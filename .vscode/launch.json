@@ -1,0 +1,72 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug NeuStack",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/neustack",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "CMake: Build",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "Debug NeuStack (sudo)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/usr/bin/sudo",
+            "args": ["${workspaceFolder}/build/neustack"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "lldb",
+            "preLaunchTask": "CMake: Build"
+        },
+        {
+            "name": "Debug Unit Test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/${input:testExecutable}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "CMake: Build"
+        },
+        {
+            "name": "Attach to Process",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/build/neustack",
+            "processId": "${command:pickProcess}",
+            "MIMode": "lldb"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testExecutable",
+            "type": "pickString",
+            "description": "Select test to run",
+            "options": [
+                "test_checksum",
+                "test_ipv4",
+                "test_tcp_state"
+            ],
+            "default": "test_checksum"
+        }
+    ]
+}
