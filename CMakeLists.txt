@@ -63,20 +63,20 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # Common sources (cross-platform)
 set(COMMON_SOURCES
-    # src/common/buffer.cpp
-    # src/common/checksum.cpp
+    src/common/checksum.cpp
+    src/common/ip_addr.cpp
 )
 
 # Network layer sources
 set(NET_SOURCES
-    # src/net/ipv4.cpp
-    # src/net/icmp.cpp
+    src/net/ipv4.cpp
+    src/net/icmp.cpp
     # src/net/arp.cpp
 )
 
 # Transport layer sources
 set(TRANSPORT_SOURCES
-    # src/transport/udp.cpp
+    src/transport/udp.cpp
     # src/transport/tcp_conn.cpp
     # src/transport/tcp_state.cpp
     # src/transport/tcp_window.cpp

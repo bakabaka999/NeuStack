@@ -6,6 +6,7 @@
 #ifdef NEUSTACK_PLATFORM_MACOS
 
 #include "neustack/hal/hal_macos.hpp"
+#include "neustack/common/log.hpp"
 
 #include <arpa/inet.h>
 #include <cstring>
@@ -20,13 +21,14 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdio>
+
+using namespace neustack;
 
 int MacOSDevice::open() {
     // 创建控制 socket
     _fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
     if (_fd < 0) {
-        std::perror("socket(PF_SYSTEM)");
+        LOG_ERROR(HAL, "socket(PF_SYSTEM) failed: %s", std::strerror(errno));
         return -1;
     }
 
@@ -35,7 +37,7 @@ int MacOSDevice::open() {
     std::strncpy(info.ctl_name, UTUN_CONTROL_NAME, sizeof(info.ctl_name));
 
     if (ioctl(_fd, CTLIOCGINFO, &info) < 0) {
-        std::perror("ioctl(CTLIOCGINFO)");
+        LOG_ERROR(HAL, "ioctl(CTLIOCGINFO) failed: %s", std::strerror(errno));
         ::close(_fd);
         _fd = -1;
         return -1;
@@ -50,7 +52,7 @@ int MacOSDevice::open() {
     sc.sc_unit = 0;  // 系统自动分配编号
 
     if (connect(_fd, reinterpret_cast<struct sockaddr*>(&sc), sizeof(sc)) < 0) {
-        std::perror("connect(utun)");
+        LOG_ERROR(HAL, "connect(utun) failed: %s", std::strerror(errno));
         ::close(_fd);
         _fd = -1;
         return -1;
@@ -67,11 +69,13 @@ int MacOSDevice::open() {
     int flags = fcntl(_fd, F_GETFL, 0);
     fcntl(_fd, F_SETFL, flags | O_NONBLOCK);
 
+    LOG_DEBUG(HAL, "utun device opened: %s (fd=%d)", _name.c_str(), _fd);
     return 0;
 }
 
 int MacOSDevice::close() {
     if (_fd >= 0) {
+        LOG_DEBUG(HAL, "closing device %s", _name.c_str());
         ::close(_fd);
         _fd = -1;
         _name.clear();
@@ -80,13 +84,17 @@ int MacOSDevice::close() {
 }
 
 ssize_t MacOSDevice::send(const uint8_t* data, size_t len) {
-    if (_fd < 0) return -1;
+    if (_fd < 0) {
+        LOG_ERROR(HAL, "send failed: device not open");
+        return -1;
+    }
 
     // macOS utun 需要 4 字节协议族前缀
     constexpr size_t PREFIX_LEN = 4;
     uint8_t buf[PREFIX_LEN + 1500];  // MTU 通常 1500
 
     if (len > sizeof(buf) - PREFIX_LEN) {
+        LOG_ERROR(HAL, "send failed: packet too large (%zu bytes)", len);
         errno = EMSGSIZE;
         return -1;
     }
@@ -96,14 +104,20 @@ ssize_t MacOSDevice::send(const uint8_t* data, size_t len) {
     std::memcpy(buf + PREFIX_LEN, data, len);
 
     ssize_t n = write(_fd, buf, PREFIX_LEN + len);
-    if (n < 0) return -1;
+    if (n < 0) {
+        LOG_ERROR(HAL, "write failed: %s", std::strerror(errno));
+        return -1;
+    }
 
-    // 返回实际发送的数据长度（不含前缀）
+    LOG_TRACE(HAL, "sent %zd bytes", n - static_cast<ssize_t>(PREFIX_LEN));
     return (n > static_cast<ssize_t>(PREFIX_LEN)) ? (n - PREFIX_LEN) : 0;
 }
 
 ssize_t MacOSDevice::recv(uint8_t* buf, size_t len, int timeout_ms) {
-    if (_fd < 0) return -1;
+    if (_fd < 0) {
+        LOG_ERROR(HAL, "recv failed: device not open");
+        return -1;
+    }
 
     // 使用 poll 实现超时
     if (timeout_ms >= 0) {
@@ -112,8 +126,13 @@ ssize_t MacOSDevice::recv(uint8_t* buf, size_t len, int timeout_ms) {
         pfd.events = POLLIN;
 
         int ret = poll(&pfd, 1, timeout_ms);
-        if (ret < 0) return -1;   // 错误
-        if (ret == 0) return 0;   // 超时
+        if (ret < 0) {
+            LOG_ERROR(HAL, "poll failed: %s", std::strerror(errno));
+            return -1;
+        }
+        if (ret == 0) {
+            return 0;  // 超时
+        }
     }
 
     constexpr size_t PREFIX_LEN = 4;
@@ -123,6 +142,7 @@ ssize_t MacOSDevice::recv(uint8_t* buf, size_t len, int timeout_ms) {
     if (n < static_cast<ssize_t>(PREFIX_LEN)) {
         // EAGAIN/EWOULDBLOCK 表示无数据（非阻塞模式）
         if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        LOG_ERROR(HAL, "read failed: %s", std::strerror(errno));
         return -1;
     }
 
@@ -130,6 +150,7 @@ ssize_t MacOSDevice::recv(uint8_t* buf, size_t len, int timeout_ms) {
     if (payload_len > len) payload_len = len;  // 截断
 
     std::memcpy(buf, recv_buf + PREFIX_LEN, payload_len);
+    LOG_TRACE(HAL, "received %zu bytes", payload_len);
     return static_cast<ssize_t>(payload_len);
 }
 
