@@ -77,6 +77,9 @@ set(NET_SOURCES
 # Transport layer sources
 set(TRANSPORT_SOURCES
     src/transport/udp.cpp
+    src/transport/tcp_segment.cpp
+    src/transport/tcp_builder.cpp
+    src/transport/tcp_connection.cpp
     # src/transport/tcp_conn.cpp
     # src/transport/tcp_state.cpp
     # src/transport/tcp_window.cpp

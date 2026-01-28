@@ -1,8 +1,8 @@
-# 05: TCP 基础 - 状态机与连接管理
+# 05: TCP 基础 - 头部与数据结构
 
 TCP 是用户态协议栈最具挑战性的部分。它需要处理：可靠传输、流量控制、拥塞控制、连接状态管理等。我们将分多个阶段实现。
 
-本章实现 TCP 的基础结构：头部解析、状态机、连接管理。
+本章实现 TCP 的基础结构：头部定义、状态枚举、核心数据结构、段解析与构建。
 
 ## 1. TCP 概述
 
@@ -464,7 +464,7 @@ public:
     static bool verify_checksum(const IPv4Packet& pkt);
 
 private:
-    static uint16_t compute_checksum(uint32_t src_ip, uint32_t dst_ip,
+    static uint16_t compute_tcp_checksum(uint32_t src_ip, uint32_t dst_ip,
                                      const uint8_t* tcp_data, size_t tcp_len);
 };
 
@@ -570,125 +570,46 @@ private:
 #endif // NEUSTACK_TRANSPORT_TCP_BUILDER_HPP
 ```
 
-## 7. 三次握手流程
+## 7. 练习
 
-```
-    Client                                    Server
-      |                                          |
-      |  ──────── SYN, seq=x ──────────────>     |
-      |               (SYN_SENT)                 |  (LISTEN -> SYN_RCVD)
-      |                                          |
-      |  <─────── SYN+ACK, seq=y, ack=x+1 ────   |
-      |               (SYN_SENT -> ESTABLISHED)  |
-      |                                          |
-      |  ──────── ACK, ack=y+1 ─────────────>    |
-      |                                          |  (SYN_RCVD -> ESTABLISHED)
-      |                                          |
-```
-
-### 7.1 服务端处理 SYN
-
-```cpp
-void handle_syn(TCB& tcb, const TCPSegment& seg) {
-    // 当前状态必须是 LISTEN
-    if (tcb.state != TCPState::LISTEN) {
-        return; // 或发送 RST
-    }
-
-    // 记录对方的初始序列号
-    tcb.irs = seg.seq_num;
-    tcb.rcv_nxt = seg.seq_num + 1;  // SYN 占一个序列号
-
-    // 生成我们的初始序列号
-    tcb.iss = TCB::generate_isn();
-    tcb.snd_nxt = tcb.iss;
-    tcb.snd_una = tcb.iss;
-
-    // 记录对方通告的窗口
-    tcb.snd_wnd = seg.window;
-
-    // 发送 SYN+ACK
-    send_syn_ack(tcb);
-
-    // 状态转换
-    tcb.state = TCPState::SYN_RCVD;
-}
-```
-
-### 7.2 服务端处理 ACK (完成握手)
-
-```cpp
-void handle_ack_in_syn_rcvd(TCB& tcb, const TCPSegment& seg) {
-    // 验证 ACK 是否确认了我们的 SYN
-    if (seg.ack_num != tcb.iss + 1) {
-        // 无效的 ACK
-        send_rst(tcb, seg);
-        return;
-    }
-
-    // 更新发送窗口
-    tcb.snd_una = seg.ack_num;
-    tcb.snd_wnd = seg.window;
-
-    // 连接建立！
-    tcb.state = TCPState::ESTABLISHED;
-
-    // 通知应用层
-    if (tcb.on_connect) {
-        tcb.on_connect(0); // 0 = 成功
-    }
-}
-```
-
-## 8. 练习
-
-1. **实现 TCP 头部解析**
+1. **实现 TCP 头部解析** ✓
    - 创建 `src/transport/tcp_segment.cpp`
    - 实现 `TCPParser::parse()` 和校验和验证
 
-2. **实现 TCP 段构建器**
+2. **实现 TCP 段构建器** ✓
    - 创建 `src/transport/tcp_builder.cpp`
    - 实现 `TCPBuilder::build()` 和 `fill_checksum()`
 
-3. **创建基础 TCP 层框架**
-   - 参考 UDP 层的结构
-   - 实现连接管理（TCB 表）
-   - 实现状态机框架
+## 8. 关键点总结
 
-## 9. 关键点总结
-
-1. **状态机是核心**：每个操作都要检查当前状态是否允许
-2. **序列号会回绕**：使用专门的比较函数
-3. **SYN 和 FIN 各占一个序列号**：计算时要考虑
-4. **校验和包含伪头部**：和 UDP 类似
-5. **TCB 管理所有连接状态**：每个连接一个 TCB
+1. **TCP 头部固定 20 字节**：可选项最多 40 字节
+2. **序列号会回绕**：使用专门的比较函数 (`seq_lt`, `seq_gt` 等)
+3. **SYN 和 FIN 各占一个序列号**：计算 `seg_len()` 时要考虑
+4. **校验和包含伪头部**：和 UDP 类似，但 protocol = 6
+5. **TCB 是核心**：每个连接一个 TCB，存储所有状态
 6. **拥塞控制接口已预留**：`ICongestionControl` 接口支持后续接入 AI 算法
 
-## 10. 关于 AI 拥塞控制
+## 9. 已完成的文件
 
-TCB 中预留了 `ICongestionControl` 接口，后续可以实现：
+```
+include/neustack/transport/
+├── tcp.hpp              ✓ (TCPHeader, TCPFlags, TCPPseudoHeader)
+├── tcp_state.hpp        ✓ (TCPState 枚举)
+├── tcp_tcb.hpp          ✓ (TCB, TCPTuple, ICongestionControl)
+├── tcp_seq.hpp          ✓ (序列号比较函数)
+├── tcp_segment.hpp      ✓ (TCPSegment, TCPParser)
+└── tcp_builder.hpp      ✓ (TCPBuilder)
 
-```cpp
-// 传统算法 (作为基准)
-class RenoCC : public ICongestionControl { ... };
-class CubicCC : public ICongestionControl { ... };
-
-// AI 算法 (使用 ONNX Runtime)
-class AICC : public ICongestionControl {
-    // 输入: RTT, loss_rate, throughput, rtt_variance
-    // 输出: cwnd 调整
-};
+src/transport/
+├── tcp_segment.cpp      ✓ (解析和校验和)
+└── tcp_builder.cpp      ✓ (构建和校验和)
 ```
 
-这种设计允许：
-- 运行时切换拥塞控制算法
-- A/B 测试不同算法
-- 方便对比 AI vs 传统算法性能
+## 10. 下一步
 
-## 11. 下一步
-
-完成基础结构后，下一章我们将实现：
-- 完整的三次握手（主动和被动）
+下一章 (06) 我们将实现 TCP 连接管理：
+- TCPConnectionManager 类
+- 三次握手（主动和被动）
 - 四次挥手
 - RST 处理
-- 基本的数据传输
+- 状态机完整实现
