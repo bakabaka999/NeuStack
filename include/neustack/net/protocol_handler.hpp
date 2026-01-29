@@ -1,6 +1,8 @@
 #ifndef NEUSTACK_NET_PROTOCOL_HANDLER_HPP
 #define NEUSTACK_NET_PROTOCOL_HANDLER_HPP
 
+namespace neustack {
+
 // Forward declaration to avoid circular dependency
 struct IPv4Packet;
 
@@ -17,5 +19,7 @@ public:
      */
     virtual void handle(const IPv4Packet& pkt) = 0;
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_NET_PROTOCOL_HANDLER_HPP

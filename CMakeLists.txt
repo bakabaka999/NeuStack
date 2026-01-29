@@ -80,10 +80,7 @@ set(TRANSPORT_SOURCES
     src/transport/tcp_segment.cpp
     src/transport/tcp_builder.cpp
     src/transport/tcp_connection.cpp
-    # src/transport/tcp_conn.cpp
-    # src/transport/tcp_state.cpp
-    # src/transport/tcp_window.cpp
-    # src/transport/tcp_timer.cpp
+    src/transport/tcp_layer.cpp
 )
 
 # Platform-specific HAL sources

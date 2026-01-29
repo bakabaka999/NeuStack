@@ -13,6 +13,8 @@
 #include <memory>
 #include <string>
 
+namespace neustack {
+
 /**
  * @brief Abstract base class for network devices (HAL)
  *
@@ -47,5 +49,7 @@ public:
 protected:
     NetDevice() = default;
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_HAL_DEVICE_HPP

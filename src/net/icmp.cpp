@@ -133,6 +133,10 @@ void ICMPHandler::handle_echo_reply(const IPv4Packet &pkt) {
 void ICMPHandler::send_dest_unreachable(ICMPUnreachCode code, const IPv4Packet &original_pkt) {
     // 检查原本的包的性质，不对ICMP错误回复ICMP错误
     if (original_pkt.protocol == static_cast<uint8_t>(IPProtocol::ICMP)) {
+        // 确保有足够的数据来读取 ICMP 头部
+        if (original_pkt.payload_length < sizeof(ICMPHeader)) {
+            return;
+        }
         auto *icmp_hdr = reinterpret_cast<const ICMPHeader *>(original_pkt.payload);
         if (icmp_hdr->type != static_cast<uint8_t>(ICMPType::EchoRequest) &&
             icmp_hdr->type != static_cast<uint8_t>(ICMPType::EchoReply)) {
@@ -156,6 +160,10 @@ void ICMPHandler::send_dest_unreachable(ICMPUnreachCode code, const IPv4Packet &
 void ICMPHandler::send_time_exceeded(ICMPTimeExCode code, const IPv4Packet &original_pkt) {
     // 检查是否为 ICMP 错误回复
     if (original_pkt.protocol == static_cast<uint8_t>(IPProtocol::ICMP)) {
+        // 确保有足够的数据来读取 ICMP 头部
+        if (original_pkt.payload_length < sizeof(ICMPHeader)) {
+            return;
+        }
         auto *icmp_hdr = reinterpret_cast<const ICMPHeader *>(original_pkt.payload);
         if (icmp_hdr->type != static_cast<uint8_t>(ICMPType::EchoRequest) &&
             icmp_hdr->type != static_cast<uint8_t>(ICMPType::EchoReply)) {

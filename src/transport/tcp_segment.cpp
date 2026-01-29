@@ -75,6 +75,12 @@ bool TCPParser::verify_checksum(const IPv4Packet &pkt) {
 
 uint16_t TCPParser::compute_tcp_checksum(uint32_t src_ip, uint32_t dst_ip,
                                          const uint8_t *tcp_data, size_t tcp_len) {
+    // TCP 段长度不能超过 65535（伪头部长度字段为 16 位）
+    if (tcp_len > 65535) {
+        LOG_ERROR(TCP, "TCP segment too large for checksum: %zu", tcp_len);
+        return 0;
+    }
+
     // 构造伪头部 + TCP 数据
     std::vector<uint8_t> buffer(sizeof(TCPPseudoHeader) + tcp_len);
 

@@ -12,6 +12,8 @@
 #include "neustack/hal/device.hpp"
 #include "neustack/net/protocol_handler.hpp"
 
+namespace neustack {
+
 // ============================================================================
 // Protocol Numbers
 // ============================================================================
@@ -42,7 +44,11 @@ struct IPv4Header {
     uint8_t version() const { return version_ihl >> 4; }
     uint8_t ihl() const { return version_ihl & 0x0F; }
     size_t header_length() const { return ihl() * 4; }
-    size_t payload_length() const { return ntohs(total_length) - header_length(); }
+    size_t payload_length() const {
+        uint16_t tl = ntohs(total_length);
+        size_t hl = header_length();
+        return (tl >= hl) ? (tl - hl) : 0;
+    }
 
     uint8_t flags() const { return ntohs(flags_fragment) >> 13; }
     uint16_t fragment_offset() const { return ntohs(flags_fragment) & 0x1FFF; }
@@ -206,5 +212,7 @@ private:
     std::unordered_map<uint8_t, IProtocolHandler*> _handlers;
     uint16_t _next_id = 0;  // 用于 Identification 字段
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_NET_IPV4_HPP

@@ -11,6 +11,8 @@
 #include "neustack/net/ipv4.hpp"
 #include "neustack/net/protocol_handler.hpp"
 
+namespace neustack {
+
 // ============================================================================
 // UDP 头部 (网络字节序)
 // ============================================================================
@@ -131,5 +133,7 @@ private:
     std::unordered_map<uint16_t, UDPReceiveCallback> _sockets;
     uint16_t _next_ephemeral_port = 49152; // 临时端口范围: 49152-65535
 };
+
+} // namespace neustack
 
 #endif

@@ -6,6 +6,8 @@
 #include "neustack/net/protocol_handler.hpp"
 #include "neustack/net/ipv4.hpp"
 
+namespace neustack {
+
 // ICMP类型定义
 enum class ICMPType : uint8_t
 { // 列了常见的几个
@@ -97,5 +99,7 @@ private:
 
     IPv4Layer &_ip_layer;
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_NET_ICMP_HPP

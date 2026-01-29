@@ -7,6 +7,8 @@
 
 #include <cstdio>
 
+namespace neustack {
+
 uint32_t ip_from_string(const char* str) {
     uint32_t a, b, c, d;
     if (std::sscanf(str, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
@@ -27,3 +29,5 @@ std::string ip_to_string(uint32_t addr) {
         addr & 0xFF);
     return buf;
 }
+
+} // namespace neustack

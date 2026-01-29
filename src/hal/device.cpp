@@ -8,6 +8,8 @@
     #include "neustack/hal/hal_windows.hpp"
 #endif
 
+using namespace neustack;
+
 std::unique_ptr<NetDevice> NetDevice::create() {
 #if defined(NEUSTACK_PLATFORM_MACOS)
     return std::make_unique<MacOSDevice>();

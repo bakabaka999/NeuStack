@@ -5,6 +5,8 @@
 #include "neustack/net/ipv4.hpp"
 #include <optional>
 
+namespace neustack {
+
 // ========================================================================
 // 解析后的 TCP 段
 // ========================================================================
@@ -66,5 +68,7 @@ private:
     static uint16_t compute_tcp_checksum(uint32_t src_ip, uint32_t dst_ip,
                                      const uint8_t *tcp_data, size_t tcp_len);
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_SEGMENT_HPP

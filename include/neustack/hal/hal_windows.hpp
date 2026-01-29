@@ -5,6 +5,8 @@
 
 #include "neustack/hal/device.hpp"
 
+namespace neustack {
+
 // 源文件待实现
 
 class WindowsDevice : public NetDevice {
@@ -23,6 +25,8 @@ private:
     int _fd = -1;
     std::string _name;
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_PLATFORM_WINDOWS
 #endif // NEUSTACK_HAL_WINDOWS_HPP

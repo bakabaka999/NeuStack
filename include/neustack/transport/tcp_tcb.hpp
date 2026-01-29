@@ -7,8 +7,12 @@
 #include <memory>
 #include <algorithm>
 #include <chrono>
+#include <list>
 
 #include "tcp_state.hpp"
+#include "neustack/common/isn_generator.hpp"
+
+namespace neustack {
 
 // ========================================================================
 // 连接四元组
@@ -64,7 +68,7 @@ using TCPCloseCallback = std::function<void(TCB* tcb)>;
 
 // ========================================================================
 // 拥塞控制接口 (为 AI 预留)
-// =========================================================================
+// ========================================================================
 
 class ICongestionControl {
 public:
@@ -84,15 +88,107 @@ public:
 };
 
 // ========================================================================
+// 重传队列条目
+// ========================================================================
+struct RetransmitEntry {
+    uint32_t seq_start;
+    uint32_t seq_end;
+    std::vector<uint8_t> data;
+    std::chrono::steady_clock::time_point send_time;
+    std::chrono::steady_clock::time_point timeout;
+    int retransmit_count = 0;
+
+    // 数据长度
+    uint32_t length() const { return seq_end - seq_start; }
+};
+
+// ========================================================================
+// 乱序数据段
+// ========================================================================
+struct OutOfOrderSegment {
+    uint32_t seq_start;
+    uint32_t seq_end;
+    std::vector<uint8_t> data;
+
+    uint32_t length() const { return seq_end - seq_start; }
+};
+
+// ========================================================================
+// TCP 连接选项
+// ========================================================================
+
+struct TCPOptions {
+    // Nagle 算法：合并小包，减少网络开销，但增加延迟
+    // 低延迟应用应禁用（如游戏、实时通信）
+    bool nagle_enabled = true;
+
+    // 延迟 ACK：等待一段时间或收到第二个包再发 ACK
+    // 低延迟应用应禁用
+    bool delayed_ack_enabled = true;
+
+    // 延迟 ACK 超时（毫秒）
+    uint32_t delayed_ack_timeout_ms = 200;
+
+    // 最大段大小（MSS）
+    uint16_t mss = 1460;
+
+    // 接收缓冲区大小
+    uint32_t recv_buffer_size = 65535;
+
+    // 发送缓冲区大小
+    uint32_t send_buffer_size = 65535;
+
+    // 最大重传次数
+    int max_retransmit = 5;
+
+    // 初始 RTO（微秒）
+    uint32_t initial_rto_us = 1000000;
+
+    // 快速打开（保留，暂未实现）
+    bool tcp_fast_open = false;
+
+    // 时间戳选项（保留，暂未实现）
+    bool timestamps_enabled = false;
+
+    // 预设配置
+    static TCPOptions low_latency() {
+        TCPOptions opts;
+        opts.nagle_enabled = false;
+        opts.delayed_ack_enabled = false;
+        return opts;
+    }
+
+    static TCPOptions high_throughput() {
+        TCPOptions opts;
+        opts.nagle_enabled = true;
+        opts.delayed_ack_enabled = true;
+        opts.recv_buffer_size = 256 * 1024;  // 256KB
+        opts.send_buffer_size = 256 * 1024;
+        return opts;
+    }
+
+    static TCPOptions interactive() {
+        TCPOptions opts;
+        opts.nagle_enabled = false;
+        opts.delayed_ack_enabled = true;
+        opts.delayed_ack_timeout_ms = 100;  // 更短的超时
+        return opts;
+    }
+};
+
+// ========================================================================
 // TCB - Transmission Control Block
 // ========================================================================
 struct TCB {
-    // 连接标志
+    // ─── 连接选项（可配置）───
+    TCPOptions options;
+
+    // ─── 连接标识 ───
     TCPTuple t_tuple;
     TCPState state = TCPState::CLOSED;
     bool passive_open = false;  // true = 从 LISTEN 创建（被动打开），false = 从 connect() 创建（主动打开）
 
-    // 发送队列量
+    // ─── 发送变量 ───
     // SND.UNA - 已发送但未确认的最小序列号
     // SND.NXT - 下一个要发送的序列号
     // SND.WND - 发送窗口大小
@@ -102,7 +198,7 @@ struct TCB {
     uint32_t snd_wnd = 0;
     uint32_t iss = 0;
 
-    // 接收队列量
+    // ─── 接收变量 ───
     // RCV.NXT - 期望接收的下一个序列号
     // RCV.WND - 接收窗口大小
     // IRS     - 初始接收序列号
@@ -110,35 +206,63 @@ struct TCB {
     uint32_t rcv_wnd = 65535;
     uint32_t irs = 0;
 
-    // 拥塞控制
+    // ─── 拥塞控制 ───
     std::unique_ptr<ICongestionControl> congestion_control;
+
+    // ─── 重传 ───
+    std::list<RetransmitEntry> retransmit_queue;
 
     // RTT 估计（用于重传和拥塞控制）
     uint32_t srtt_us = 0;       // 平滑 RTT
     uint32_t rttvar_us = 0;     // RTT 方差
     uint32_t rto_us = 1000000;  // 重传超时（初始化为1s）
 
-    // 缓冲区
+    // 是否有未确认的 RTT 测量
+    bool rtt_measuring = false;
+    uint32_t rtt_seq = 0; // 用于测量的序列号
+    std::chrono::steady_clock::time_point rtt_send_time;
+
+    // ─── 乱序处理 ───
+    std::list<OutOfOrderSegment> ooo_queue;
+    size_t ooo_size = 0;
+
+    // ─── 快速重传 ───
+    uint32_t dup_ack_count = 0;
+    uint32_t last_ack_num = 0;
+
+    // ─── 缓冲区 ───
     std::vector<uint8_t> send_buffer; // 待发送数据
     std::vector<uint8_t> recv_buffer; // 已接收数据
 
-    // 回调函数
+    // ─── 回调函数 ───
     TCPConnectCallback on_connect;
     TCPReceiveCallback on_receive;
     TCPCloseCallback   on_close;
 
-    // 时间戳（用于超时）
+    // ─── 时间戳 ───
     std::chrono::steady_clock::time_point last_activity;
 
-    // 辅助方法
+    // ─── 零窗口探测 ───
+    bool zero_window_probe_needed = false;
+    std::chrono::steady_clock::time_point zwp_time;
 
-    // 生成初始序列号
+    // ─── 延迟 ACK ───
+    bool delayed_ack_pending = false;
+    std::chrono::steady_clock::time_point delayed_ack_time;
+
+    // ─── 关闭相关 ───
+    bool close_pending = false;  // 应用层已调用 close()，等缓冲区发完后发 FIN
+
+    // ─── 辅助方法 ───
+
+    // 生成初始序列号 (RFC 6528 安全版本)
     static uint32_t generate_isn() {
-        // 我们暂时的使用一个基于时间的方式实现
-        // 后续，我们可以使用 MD5/SHA-256+密钥 实现更安全的算法
-        auto now = std::chrono::steady_clock::now(); // 取当前时间
-        auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count(); // 转化为us单位，取其数
-        return static_cast<uint32_t>(us);
+        return ISNGenerator::generate();
+    }
+
+    static uint32_t generate_isn(uint32_t local_ip, uint16_t local_port,
+                                  uint32_t remote_ip, uint16_t remote_port) {
+        return ISNGenerator::generate(local_ip, local_port, remote_ip, remote_port);
     }
 
     // 计算有效发送窗口：min(cwnd, snd_wnd)
@@ -146,6 +270,21 @@ struct TCB {
         uint32_t cwnd = congestion_control ? congestion_control->cwnd() : 65535;
         return std::min(cwnd, snd_wnd);
     }
+
+    // 计算当前可用接收窗口
+    uint32_t available_recv_window() const {
+        size_t used = recv_buffer.size();
+        return (used < options.recv_buffer_size) ? (options.recv_buffer_size - used) : 0;
+    }
+
+    // 应用选项到 TCB
+    void apply_options(const TCPOptions& opts) {
+        options = opts;
+        rto_us = opts.initial_rto_us;
+        rcv_wnd = opts.recv_buffer_size;
+    }
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_TCB_HPP

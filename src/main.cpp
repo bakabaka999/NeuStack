@@ -7,8 +7,7 @@
 #include "neustack/net/ipv4.hpp"
 #include "neustack/net/icmp.hpp"
 #include "neustack/transport/udp.hpp"
-#include "neustack/transport/tcp_connection.hpp"
-#include "neustack/transport/tcp_segment.hpp"
+#include "neustack/transport/tcp_layer.hpp"
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/common/log.hpp"
 
@@ -25,43 +24,6 @@ static volatile bool running = true;
 void signal_handler(int) {
     running = false;
 }
-
-// ============================================================================
-// TCP Protocol Handler - 桥接 IPv4Layer 和 TCPConnectionManager
-// ============================================================================
-
-class TCPHandler : public IProtocolHandler {
-public:
-    TCPHandler(IPv4Layer& ip_layer, uint32_t local_ip)
-        : _ip_layer(ip_layer), _tcp_mgr(local_ip) {
-        // 设置发送回调：TCP -> IP 层
-        _tcp_mgr.set_send_callback([this](uint32_t dst_ip, const uint8_t* data, size_t len) {
-            _ip_layer.send(dst_ip, static_cast<uint8_t>(IPProtocol::TCP), data, len);
-        });
-    }
-
-    // IProtocolHandler 接口：处理收到的 TCP 段
-    void handle(const IPv4Packet& pkt) override {
-        auto seg = TCPParser::parse(pkt);
-        if (seg) {
-            _tcp_mgr.on_segment_received(*seg);
-        } else {
-            LOG_WARN(TCP, "Failed to parse TCP segment");
-        }
-    }
-
-    // 定时器处理
-    void on_timer() {
-        _tcp_mgr.on_timer();
-    }
-
-    // 暴露 TCPConnectionManager 接口
-    TCPConnectionManager& manager() { return _tcp_mgr; }
-
-private:
-    IPv4Layer& _ip_layer;
-    TCPConnectionManager _tcp_mgr;
-};
 
 // ============================================================================
 // Main
@@ -132,9 +94,12 @@ int main(int argc, char* argv[]) {
     UDPLayer udp_layer(ip_layer);
     ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::UDP), &udp_layer);
 
-    // 创建 TCP 处理器并注册到 IPv4 层
-    TCPHandler tcp_handler(ip_layer, local_ip);
-    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::TCP), &tcp_handler);
+    // 创建 TCP 层并注册到 IPv4 层
+    TCPLayer tcp_layer(ip_layer, local_ip);
+    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::TCP), &tcp_layer);
+
+    // 设置 TCP 默认选项（交互式应用：禁用 Nagle，启用延迟 ACK）
+    tcp_layer.set_default_options(TCPOptions::interactive());
 
     // ─── UDP Echo 服务 (端口 7) ───
     uint16_t echo_port = udp_layer.bind(7, [&udp_layer](uint32_t src_ip, uint16_t src_port,
@@ -152,36 +117,29 @@ int main(int argc, char* argv[]) {
     }
 
     // ─── TCP Echo 服务 (端口 7) ───
-    auto& tcp_mgr = tcp_handler.manager();
+    int tcp_listen_result = tcp_layer.listen(7, [&tcp_layer](TCB* tcb) -> TCPCallbacks {
+        LOG_INFO(TCP, "New TCP connection from %s:%u",
+                 ip_to_string(tcb->t_tuple.remote_ip).c_str(),
+                 tcb->t_tuple.remote_port);
 
-    int tcp_listen_result = tcp_mgr.listen(7, [](TCB* tcb, int err) {
-        if (err == 0) {
-            LOG_INFO(TCP, "New TCP connection accepted from %s:%u",
-                     ip_to_string(tcb->t_tuple.remote_ip).c_str(),
-                     tcb->t_tuple.remote_port);
-        } else {
-            LOG_WARN(TCP, "TCP connection failed: %d", err);
-        }
+        return TCPCallbacks{
+            // on_receive: echo 收到的数据
+            .on_receive = [&tcp_layer](TCB* tcb, const uint8_t* data, size_t len) {
+                LOG_INFO(TCP, "echo: received %zu bytes, sending back", len);
+                tcp_layer.send(tcb, data, len);
+            },
+            // on_close: 对方关闭连接，我们也关闭
+            .on_close = [&tcp_layer](TCB* tcb) {
+                LOG_INFO(TCP, "echo: peer closed, closing our side");
+                tcp_layer.close(tcb);
+            }
+        };
     });
 
     if (tcp_listen_result < 0) {
         LOG_FATAL(TCP, "failed to listen on TCP port 7");
         return EXIT_FAILURE;
     }
-
-    // 设置 TCP 数据接收和关闭回调
-    tcp_mgr.set_listener_callbacks(7,
-        // on_receive: echo 收到的数据
-        [&tcp_mgr](TCB* tcb, const uint8_t* data, size_t len) {
-            LOG_INFO(TCP, "echo: received %zu bytes, sending back", len);
-            tcp_mgr.send(tcb, data, len);
-        },
-        // on_close: 对方关闭连接，我们也关闭
-        [&tcp_mgr](TCB* tcb) {
-            LOG_INFO(TCP, "echo: peer closed, closing our side");
-            tcp_mgr.close(tcb);
-        }
-    );
 
     LOG_INFO(APP, "local IP: %s", ip_to_string(local_ip).c_str());
     LOG_INFO(UDP, "UDP echo service on port %u", echo_port);
@@ -226,6 +184,9 @@ int main(int argc, char* argv[]) {
                 LOG_WARN(IPv4, "[#%d] invalid packet (%zd bytes)", pkt_count, n);
             }
         } else if (n < 0) {
+            if (errno == EINTR) {
+                continue;  // 被信号中断，继续循环（running 会被设为 false）
+            }
             LOG_ERROR(HAL, "recv error: %s", std::strerror(errno));
             break;
         }
@@ -233,7 +194,7 @@ int main(int argc, char* argv[]) {
         // 定时器处理
         auto now = std::chrono::steady_clock::now();
         if (now - last_timer >= TIMER_INTERVAL) {
-            tcp_handler.on_timer();
+            tcp_layer.on_timer();
             last_timer = now;
         }
     }

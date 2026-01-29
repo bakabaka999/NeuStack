@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+namespace neustack {
+
 // ========================================================================
 // TCP 状态
 // ========================================================================
@@ -38,5 +40,7 @@ inline const char* tcp_state_name(TCPState state) {
         default:                    return "UNKNOWN";
     }
 }
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_STATE_HPP

@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstddef>
 
+namespace neustack {
+
 /**
  * @brief 计算 Internet 校验和 (RFC 1071)
  * @param data 数据指针
@@ -17,5 +19,7 @@ uint16_t compute_checksum(const void *data, size_t len);
  * @return true 如果校验和正确
  */
 bool verify_checksum(const void *data, size_t len);
+
+} // namespace neustack
 
 #endif

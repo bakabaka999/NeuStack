@@ -1,6 +1,8 @@
 #include "neustack/transport/tcp_connection.hpp"
 #include "neustack/common/log.hpp"
 #include "neustack/common/ip_addr.hpp"
+#include "neustack/transport/tcp_reno.hpp"
+
 
 using namespace neustack;
 
@@ -43,6 +45,14 @@ void TCPConnectionManager::set_listener_callbacks(uint16_t port,
     }
 }
 
+void TCPConnectionManager::unlisten(uint16_t port) {
+    auto it = _listeners.find(port);
+    if (it != _listeners.end()) {
+        LOG_INFO(TCP, "Stopped listening on port %u", port);
+        _listeners.erase(it);
+    }
+}
+
 int TCPConnectionManager::connect(uint32_t remote_ip, uint16_t remote_port, uint16_t local_port, TCPConnectCallback on_connect) {
     // 构造四元组
     TCPTuple tuple{_local_ip, remote_ip, local_port, remote_port};
@@ -59,12 +69,13 @@ int TCPConnectionManager::connect(uint32_t remote_ip, uint16_t remote_port, uint
     TCB *tcb = create_tcb(tuple);
     tcb->on_connect = std::move(on_connect);
 
-    // 生成初始序列号（ISN）
-    tcb->iss = TCB::generate_isn();
+    // 生成初始序列号（ISN）- 使用四元组确保安全性
+    tcb->iss = TCB::generate_isn(tuple.local_ip, tuple.local_port,
+                                  tuple.remote_ip, tuple.remote_port);
     tcb->snd_una = tcb->iss;
-    tcb->snd_nxt = tcb->iss + 1;  // SYN 占一个序列号
+    tcb->snd_nxt = tcb->iss;  // send_segment 会在发送 SYN 时递增
 
-    // 发送 SYN
+    // 发送 SYN（send_segment 内部 snd_nxt += 1）
     send_segment(tcb, TCPFlags::SYN);
 
     // 进入 SYN_SENT 状态
@@ -87,6 +98,41 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
         return 0;
     }
 
+    // 检查发送缓冲区是否有空间
+    size_t buffer_space = tcb->options.send_buffer_size > tcb->send_buffer.size()
+                        ? tcb->options.send_buffer_size - tcb->send_buffer.size()
+                        : 0;
+    if (buffer_space == 0) {
+        LOG_WARN(TCP, "Send buffer full, cannot accept more data");
+        return -1;  // 缓冲区已满，无法接受更多数据
+    }
+
+    // 限制为可用缓冲空间
+    size_t accepted = std::min(len, buffer_space);
+
+    uint16_t mss = tcb->options.mss;
+
+    // 关键：如果 send_buffer 已经有数据在排队，新数据必须追加到队尾
+    // 否则会导致乱序发送！
+    if (!tcb->send_buffer.empty()) {
+        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + accepted);
+        LOG_DEBUG(TCP, "Appended %zu bytes to existing buffer (%zu total)",
+                  accepted, tcb->send_buffer.size());
+        return static_cast<ssize_t>(accepted);
+    }
+
+    // Nagle 算法：如果有未确认的数据，且当前数据小于 MSS，就缓冲
+    if (tcb->options.nagle_enabled &&
+        tcb->snd_nxt != tcb->snd_una &&  // 有未确认数据
+        accepted < mss) {                 // 当前数据小于 MSS
+
+        // 缓冲数据，等待 ACK 或凑够 MSS
+        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + accepted);
+        LOG_DEBUG(TCP, "Nagle: buffered %zu bytes", accepted);
+        return static_cast<ssize_t>(accepted);
+    }
+
+
     // 计算可发送的数据量
     // 受限于：1) 发送窗口 2) 拥塞窗口
     uint32_t window = tcb->effective_window();
@@ -95,43 +141,60 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
 
     if (available == 0) {
         // 窗口已满，将数据放入发送缓冲区等待
-        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + len);
-        LOG_DEBUG(TCP, "Window full, buffered %zu bytes", len);
-        return static_cast<ssize_t>(len);
+        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + accepted);
+        LOG_DEBUG(TCP, "Window full, buffered %zu bytes", accepted);
+        return static_cast<ssize_t>(accepted);
     }
 
     // 限制单次发送的大小
-    constexpr size_t MSS = 1460; // Maximum Segment Size (MTU - IP头 - TCP头)
-    size_t to_send = std::min({len, static_cast<size_t>(available), MSS});
+    size_t to_send = std::min({accepted, static_cast<size_t>(available), static_cast<size_t>(mss)});
 
     // 发送数据段
     send_segment(tcb, TCPFlags::ACK | TCPFlags::PSH, data, to_send);
 
     // 剩余数据放入缓冲区
-    if (to_send < len) {
+    if (to_send < accepted) {
         tcb->send_buffer.insert(tcb->send_buffer.end(),
-                                data + to_send, data + len);
+                                data + to_send, data + accepted);
     }
 
-    LOG_DEBUG(TCP, "Sent %zu bytes, buffered %zu bytes", to_send, len - to_send);
-    return static_cast<ssize_t>(len);
+    LOG_DEBUG(TCP, "Sent %zu bytes, buffered %zu bytes", to_send, accepted - to_send);
+    return static_cast<ssize_t>(accepted);
 }
 
 int TCPConnectionManager::close(TCB *tcb) {
     switch (tcb->state) {
         case TCPState::ESTABLISHED:
+            // 先发完缓冲区中的数据
+            send_buffered_data(tcb);
+
+            // 如果缓冲区还有数据（窗口满了），标记需要关闭，等数据发完再发 FIN
+            if (!tcb->send_buffer.empty()) {
+                tcb->close_pending = true;
+                LOG_DEBUG(TCP, "Close pending: %zu bytes still in buffer", tcb->send_buffer.size());
+                return 0;
+            }
+
             // 发送 FIN，告诉对方我们不再发送数据
             send_segment(tcb, TCPFlags::FIN | TCPFlags::ACK);
-            tcb->snd_nxt++; // FIN 占一个序列号
             tcb->state = TCPState::FIN_WAIT_1;
             LOG_INFO(TCP, "ESTABLISHED -> FIN_WAIT_1: initiating close");
             break;
 
         case TCPState::CLOSE_WAIT:
             // 已经收到了对方的 FIN
+            // 先发完缓冲区中的数据
+            send_buffered_data(tcb);
+
+            // 如果缓冲区还有数据，标记需要关闭
+            if (!tcb->send_buffer.empty()) {
+                tcb->close_pending = true;
+                LOG_DEBUG(TCP, "Close pending: %zu bytes still in buffer", tcb->send_buffer.size());
+                return 0;
+            }
+
             // 应用层处理完后调用 close，现在发送 FIN
             send_segment(tcb, TCPFlags::FIN | TCPFlags::ACK);
-            tcb->snd_nxt++;
             tcb->state = TCPState::LAST_ACK;
             LOG_INFO(TCP, "CLOSE_WAIT -> LAST_ACK: sending FIN");
             break;
@@ -154,6 +217,16 @@ int TCPConnectionManager::close(TCB *tcb) {
 }
 
 void TCPConnectionManager::on_segment_received(const TCPSegment &seg) {
+    LOG_DEBUG(TCP, "Received: %s:%u -> %s:%u [%s%s%s%s%s] seq=%u ack=%u len=%zu win=%u",
+              ip_to_string(seg.src_addr).c_str(), seg.src_port,
+              ip_to_string(seg.dst_addr).c_str(), seg.dst_port,
+              seg.is_syn() ? "SYN " : "",
+              seg.is_ack() ? "ACK " : "",
+              seg.is_fin() ? "FIN " : "",
+              seg.is_rst() ? "RST " : "",
+              seg.is_psh() ? "PSH " : "",
+              seg.seq_num, seg.ack_num, seg.data_length, seg.window);
+
     // 查找对应的 TCB
     TCPTuple t_tuple{seg.dst_addr, seg.src_addr, seg.dst_port, seg.src_port};
     TCB *tcb = find_tcb(t_tuple);
@@ -165,6 +238,7 @@ void TCPConnectionManager::on_segment_received(const TCPSegment &seg) {
             tcb = listen_tcb;
         } else {
             // 没有监听就发送 RST（除非接受的是一个RST
+            LOG_DEBUG(TCP, "No TCB found for port %u, sending RST", seg.dst_port);
             if (!seg.is_rst()) {
                 send_rst(seg);
             }
@@ -197,6 +271,30 @@ void TCPConnectionManager::on_segment_received(const TCPSegment &seg) {
 void TCPConnectionManager::on_timer() {
     auto now = std::chrono::steady_clock::now();
 
+    // 收集需要删除的连接（超过最大重传次数）
+    std::vector<TCPTuple> to_delete;
+
+    // 检查所有连接的重传队列
+    for (auto& [tuple, tcb] : _connections) {
+        check_retransmit(tcb.get(), now);
+
+        // 如果连接已经标记为 CLOSED（超过最大重传），加入删除列表
+        if (tcb->state == TCPState::CLOSED) {
+            to_delete.push_back(tuple);
+            continue;
+        }
+
+        // 检查delayed_ack
+        check_delayed_ack(tcb.get(), now);
+        // 检查零窗口探测
+        check_zero_window_probe(tcb.get(), now);
+    }
+
+    // 删除已关闭的连接
+    for (const auto& tuple : to_delete) {
+        _connections.erase(tuple);
+    }
+
     // 处理 TIME_WAIT 超时
     for (auto it = _time_wait_list.begin(); it != _time_wait_list.end();) {
         if (now >= it->first) {
@@ -210,8 +308,20 @@ void TCPConnectionManager::on_timer() {
             it++;
         }
     }
+}
 
-    // TODO: 重传超时处理
+bool TCPConnectionManager::is_port_in_use(uint16_t port) const {
+    // 检查监听表
+    if (_listeners.count(port)) {
+        return true;
+    }
+    // 检查连接表中是否有使用该本地端口的连接
+    for (const auto& [tuple, tcb] : _connections) {
+        if (tuple.local_port == port) {
+            return true;
+        }
+    }
+    return false;
 }
 
 TCB *TCPConnectionManager::find_tcb(const TCPTuple &t_tuple) {
@@ -235,6 +345,12 @@ TCB *TCPConnectionManager::create_tcb(const TCPTuple &t_tuple) {
     tcb->t_tuple = t_tuple;
     tcb->state = TCPState::CLOSED;
     tcb->last_activity = std::chrono::steady_clock::now();
+
+    // 应用默认选项
+    tcb->apply_options(_default_options);
+
+    // 创建拥塞控制器（使用 MSS 配置）
+    tcb->congestion_control = std::make_unique<TCPReno>(tcb->options.mss);
 
     TCB *ptr = tcb.get();
     _connections[t_tuple] = std::move(tcb);
@@ -272,14 +388,23 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
     constexpr size_t MAX_TCP_SIZE = 1500 - 20 - 20; // MTU - IP头 - TCP头
     uint8_t buffer[MAX_TCP_SIZE + sizeof(TCPHeader)];
 
+    // 验证数据长度不超过缓冲区大小
+    if (len > MAX_TCP_SIZE) {
+        LOG_ERROR(TCP, "Data too large for TCP segment: %zu > %zu", len, MAX_TCP_SIZE);
+        return;
+    }
+
+    // 记录发送前的序列号（用于重传队列）
+    // SYN 时用 snd_una（ISS），否则用 snd_nxt
+    uint32_t seq_used = (flags & TCPFlags::SYN) ? tcb->snd_una : tcb->snd_nxt;
+
     TCPBuilder builder;
     builder.set_src_port(tcb->t_tuple.local_port)
            .set_dst_port(tcb->t_tuple.remote_port)
-           // SYN 时用 snd_una（还没发过数据），否则用 snd_nxt
-           .set_seq(flags & TCPFlags::SYN ? tcb->snd_una : tcb->snd_nxt)
+           .set_seq(seq_used)
            .set_ack(tcb->rcv_nxt)
            .set_flags(flags)
-           .set_window(static_cast<uint16_t>(tcb->rcv_wnd));
+           .set_window(static_cast<uint16_t>(std::min(tcb->rcv_wnd, 65535u)));
 
     if (data && len > 0) {
         builder.set_payload(data, len);
@@ -287,6 +412,7 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
 
     ssize_t tcp_len = builder.build(buffer, sizeof(buffer));
     if (tcp_len < 0) {
+        LOG_ERROR(TCP, "Failed to build TCP segment");
         return;
     }
 
@@ -294,9 +420,25 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
     TCPBuilder::fill_checksum(buffer, tcp_len,
                               tcb->t_tuple.local_ip, tcb->t_tuple.remote_ip);
 
-    // 更新序列号（数据占序列号，SYN/FIN在调用处单独处理）
+    LOG_DEBUG(TCP, "Sending: %s:%u -> %s:%u [%s%s%s%s] seq=%u ack=%u len=%zu win=%u",
+              ip_to_string(tcb->t_tuple.local_ip).c_str(), tcb->t_tuple.local_port,
+              ip_to_string(tcb->t_tuple.remote_ip).c_str(), tcb->t_tuple.remote_port,
+              (flags & TCPFlags::SYN) ? "SYN " : "",
+              (flags & TCPFlags::ACK) ? "ACK " : "",
+              (flags & TCPFlags::FIN) ? "FIN " : "",
+              (flags & TCPFlags::PSH) ? "PSH " : "",
+              seq_used, tcb->rcv_nxt, len, tcb->rcv_wnd);
+
+    // 更新序列号
+    // 数据占序列号，SYN/FIN 也各占一个序列号
+    if (flags & TCPFlags::SYN) {
+        tcb->snd_nxt++;
+    }
     if (data && len > 0) {
         tcb->snd_nxt += len;
+    }
+    if (flags & TCPFlags::FIN) {
+        tcb->snd_nxt++;
     }
 
     // 更新活动时间
@@ -306,9 +448,87 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
     if (_send_cb) {
         _send_cb(tcb->t_tuple.remote_ip, buffer, tcp_len);
     }
+
+    // 如果有数据或者是 SYN/FIN，需要加入重传队列
+    bool needs_retransmit = (data && len > 0) ||
+                            (flags & (TCPFlags::SYN | TCPFlags::FIN));
+
+    if (needs_retransmit) {
+        RetransmitEntry entry;
+        entry.seq_start = seq_used;
+        // seq_end: 数据段用更新后的 snd_nxt，SYN/FIN 在调用处已经更新了 snd_nxt
+        entry.seq_end = tcb->snd_nxt;
+
+        if (data && len > 0) {
+            entry.data.assign(data, data + len);
+        }
+
+        entry.send_time = std::chrono::steady_clock::now();
+        entry.timeout = entry.send_time + std::chrono::microseconds(tcb->rto_us);
+        entry.retransmit_count = 0;
+
+        // 先记录 RTT 测量信息（在 move 之前）
+        if (!tcb->rtt_measuring) {
+            tcb->rtt_measuring = true;
+            tcb->rtt_seq = entry.seq_start;
+            tcb->rtt_send_time = entry.send_time;
+        }
+
+        tcb->retransmit_queue.push_back(std::move(entry));
+    }
+}
+
+void TCPConnectionManager::raw_send(TCB *tcb, uint8_t flags, uint32_t seq,
+                                     const uint8_t *data, size_t len) {
+    // 直接发送 TCP 段，不更新 snd_nxt，不加入重传队列
+    // 用于重传和特殊场景
+    constexpr size_t MAX_TCP_SIZE = 1500 - 20 - 20;
+    uint8_t buffer[MAX_TCP_SIZE + sizeof(TCPHeader)];
+
+    // 验证数据长度
+    if (len > MAX_TCP_SIZE) {
+        LOG_ERROR(TCP, "raw_send: data too large: %zu > %zu", len, MAX_TCP_SIZE);
+        return;
+    }
+
+    TCPBuilder builder;
+    builder.set_src_port(tcb->t_tuple.local_port)
+           .set_dst_port(tcb->t_tuple.remote_port)
+           .set_seq(seq)
+           .set_ack(tcb->rcv_nxt)
+           .set_flags(flags)
+           .set_window(static_cast<uint16_t>(std::min(tcb->rcv_wnd, 65535u)));
+
+    if (data && len > 0) {
+        builder.set_payload(data, len);
+    }
+
+    ssize_t tcp_len = builder.build(buffer, sizeof(buffer));
+    if (tcp_len < 0) {
+        LOG_ERROR(TCP, "Failed to build TCP segment (raw_send)");
+        return;
+    }
+
+    TCPBuilder::fill_checksum(buffer, tcp_len,
+                              tcb->t_tuple.local_ip, tcb->t_tuple.remote_ip);
+
+    LOG_DEBUG(TCP, "raw_send: %s:%u -> %s:%u [%s%s%s%s] seq=%u ack=%u len=%zu",
+              ip_to_string(tcb->t_tuple.local_ip).c_str(), tcb->t_tuple.local_port,
+              ip_to_string(tcb->t_tuple.remote_ip).c_str(), tcb->t_tuple.remote_port,
+              (flags & TCPFlags::SYN) ? "SYN " : "",
+              (flags & TCPFlags::ACK) ? "ACK " : "",
+              (flags & TCPFlags::FIN) ? "FIN " : "",
+              (flags & TCPFlags::PSH) ? "PSH " : "",
+              seq, tcb->rcv_nxt, len);
+
+    if (_send_cb) {
+        _send_cb(tcb->t_tuple.remote_ip, buffer, tcp_len);
+    }
 }
 
 void TCPConnectionManager::send_rst(const TCPSegment &seg) {
+    LOG_DEBUG(TCP, "Sending RST to %s:%u", ip_to_string(seg.src_addr).c_str(), seg.src_port);
+
     uint8_t buffer[sizeof(TCPHeader)];
 
     TCPBuilder builder;
@@ -364,15 +584,16 @@ void TCPConnectionManager::handle_listen(TCB *listen_tcb, const TCPSegment &seg)
     tcb->irs = seg.seq_num;
     tcb->rcv_nxt = seg.seq_num + 1;
 
-    // 生成我们的初始序列号
-    tcb->iss = TCB::generate_isn();
+    // 生成我们的初始序列号 - 使用四元组确保安全性
+    tcb->iss = TCB::generate_isn(tuple.local_ip, tuple.local_port,
+                                  tuple.remote_ip, tuple.remote_port);
     tcb->snd_una = tcb->iss;
-    tcb->snd_nxt = tcb->iss + 1;  // SYN 占一个序列号
+    tcb->snd_nxt = tcb->iss;  // send_segment 会在发送 SYN+ACK 时递增
 
     // 记录对方的窗口大小
     tcb->snd_wnd = seg.window;
 
-    // 发送 SYN+ACK
+    // 发送 SYN+ACK（send_segment 内部 snd_nxt += 1）
     send_segment(tcb, TCPFlags::SYN | TCPFlags::ACK);
 
     // 进入 SYN_RCVD 状态
@@ -397,9 +618,8 @@ void TCPConnectionManager::handle_syn_sent(TCB *tcb, const TCPSegment &seg) {
         tcb->irs = seg.seq_num;
         tcb->rcv_nxt = seg.seq_num + 1;
 
-        // 更新发送状态
-        tcb->snd_una = seg.ack_num;
-        tcb->snd_wnd = seg.window;
+        // 使用 process_ack 来更新 snd_una 并清理重传队列中的 SYN
+        process_ack(tcb, seg.ack_num, seg.window);
 
         // 发送 ACK 完成握手
         send_segment(tcb, TCPFlags::ACK);
@@ -422,7 +642,16 @@ void TCPConnectionManager::handle_syn_sent(TCB *tcb, const TCPSegment &seg) {
     if (seg.is_syn() && !seg.is_ack()) {
         tcb->irs = seg.seq_num;
         tcb->rcv_nxt = seg.seq_num + 1;
+
+        // 清除原来的 SYN 重传条目
+        // 新的 SYN+ACK 会在 send_segment 中加入队列
+        tcb->retransmit_queue.clear();
+
+        // 发送 SYN+ACK (使用 send_segment 以便加入重传队列)
+        // 注意：snd_nxt 已经是 iss + 1 了，需要先回退
+        tcb->snd_nxt = tcb->iss;
         send_segment(tcb, TCPFlags::SYN | TCPFlags::ACK);
+
         tcb->state = TCPState::SYN_RCVD;
         LOG_INFO(TCP, "SYN_SENT -> SYN_RCVD: simultaneous open");
     }
@@ -459,9 +688,8 @@ void TCPConnectionManager::handle_syn_rcvd(TCB *tcb, const TCPSegment &seg) {
         return;
     }
 
-    // 更新状态
-    tcb->snd_una = seg.ack_num;
-    tcb->snd_wnd = seg.window;
+    // 使用 process_ack 来更新状态并清理重传队列中的 SYN+ACK
+    process_ack(tcb, seg.ack_num, seg.window);
 
     // 连接建立
     tcb->state = TCPState::ESTABLISHED;
@@ -481,43 +709,38 @@ void TCPConnectionManager::handle_syn_rcvd(TCB *tcb, const TCPSegment &seg) {
 void TCPConnectionManager::handle_established(TCB *tcb, const TCPSegment &seg) {
     // 处理 ACK（确认发送的数据）
     if (seg.is_ack()) {
-        if (seq_gt(seg.ack_num, tcb->snd_una) && seq_le(seg.ack_num, tcb->snd_nxt)) {
-            tcb->snd_una = seg.ack_num;
-        }
-        tcb->snd_wnd = seg.window;
+        process_ack(tcb, seg.ack_num, seg.window);
     }
 
-    // 处理数据
+    // 处理数据（使用完整的乱序处理逻辑）
+    // 注意：handle_data 内部会发送 ACK
     if (seg.data_length > 0) {
-        if (seg.seq_num == tcb->rcv_nxt) {
-            // 数据按序到达
-            tcb->recv_buffer.insert(tcb->recv_buffer.end(),
-                                    seg.data, seg.data + seg.data_length);
-            tcb->rcv_nxt += seg.data_length;
-            send_segment(tcb, TCPFlags::ACK);
-
-            LOG_DEBUG(TCP, "Received %zu bytes of data", seg.data_length);
-
-            if (tcb->on_receive) {
-                tcb->on_receive(tcb, seg.data, seg.data_length);
-            }
-        } else {
-            LOG_DEBUG(TCP, "Out-of-order segment: got seq %u, expected %u",
-                      seg.seq_num, tcb->rcv_nxt);
-            // TODO: 乱序处理
-        }
+        handle_data(tcb, seg);
     }
 
     // 处理 FIN（被动关闭）
+    // 注意：只有当 FIN 的序列号正好是期望的 rcv_nxt 时才处理
+    // 如果 FIN 前面还有乱序数据，需要等数据到齐后再处理 FIN
     if (seg.is_fin()) {
-        tcb->rcv_nxt = seg.seq_num + seg.data_length + 1;
-        send_segment(tcb, TCPFlags::ACK);
+        // FIN 的序列号应该是 seg.seq_num + seg.data_length
+        uint32_t fin_seq = seg.seq_num + seg.data_length;
 
-        tcb->state = TCPState::CLOSE_WAIT;
-        LOG_INFO(TCP, "ESTABLISHED -> CLOSE_WAIT: received FIN");
+        if (fin_seq == tcb->rcv_nxt) {
+            // FIN 正好是期望的，确认它
+            tcb->rcv_nxt++;  // FIN 占一个序列号
+            send_segment(tcb, TCPFlags::ACK);
 
-        if (tcb->on_close) {
-            tcb->on_close(tcb);
+            tcb->state = TCPState::CLOSE_WAIT;
+            LOG_INFO(TCP, "ESTABLISHED -> CLOSE_WAIT: received FIN");
+
+            if (tcb->on_close) {
+                tcb->on_close(tcb);
+            }
+        } else {
+            // FIN 还不能被处理（前面可能有乱序数据）
+            // 这种情况应该很少见，暂时记录日志
+            LOG_DEBUG(TCP, "FIN received but not at rcv_nxt (fin_seq=%u, rcv_nxt=%u)",
+                      fin_seq, tcb->rcv_nxt);
         }
     }
 }
@@ -525,30 +748,43 @@ void TCPConnectionManager::handle_established(TCB *tcb, const TCPSegment &seg) {
 void TCPConnectionManager::handle_fin_wait_1(TCB *tcb, const TCPSegment &seg) {
     bool our_fin_acked = false;
 
-    // 处理 ACK
+    // 处理 ACK（使用 process_ack 来处理重传队列）
     if (seg.is_ack()) {
-        if (seq_gt(seg.ack_num, tcb->snd_una) && seq_le(seg.ack_num, tcb->snd_nxt)) {
-            tcb->snd_una = seg.ack_num;
-            if (tcb->snd_una == tcb->snd_nxt) {
-                our_fin_acked = true;
-            }
+        process_ack(tcb, seg.ack_num, seg.window);
+
+        // 检查 FIN 是否被确认
+        if (tcb->snd_una == tcb->snd_nxt) {
+            our_fin_acked = true;
         }
+    }
+
+    // 处理数据（FIN 包可能携带数据）
+    if (seg.data_length > 0) {
+        handle_data(tcb, seg);
     }
 
     // 处理 FIN
     if (seg.is_fin()) {
-        tcb->rcv_nxt = seg.seq_num + 1;
-        send_segment(tcb, TCPFlags::ACK);
+        uint32_t fin_seq = seg.seq_num + seg.data_length;
 
-        if (our_fin_acked) {
-            tcb->state = TCPState::TIME_WAIT;
-            start_time_wait_timer(tcb);
-            LOG_INFO(TCP, "FIN_WAIT_1 -> TIME_WAIT: both FINs acknowledged");
+        if (fin_seq == tcb->rcv_nxt) {
+            // FIN 正好是期望的
+            tcb->rcv_nxt++;
+            send_segment(tcb, TCPFlags::ACK);
+
+            if (our_fin_acked) {
+                tcb->state = TCPState::TIME_WAIT;
+                start_time_wait_timer(tcb);
+                LOG_INFO(TCP, "FIN_WAIT_1 -> TIME_WAIT: both FINs acknowledged");
+            } else {
+                tcb->state = TCPState::CLOSING;
+                LOG_INFO(TCP, "FIN_WAIT_1 -> CLOSING: simultaneous close");
+            }
+            return;
         } else {
-            tcb->state = TCPState::CLOSING;
-            LOG_INFO(TCP, "FIN_WAIT_1 -> CLOSING: simultaneous close");
+            LOG_DEBUG(TCP, "FIN_WAIT_1: FIN not at rcv_nxt (fin_seq=%u, rcv_nxt=%u)",
+                      fin_seq, tcb->rcv_nxt);
         }
-        return;
     }
 
     // 只收到 ACK
@@ -559,35 +795,38 @@ void TCPConnectionManager::handle_fin_wait_1(TCB *tcb, const TCPSegment &seg) {
 }
 
 void TCPConnectionManager::handle_fin_wait_2(TCB *tcb, const TCPSegment &seg) {
-    // 对方可能还在发数据
-    if (seg.data_length > 0 && seg.seq_num == tcb->rcv_nxt) {
-        tcb->recv_buffer.insert(tcb->recv_buffer.end(),
-                                seg.data, seg.data + seg.data_length);
-        tcb->rcv_nxt += seg.data_length;
-        send_segment(tcb, TCPFlags::ACK);
+    // 处理 ACK
+    if (seg.is_ack()) {
+        process_ack(tcb, seg.ack_num, seg.window);
+    }
 
-        if (tcb->on_receive) {
-            tcb->on_receive(tcb, seg.data, seg.data_length);
-        }
+    // 对方可能还在发数据（使用 handle_data 处理乱序）
+    if (seg.data_length > 0) {
+        handle_data(tcb, seg);
     }
 
     // 等待对方的 FIN
     if (seg.is_fin()) {
-        tcb->rcv_nxt = seg.seq_num + seg.data_length + 1;
-        send_segment(tcb, TCPFlags::ACK);
-        tcb->state = TCPState::TIME_WAIT;
-        start_time_wait_timer(tcb);
-        LOG_INFO(TCP, "FIN_WAIT_2 -> TIME_WAIT: received FIN");
+        uint32_t fin_seq = seg.seq_num + seg.data_length;
+
+        if (fin_seq == tcb->rcv_nxt) {
+            // FIN 正好是期望的
+            tcb->rcv_nxt++;
+            send_segment(tcb, TCPFlags::ACK);
+            tcb->state = TCPState::TIME_WAIT;
+            start_time_wait_timer(tcb);
+            LOG_INFO(TCP, "FIN_WAIT_2 -> TIME_WAIT: received FIN");
+        } else {
+            LOG_DEBUG(TCP, "FIN_WAIT_2: FIN not at rcv_nxt (fin_seq=%u, rcv_nxt=%u)",
+                      fin_seq, tcb->rcv_nxt);
+        }
     }
 }
 
 void TCPConnectionManager::handle_close_wait(TCB *tcb, const TCPSegment &seg) {
     // 等待应用层调用close()，期间只处理ACK即可
     if (seg.is_ack()) {
-        if (seq_gt(seg.ack_num, tcb->snd_una) && seq_le(seg.ack_num, tcb->snd_nxt)) {
-            tcb->snd_una = seg.ack_num;
-        }
-        tcb->snd_wnd = seg.window;
+        process_ack(tcb, seg.ack_num, seg.window);
     }
     // 不处理数据和 FIN（因为我们已经收到过 FIN 了）
 }
@@ -595,8 +834,10 @@ void TCPConnectionManager::handle_close_wait(TCB *tcb, const TCPSegment &seg) {
 void TCPConnectionManager::handle_closing(TCB *tcb, const TCPSegment &seg) {
     // 等待对方确认我们的 FIN 即可
     if (seg.is_ack()) {
-        // 检查是不是确认的 FIN
-        if (seg.ack_num == tcb->snd_nxt) {
+        process_ack(tcb, seg.ack_num, seg.window);
+
+        // 检查是不是确认了我们的 FIN
+        if (tcb->snd_una == tcb->snd_nxt) {
             tcb->state = TCPState::TIME_WAIT;
             start_time_wait_timer(tcb);
             LOG_INFO(TCP, "CLOSING -> TIME_WAIT");
@@ -605,10 +846,15 @@ void TCPConnectionManager::handle_closing(TCB *tcb, const TCPSegment &seg) {
 }
 
 void TCPConnectionManager::handle_last_ack(TCB *tcb, const TCPSegment &seg) {
-    if (seg.is_ack() && seg.ack_num == tcb->snd_nxt) {
-        LOG_INFO(TCP, "LAST_ACK -> CLOSED: connection closed");
-        tcb->state = TCPState::CLOSED;
-        delete_tcb(tcb);
+    if (seg.is_ack()) {
+        process_ack(tcb, seg.ack_num, seg.window);
+
+        // 检查是不是确认了我们的 FIN
+        if (tcb->snd_una == tcb->snd_nxt) {
+            LOG_INFO(TCP, "LAST_ACK -> CLOSED: connection closed");
+            tcb->state = TCPState::CLOSED;
+            delete_tcb(tcb);
+        }
     }
 }
 
@@ -631,11 +877,14 @@ void TCPConnectionManager::handle_rst(TCB *tcb, const TCPSegment &seg) {
 
     LOG_INFO(TCP, "%s -> CLOSED: received RST", tcp_state_name(tcb->state));
 
+    // 先设置状态为 CLOSED，防止回调中再发送数据
+    tcb->state = TCPState::CLOSED;
+
+    // 通知应用层（注意：回调可能调用 close()，但 close() 在 CLOSED 状态下不做任何事）
     if (tcb->on_close) {
         tcb->on_close(tcb);
     }
 
-    tcb->state = TCPState::CLOSED;
     delete_tcb(tcb);
 }
 
@@ -660,3 +909,488 @@ void TCPConnectionManager::restart_time_wait_timer(TCB *tcb) {
     // 如果没找到，就新建一个
     start_time_wait_timer(tcb);
 }
+
+void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t window) {
+    // 保存旧窗口值，用于检测窗口变化
+    uint32_t old_wnd = tcb->snd_wnd;
+    tcb->snd_wnd = window;
+
+    // 检查是否是重复 ACK（在更新 snd_una 之前检查）
+    check_dup_ack(tcb, ack_num);
+
+    // 如果 ACK 没有确认新数据
+    if (!seq_gt(ack_num, tcb->snd_una)) {
+        // 即使没有确认新数据，窗口可能变大了（零窗口恢复）
+        if (old_wnd == 0 && window > 0) {
+            LOG_DEBUG(TCP, "Zero window opened: %u -> %u", old_wnd, window);
+            send_buffered_data(tcb);
+        }
+        return;
+    }
+
+    // 计算确认的字节数
+    uint32_t bytes_acked = 0;
+    if (seq_gt(ack_num, tcb->snd_una)) {
+        bytes_acked = ack_num - tcb->snd_una;
+        tcb->snd_una = ack_num;
+    }
+
+    // 通知拥塞控制
+    if (bytes_acked > 0 && tcb->congestion_control) {
+        tcb->congestion_control->on_ack(bytes_acked, tcb->srtt_us);
+    }
+
+    auto now = std::chrono::steady_clock::now();
+
+    // 从队列中移除已经确认的数据
+    while (!tcb->retransmit_queue.empty()) {
+        auto &entry = tcb->retransmit_queue.front();
+
+        if (seq_le(entry.seq_end, ack_num)) {
+            // 如果整个条目已经被确认了
+
+            // RTT测量：只有未重传的段才能用于计算 RTT
+            // 使用Karn算法：重传的段无法确定 ACK 对应哪次发送
+            if (tcb->rtt_measuring &&
+                seq_le(tcb->rtt_seq, entry.seq_end) &&
+                entry.retransmit_count == 0) {
+
+                auto rtt = std::chrono::duration_cast<std::chrono::microseconds>(now - tcb->rtt_send_time).count();
+                update_rtt(tcb, rtt);
+                tcb->rtt_measuring = false;
+            }
+
+            tcb->retransmit_queue.pop_front();
+        } else if (seq_lt(entry.seq_start, ack_num)) {
+            // 部分确认：截断条目
+            uint32_t confirmed = ack_num - entry.seq_start;
+            if (confirmed <= entry.data.size()) {
+                entry.data.erase(entry.data.begin(), entry.data.begin() + confirmed);
+            } else {
+                // SYN/FIN 可能占序列号但没有数据
+                entry.data.clear();
+            }
+            entry.seq_start = ack_num;
+            break;
+        } else {
+            // 这个条目还没被确认
+            break;
+        }
+    }
+
+    // 新的 ACK，重置重复 ACK 计数
+    tcb->dup_ack_count = 0;
+    tcb->last_ack_num = ack_num;
+
+    // 关键：ACK 确认了数据后，窗口空间释放，发送缓冲区中的数据
+    if (bytes_acked > 0) {
+        send_buffered_data(tcb);
+    }
+}
+
+void TCPConnectionManager::update_rtt(TCB *tcb, uint32_t rtt_us) {
+    if (tcb->srtt_us == 0) {
+        // 第一次测量
+        tcb->srtt_us = rtt_us;
+        tcb->rttvar_us = rtt_us / 2;
+    } else {
+        // 后续测量，采用RFC 6298
+        // RTTVAR = (1 - β) * RTTVAR + β * |SRTT - R|, β = 1/4
+        uint32_t delta = (tcb->srtt_us > rtt_us) ? (tcb->srtt_us - rtt_us) : (rtt_us - tcb->srtt_us);
+        tcb->rttvar_us = (3 * tcb->rttvar_us + delta) / 4;
+
+        // SRTT = (1 - α) * SRTT + α * R, α = 1/8
+        tcb->srtt_us = (7 * tcb->srtt_us + rtt_us) / 8;
+    }
+
+    // RTO = SRTT + max(G, 4 * RTTVAR)
+    // G (时钟粒度) 我们用 100ms = 100000us
+    uint32_t rto = tcb->srtt_us + std::max(100000u, 4 * tcb->rttvar_us);
+
+    // RTO限制：最小200ms，最大60s
+    tcb->rto_us = std::clamp(rto, 200000u, 60000000u);
+
+    LOG_DEBUG(TCP, "RTT updated: srtt=%u us, rttvar=%u us, rto=%u us",
+              tcb->srtt_us, tcb->rttvar_us, tcb->rto_us);
+}
+
+void TCPConnectionManager::check_retransmit(TCB *tcb, std::chrono::steady_clock::time_point now) {
+    if (tcb->retransmit_queue.empty()) {
+        return;
+    }
+
+    // 只检查队列头部（最早发送的）
+    auto &entry = tcb->retransmit_queue.front();
+
+    if (now < entry.timeout) {
+        return; // 还没超时
+    }
+
+    // 超时了，需要重传
+    entry.retransmit_count++;
+
+    // 通知拥塞控制（超时是严重事件）
+    if (tcb->congestion_control) {
+        auto *reno = dynamic_cast<TCPReno *>(tcb->congestion_control.get());
+        if (reno) {
+            reno->on_timeout();
+        }
+    }
+
+    // 检查是否超过了最大重传次数
+    if (entry.retransmit_count > tcb->options.max_retransmit) {
+        LOG_WARN(TCP, "Max retransmit reached, closing connection");
+        // 通知应用层，关闭连接
+        if (tcb->on_close) {
+            tcb->on_close(tcb);
+        }
+        tcb->state = TCPState::CLOSED;
+        // 注意：不能在遍历中删除，标记待删除
+        return;
+    }
+
+    LOG_INFO(TCP, "Retransmit #%d: seq=%u-%u (%u bytes)",
+             entry.retransmit_count, entry.seq_start, entry.seq_end,
+             entry.length());
+
+    // 指数退避：RTO *= 2
+    tcb->rto_us = std::min(tcb->rto_us * 2, 60000000u);
+
+    // 更新超时时间
+    entry.timeout = now + std::chrono::microseconds(tcb->rto_us);
+
+    // 重传数据
+    // 注意：重传不能使用 send_segment（会更新 snd_nxt 和重传队列）
+    // 使用 raw_send 直接发送，只发送最多一个 MSS
+    if (!entry.data.empty()) { // 数据重传
+        size_t retransmit_len = std::min(entry.data.size(),
+                                          static_cast<size_t>(tcb->options.mss));
+        raw_send(tcb, TCPFlags::ACK | TCPFlags::PSH,
+                 entry.seq_start, entry.data.data(), retransmit_len);
+    } else { // SYN/FIN 重传
+        uint8_t flags = 0;
+        if (tcb->state == TCPState::SYN_SENT) {
+            flags = TCPFlags::SYN;
+        } else if (tcb->state == TCPState::SYN_RCVD) {
+            flags = TCPFlags::SYN | TCPFlags::ACK;
+        } else if (tcb->state == TCPState::FIN_WAIT_1 ||
+                   tcb->state == TCPState::LAST_ACK) {
+            flags = TCPFlags::FIN | TCPFlags::ACK;
+        }
+        if (flags) {
+            raw_send(tcb, flags, entry.seq_start);
+        }
+    }
+
+    // 停止 RTT 测量（重传的段不能用于 RTT 计算）
+    tcb->rtt_measuring = false;
+}
+
+void TCPConnectionManager::check_dup_ack(TCB *tcb, uint32_t ack_num) {
+    // 检查是否在快速恢复中
+    auto* reno = tcb->congestion_control
+                 ? dynamic_cast<TCPReno*>(tcb->congestion_control.get())
+                 : nullptr;
+
+    // 只有当 ACK 号等于 snd_una（即没有确认新数据）时才算重复 ACK
+    if (ack_num == tcb->snd_una && !tcb->retransmit_queue.empty()) {
+        // 如果已经在快速恢复中，只膨胀窗口，不再触发快速重传
+        if (reno && reno->in_fast_recovery()) {
+            reno->on_dup_ack();
+            return;
+        }
+
+        tcb->dup_ack_count++;
+
+        // 3个重复ACK触发快速重传并进入快速恢复
+        if (tcb->dup_ack_count == 3) {
+            LOG_INFO(TCP, "3 dup ACKs, fast retransmit seq=%u", ack_num);
+
+            // 通知拥塞控制（进入快速恢复）
+            if (tcb->congestion_control) {
+                tcb->congestion_control->on_loss(0);
+            }
+
+            // 重传第一个未确认的段（使用 raw_send 避免更新状态）
+            // 注意：只重传最多一个 MSS 的数据
+            auto &entry = tcb->retransmit_queue.front();
+            if (!entry.data.empty()) {
+                size_t retransmit_len = std::min(entry.data.size(),
+                                                  static_cast<size_t>(tcb->options.mss));
+                raw_send(tcb, TCPFlags::ACK, entry.seq_start,
+                         entry.data.data(), retransmit_len);
+            }
+
+            // 重置重复 ACK 计数
+            tcb->dup_ack_count = 0;
+        }
+    }
+    // 注意：新 ACK 的重置在 process_ack 中处理
+}
+
+void TCPConnectionManager::handle_data(TCB *tcb, const TCPSegment &seg) {
+    if (seg.data_length == 0) {
+        return;
+    }
+
+    // 用局部变量，方便调整
+    uint32_t seg_start = seg.seq_num;
+    uint32_t seg_end = seg.seq_num + seg.data_length;
+    const uint8_t *data = seg.data;
+    size_t data_len = seg.data_length;
+
+    // 情况1: 完全在期望之前（重复数据）
+    if (seq_le(seg_end, tcb->rcv_nxt)) {
+        LOG_DEBUG(TCP, "Duplicate data: seq=%u-%u, expected=%u",
+                  seg_start, seg_end, tcb->rcv_nxt);
+        return;
+    }
+
+    // 情况2: 部分重叠（取新的部分）
+    if (seq_lt(seg_start, tcb->rcv_nxt)) {
+        uint32_t overlap = tcb->rcv_nxt - seg_start;
+        if (overlap >= data_len) {
+            // 整个段都是重复数据（理论上不会到这里，情况1已处理）
+            return;
+        }
+        seg_start = tcb->rcv_nxt;
+        data += overlap;
+        data_len -= overlap;
+    }
+
+    // 情况3: 正好是期望的数据
+    if (seg_start == tcb->rcv_nxt) {
+        // 直接交付
+        deliver_data(tcb, data, data_len);
+        tcb->rcv_nxt = seg_end;
+
+        // 检查乱序队列，看能否交付更多数据
+        deliver_ooo_data(tcb);
+
+        // 延迟 ACK 逻辑（只用于顺序到达的数据）
+        if (tcb->options.delayed_ack_enabled) {
+            if (!tcb->delayed_ack_pending) {
+                // 第一个段，启动延迟 ACK 定时器
+                tcb->delayed_ack_pending = true;
+                tcb->delayed_ack_time = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(tcb->options.delayed_ack_timeout_ms);
+            } else {
+                // 第二个段，立即发送 ACK（每两个段发一个 ACK）
+                send_segment(tcb, TCPFlags::ACK);
+                tcb->delayed_ack_pending = false;
+            }
+        } else {
+            // 延迟 ACK 禁用，立即发送 ACK
+            send_segment(tcb, TCPFlags::ACK);
+        }
+        return;
+    }
+
+    // 情况4: 乱序数据（seg_start > rcv_nxt）
+    LOG_DEBUG(TCP, "Out-of-order: seq=%u-%u, expected=%u",
+              seg_start, seg_end, tcb->rcv_nxt);
+
+    // 加入乱序队列
+    add_to_ooo_queue(tcb, seg_start, data, data_len);
+
+    // 立即发送重复 ACK（帮助发送方快速重传）
+    // 注意：乱序数据不使用延迟 ACK，必须立即响应
+    send_segment(tcb, TCPFlags::ACK);
+}
+
+void TCPConnectionManager::add_to_ooo_queue(TCB *tcb, uint32_t seq,
+                                            const uint8_t *data, size_t len) {
+    // 检查缓冲区大小限制
+    if (tcb->ooo_size + len > tcb->options.recv_buffer_size) {
+        LOG_WARN(TCP, "OOO buffer full, dropping segment");
+        return;
+    }
+
+    OutOfOrderSegment ooo_seg;
+    ooo_seg.seq_start = seq;
+    ooo_seg.seq_end = seq + len;
+    ooo_seg.data.assign(data, data + len);
+
+    // 按序列号顺序插入
+    auto it = tcb->ooo_queue.begin();
+    while (it != tcb->ooo_queue.end() && seq_lt(it->seq_start, seq)) {
+        ++it;
+    }
+
+    tcb->ooo_queue.insert(it, std::move(ooo_seg));
+    tcb->ooo_size += len;
+
+    LOG_DEBUG(TCP, "Added to OOO queue: seq=%u-%u, queue_size=%zu",
+              seq, seq + static_cast<uint32_t>(len), tcb->ooo_size);
+}
+
+void TCPConnectionManager::deliver_ooo_data(TCB *tcb) {
+    while (!tcb->ooo_queue.empty()) {
+        auto &front = tcb->ooo_queue.front();
+
+        // 检查是否可以交付
+        if (seq_gt(front.seq_start, tcb->rcv_nxt)) {
+            // 还有间隙，无法交付
+            break;
+        }
+
+        if (seq_le(front.seq_end, tcb->rcv_nxt)) {
+            // 完全是重复数据，丢弃
+            LOG_DEBUG(TCP, "OOO: discarding duplicate seq=%u-%u",
+                      front.seq_start, front.seq_end);
+            tcb->ooo_size -= front.data.size();
+            tcb->ooo_queue.pop_front();
+            continue;
+        }
+
+        // 可能有部分重叠
+        size_t skip = 0;
+        if (seq_lt(front.seq_start, tcb->rcv_nxt)) {
+            skip = tcb->rcv_nxt - front.seq_start;
+        }
+
+        // 交付数据
+        deliver_data(tcb, front.data.data() + skip, front.data.size() - skip);
+        tcb->rcv_nxt = front.seq_end;
+
+        LOG_DEBUG(TCP, "OOO: delivered seq=%u-%u", front.seq_start, front.seq_end);
+
+        tcb->ooo_size -= front.data.size();
+        tcb->ooo_queue.pop_front();
+    }
+}
+
+void TCPConnectionManager::deliver_data(TCB *tcb, const uint8_t *data, size_t len) {
+    LOG_DEBUG(TCP, "Delivered %zu bytes to application", len);
+
+    // 通知应用层
+    // 回调模式：数据通过 on_receive 直接交付给应用，无需缓冲
+    if (tcb->on_receive) {
+        tcb->on_receive(tcb, data, len);
+    }
+
+    // 更新接收窗口
+    // 对于 echo 类应用，接收窗口应该反映发送缓冲区的剩余空间
+    // 这样可以实现背压：当发送缓冲区满时，减小接收窗口，让对端减速
+    size_t send_buffer_free = tcb->options.send_buffer_size > tcb->send_buffer.size()
+                            ? tcb->options.send_buffer_size - tcb->send_buffer.size()
+                            : 0;
+    tcb->rcv_wnd = static_cast<uint32_t>(std::min(send_buffer_free,
+                                                   static_cast<size_t>(tcb->options.recv_buffer_size)));
+}
+
+void TCPConnectionManager::send_buffered_data(TCB *tcb) {
+    // 发送缓冲区中的数据
+    // 拥塞控制（cwnd）会自动限制发送速度
+    while (!tcb->send_buffer.empty()) {
+        uint32_t window = tcb->effective_window();
+        uint32_t in_flight = tcb->snd_nxt - tcb->snd_una;
+        uint32_t available = (window > in_flight) ? (window - in_flight) : 0;
+
+        if (available == 0) {
+            break;  // 窗口已满，等待下一个 ACK
+        }
+
+        size_t mss = tcb->options.mss;
+        size_t to_send = std::min({tcb->send_buffer.size(),
+                                   static_cast<size_t>(available), mss});
+
+        send_segment(tcb, TCPFlags::ACK | TCPFlags::PSH,
+                     tcb->send_buffer.data(), to_send);
+
+        // 从缓冲区移除已发送的数据
+        tcb->send_buffer.erase(tcb->send_buffer.begin(),
+                               tcb->send_buffer.begin() + to_send);
+
+        LOG_DEBUG(TCP, "Sent %zu bytes from buffer, %zu remaining",
+                  to_send, tcb->send_buffer.size());
+    }
+
+    // 发送缓冲区释放了空间，更新接收窗口（实现背压释放）
+    size_t send_buffer_free = tcb->options.send_buffer_size > tcb->send_buffer.size()
+                            ? tcb->options.send_buffer_size - tcb->send_buffer.size()
+                            : 0;
+    tcb->rcv_wnd = static_cast<uint32_t>(std::min(send_buffer_free,
+                                                   static_cast<size_t>(tcb->options.recv_buffer_size)));
+
+    // 缓冲区已空，如果应用层之前调用了 close()，现在完成关闭
+    if (tcb->send_buffer.empty() && tcb->close_pending) {
+        tcb->close_pending = false;
+
+        if (tcb->state == TCPState::ESTABLISHED) {
+            send_segment(tcb, TCPFlags::FIN | TCPFlags::ACK);
+            tcb->state = TCPState::FIN_WAIT_1;
+            LOG_INFO(TCP, "ESTABLISHED -> FIN_WAIT_1: close pending completed, sending FIN");
+        } else if (tcb->state == TCPState::CLOSE_WAIT) {
+            send_segment(tcb, TCPFlags::FIN | TCPFlags::ACK);
+            tcb->state = TCPState::LAST_ACK;
+            LOG_INFO(TCP, "CLOSE_WAIT -> LAST_ACK: close pending completed, sending FIN");
+        }
+    }
+}
+
+void TCPConnectionManager::send_zero_window_probe(TCB *tcb) {
+    if (tcb->send_buffer.empty()) {
+        return;
+    }
+
+    // 取 send_buffer 的第一个字节，但不移除
+    uint8_t probe_byte = tcb->send_buffer[0];
+
+    // 手动构建探测包，不使用 send_segment
+    // 因为零窗口探测不应该移动 snd_nxt，也不应该加入重传队列
+    uint8_t buffer[sizeof(TCPHeader) + 1];
+
+    TCPBuilder builder;
+    builder.set_src_port(tcb->t_tuple.local_port)
+           .set_dst_port(tcb->t_tuple.remote_port)
+           .set_seq(tcb->snd_nxt)  // 使用当前 snd_nxt，但不移动它
+           .set_ack(tcb->rcv_nxt)
+           .set_flags(TCPFlags::ACK)
+           .set_window(static_cast<uint16_t>(tcb->rcv_wnd))
+           .set_payload(&probe_byte, 1);
+
+    ssize_t tcp_len = builder.build(buffer, sizeof(buffer));
+    if (tcp_len < 0) {
+        return;
+    }
+
+    TCPBuilder::fill_checksum(buffer, tcp_len,
+                              tcb->t_tuple.local_ip, tcb->t_tuple.remote_ip);
+
+    // 发送，但 **不移动 snd_nxt**，**不加入重传队列**
+    if (_send_cb) {
+        _send_cb(tcb->t_tuple.remote_ip, buffer, tcp_len);
+    }
+
+    LOG_DEBUG(TCP, "Sent zero window probe, seq=%u", tcb->snd_nxt);
+}
+
+void TCPConnectionManager::check_zero_window_probe(TCB *tcb, std::chrono::steady_clock::time_point now) {
+    // 如果对方窗口为 0 且有数据要发送
+    if (tcb->snd_wnd == 0 && !tcb->send_buffer.empty()) {
+        if (!tcb->zero_window_probe_needed) {
+            // 开始零窗口探测定时器
+            tcb->zero_window_probe_needed = true;
+            tcb->zwp_time = now + std::chrono::microseconds(tcb->rto_us);
+        } else if (now >= tcb->zwp_time) {
+            // 发送零窗口探测（使用专门的函数，不移动 snd_nxt）
+            send_zero_window_probe(tcb);
+
+            // 重置定时器（指数退避，最大 60 秒）
+            uint32_t next_interval = std::min(tcb->rto_us * 2, 60000000u);
+            tcb->zwp_time = now + std::chrono::microseconds(next_interval);
+        }
+    } else {
+        tcb->zero_window_probe_needed = false;
+    }
+}
+
+void TCPConnectionManager::check_delayed_ack(TCB *tcb, std::chrono::steady_clock::time_point now) {
+    if (tcb->delayed_ack_pending && now >= tcb->delayed_ack_time) {
+        LOG_DEBUG(TCP, "Delayed ACK timeout, sending ACK");
+        send_segment(tcb, TCPFlags::ACK);
+        tcb->delayed_ack_pending = false;
+    }
+}
+

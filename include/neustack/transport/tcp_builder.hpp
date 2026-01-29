@@ -7,6 +7,8 @@
 
 #include "neustack/transport/tcp.hpp"
 
+namespace neustack {
+
 // ========================================================================
 // TCP 段构建器
 // ========================================================================
@@ -43,5 +45,7 @@ private:
     const uint8_t *_payload = nullptr;  // 负载数据位置
     size_t _payload_len = 0;            // 负载数据长度
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_BUILDER_HPP

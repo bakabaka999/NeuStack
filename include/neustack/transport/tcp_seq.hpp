@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+namespace neustack {
+
 // ========================================================================
 // TCP 序列号比较 (处理回绕)
 // ========================================================================
@@ -33,5 +35,7 @@ inline bool seq_ge(uint32_t a, uint32_t b) {
 inline bool seq_in_range(uint32_t seq, uint32_t start, uint32_t end) {
     return seq_ge(seq, start) && seq_lt(seq, end);
 }
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_SEQ_HPP

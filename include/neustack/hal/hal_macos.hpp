@@ -5,6 +5,8 @@
 
 #include "neustack/hal/device.hpp"
 
+namespace neustack {
+
 class MacOSDevice : public NetDevice {
 public:
     MacOSDevice() = default;
@@ -21,6 +23,8 @@ private:
     int _fd = -1;
     std::string _name;
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_PLATFORM_MACOS
 #endif // NEUSTACK_HAL_MACOS_HPP

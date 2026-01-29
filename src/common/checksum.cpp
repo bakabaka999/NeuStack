@@ -7,6 +7,8 @@
 
 #include <arpa/inet.h>  // htons (cross-platform)
 
+namespace neustack {
+
 uint16_t compute_checksum(const void* data, size_t len) {
     const uint8_t* ptr = static_cast<const uint8_t*>(data);
     uint32_t sum = 0;
@@ -56,3 +58,5 @@ bool verify_checksum(const void* data, size_t len) {
     // 如果校验和正确，结果应该是 0xFFFF
     return (sum & 0xFFFF) == 0xFFFF;
 }
+
+} // namespace neustack

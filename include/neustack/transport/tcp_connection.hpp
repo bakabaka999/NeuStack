@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <functional>
 
+namespace neustack {
+
 // ========================================================================
 // TCP 发送回调 (由上层提供，用于发送 IP 包)
 // ========================================================================
@@ -21,61 +23,73 @@ using TCPSendCallback = std::function<void(uint32_t, const uint8_t *, size_t)>;
 // ========================================================================
 
 class TCPConnectionManager {
+// ═══════════════════════════════════════════════════════════════════
+// 公开接口
+// ═══════════════════════════════════════════════════════════════════
+
 public:
+    // ─── 构造与配置 ───
     explicit TCPConnectionManager(uint32_t local_ip) : _local_ip(local_ip) {}
 
-    // 设置发送回调（由 IP 层调用）
     void set_send_callback(TCPSendCallback cb) { _send_cb = std::move(cb); }
+    void set_default_options(const TCPOptions &opts) { _default_options = opts; }
+    const TCPOptions &default_options() const { return _default_options; }
 
-    // 主动操作：应用层调用
+    // 检查本地端口是否已被使用
+    bool is_port_in_use(uint16_t port) const;
+
+public:
+    // ─── 主动操作 (应用层调用) ───
 
     // 监听端口（被动打开）
-    // 返回: 0 成功, -1 失败
     int listen(uint16_t port, TCPConnectCallback on_accept);
+
+    // 停止监听端口
+    void unlisten(uint16_t port);
 
     // 设置监听端口的回调（新连接会继承这些回调）
     void set_listener_callbacks(uint16_t port,
                                 TCPReceiveCallback on_receive,
                                 TCPCloseCallback on_close);
 
-    // 连接远程主机 (主动打开)
-    // 返回: 0 成功 (异步，结果通过回调通知), -1 失败
+    // 连接远程主机（主动打开，异步）
     int connect(uint32_t remote_ip, uint16_t remote_port, uint16_t local_port,
                 TCPConnectCallback on_connect);
 
     // 发送数据
-    // 返回: 发送的字节数, -1 失败
     ssize_t send(TCB *tcb, const uint8_t *data, size_t len);
 
-    // 关闭连接 (主动关闭)
+    // 关闭连接
     int close(TCB *tcb);
 
-    // 被动操作：收到数据包时调用
+public:
+    // ─── 被动操作 (协议栈内部调用) ───
 
     // 处理收到的 TCP 段
     void on_segment_received(const TCPSegment &seg);
 
-    // 定时器触发 (需要定期调用，如每 100ms)
+    // 定时器触发（需要周期性调用，建议 100ms）
     void on_timer();
 
-private:
-    // 内部方法
+// ═══════════════════════════════════════════════════════════════════
+// 内部实现
+// ═══════════════════════════════════════════════════════════════════
 
-    // 查找 TCB
+private:
+    // ─── TCB 管理 ───
     TCB *find_tcb(const TCPTuple &t_tuple);
     TCB *find_listening_tcb(uint16_t port);
-
-    // 创建新的 TCB
     TCB *create_tcb(const TCPTuple &t_tuple);
-
-    // 删除 TCB
     void delete_tcb(TCB *tcb);
 
-    // 发送 TCP 段
+private:
+    // ─── 发送 ───
     void send_segment(TCB *tcb, uint8_t flags, const uint8_t *data = nullptr, size_t len = 0);
-    void send_rst(const TCPSegment &seg); // 对无效段发送 RST
+    void raw_send(TCB *tcb, uint8_t flags, uint32_t seq, const uint8_t *data = nullptr, size_t len = 0);
+    void send_rst(const TCPSegment &seg);
 
-    // 状态机处理（状态转移）
+private:
+    // ─── 状态机处理 ───
     void handle_closed(TCB *tcb, const TCPSegment &seg);
     void handle_listen(TCB *tcb, const TCPSegment &seg);
     void handle_syn_sent(TCB *tcb, const TCPSegment &seg);
@@ -87,26 +101,54 @@ private:
     void handle_closing(TCB *tcb, const TCPSegment &seg);
     void handle_last_ack(TCB *tcb, const TCPSegment &seg);
     void handle_time_wait(TCB *tcb, const TCPSegment &seg);
-
-    // RST 处理
     void handle_rst(TCB *tcb, const TCPSegment &seg);
 
-    // 定时器
+private:
+    // ─── 定时器 ───
     void start_time_wait_timer(TCB *tcb);
     void restart_time_wait_timer(TCB *tcb);
 
-    // 数据成员
+private:
+    // ─── 可靠传输: 重传 ───
+    void process_ack(TCB *tcb, uint32_t ack_num, uint16_t window);
+    void update_rtt(TCB *tcb, uint32_t rtt_us);
+    void check_retransmit(TCB *tcb, std::chrono::steady_clock::time_point now);
+    void check_dup_ack(TCB *tcb, uint32_t ack_num);
+
+private:
+    // ─── 可靠传输: 乱序处理 ───
+    void handle_data(TCB *tcb, const TCPSegment &seg);
+    void add_to_ooo_queue(TCB *tcb, uint32_t seq, const uint8_t *data, size_t len);
+    void deliver_ooo_data(TCB *tcb);
+    void deliver_data(TCB *tcb, const uint8_t *data, size_t len);
+
+private:
+    // ─── 流量控制 ───
+    void send_buffered_data(TCB *tcb);
+    void send_zero_window_probe(TCB *tcb);
+    void check_zero_window_probe(TCB *tcb, std::chrono::steady_clock::time_point now);
+    void check_delayed_ack(TCB *tcb, std::chrono::steady_clock::time_point now);
+
+// ═══════════════════════════════════════════════════════════════════
+// 数据成员
+// ═══════════════════════════════════════════════════════════════════
+
+private:
+    // ─── 配置 ───
     uint32_t _local_ip;
     TCPSendCallback _send_cb;
+    TCPOptions _default_options;
 
-    // 活跃连接表 (四元组 -> TCB)
+private:
+    // ─── 连接表 ───
     std::unordered_map<TCPTuple, std::unique_ptr<TCB>, TCPTupleHash> _connections;
-
-    // 监听表 (本地端口 -> TCB)
     std::unordered_map<uint16_t, std::unique_ptr<TCB>> _listeners;
 
-    // TIME_WAIT 连接 (需要单独管理以便定时删除)
+private:
+    // ─── 定时器数据 ───
     std::vector<std::pair<std::chrono::steady_clock::time_point, TCPTuple>> _time_wait_list;
 };
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_CONNECTION_HPP

@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <arpa/inet.h>
 
+namespace neustack {
+
 // ========================================================================
 // TCP 标志位
 // ========================================================================
@@ -59,5 +61,7 @@ struct TCPPseudoHeader {
 };
 
 static_assert(sizeof(TCPPseudoHeader) == 12, "TCPPseudoHeader must be 12 bytes");
+
+} // namespace neustack
 
 #endif // NEUSTACK_TRANSPORT_TCP_HPP

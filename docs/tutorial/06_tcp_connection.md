@@ -172,6 +172,9 @@ private:
     void send_segment(TCB* tcb, uint8_t flags, const uint8_t* data = nullptr, size_t len = 0);
     void send_rst(const TCPSegment& seg);  // 对无效段发送 RST
 
+    // 发送缓冲区中的数据
+    void send_buffered_data(TCB* tcb);
+
     // ─── 状态机处理 ───
 
     void handle_closed(TCB* tcb, const TCPSegment& seg);
@@ -1096,6 +1099,66 @@ ssize_t TCPConnectionManager::send(TCB* tcb, const uint8_t* data, size_t len) {
     LOG_DEBUG(TCP, "Sent %zu bytes, buffered %zu bytes", to_send, len - to_send);
     return static_cast<ssize_t>(len);
 }
+```
+
+### 9.1 发送缓冲区数据
+
+上面的 `send()` 函数只发送第一个 MSS（1460 字节），剩余数据放入 `send_buffer`。那这些缓冲数据什么时候发送呢？
+
+**关键点：当收到 ACK 确认数据后，窗口空间释放，就可以发送更多数据。**
+
+```cpp
+void TCPConnectionManager::send_buffered_data(TCB* tcb) {
+    // 循环发送，直到缓冲区空或窗口用完
+    while (!tcb->send_buffer.empty()) {
+        uint32_t window = tcb->effective_window();
+        uint32_t in_flight = tcb->snd_nxt - tcb->snd_una;
+        uint32_t available = (window > in_flight) ? (window - in_flight) : 0;
+
+        if (available == 0) {
+            break;  // 窗口已满，等待下一个 ACK
+        }
+
+        constexpr size_t MSS = 1460;
+        size_t to_send = std::min({tcb->send_buffer.size(),
+                                   static_cast<size_t>(available), MSS});
+
+        send_segment(tcb, TCPFlags::ACK | TCPFlags::PSH,
+                     tcb->send_buffer.data(), to_send);
+
+        // 从缓冲区移除已发送的数据
+        tcb->send_buffer.erase(tcb->send_buffer.begin(),
+                               tcb->send_buffer.begin() + to_send);
+
+        LOG_DEBUG(TCP, "Sent %zu bytes from buffer, %zu remaining",
+                  to_send, tcb->send_buffer.size());
+    }
+}
+```
+
+**什么时候调用 `send_buffered_data()`？**
+
+1. **收到 ACK 后**：在 `process_ack()` 函数末尾调用（下一章详细实现）
+2. **窗口更新后**：当对方通告更大的窗口时（第 8 章流量控制详细实现）
+
+这形成了一个完整的数据发送流程：
+
+```
+应用层调用 send(data)
+    │
+    ├── 窗口有空间 → 直接发送一个 MSS
+    │       │
+    │       └── 剩余数据 → 放入 send_buffer
+    │
+    └── 窗口已满 → 全部放入 send_buffer
+            │
+            ▼
+        等待 ACK...
+            │
+            ▼
+    收到 ACK → process_ack() → send_buffered_data()
+                                    │
+                                    └── 继续发送缓冲数据
 ```
 
 ## 10. 定时器处理

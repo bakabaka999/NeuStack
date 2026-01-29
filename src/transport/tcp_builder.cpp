@@ -40,6 +40,12 @@ ssize_t TCPBuilder::build(uint8_t *buffer, size_t buffer_len) const {
 
 void TCPBuilder::fill_checksum(uint8_t *tcp_data, size_t tcp_len,
                                uint32_t src_ip, uint32_t dst_ip) {
+    // TCP 段长度不能超过 65535（伪头部长度字段为 16 位）
+    if (tcp_len > 65535) {
+        LOG_ERROR(TCP, "TCP segment too large for checksum: %zu", tcp_len);
+        return;
+    }
+
     // 先将校验和字段清零
     auto *hdr = reinterpret_cast<TCPHeader *>(tcp_data);
     hdr->checksum = 0;
