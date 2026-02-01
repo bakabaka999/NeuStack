@@ -9,6 +9,10 @@
 - 学习文本协议解析
 - 为后续 HTTPS/TLS 打基础
 
+> **设计说明**：HTTP 服务器依赖 `IStreamServer` 抽象接口，而非直接依赖 `TCPLayer`。
+> 这样 HTTP 可以运行在任何实现了该接口的传输层上（TCP、TLS、QUIC 等）。
+> 详见 [Extra 2: Stream 抽象接口](extra_02_stream_interface.md)。
+
 ## HTTP/1.1 协议基础
 
 ### 请求格式
@@ -110,33 +114,52 @@ enum class HttpStatus {
 };
 
 // HTTP 请求
+// 注意：headers 使用 vector 存储值，支持多值 Header（如多个 Cookie）
 struct HttpRequest {
     HttpMethod method = HttpMethod::UNKNOWN;
     std::string path;
     std::string version;
-    std::unordered_map<std::string, std::string> headers;
+    std::unordered_map<std::string, std::vector<std::string>> headers;
     std::string body;
 
-    // 便捷方法
+    // 获取单个 header 值（返回第一个）
     std::string get_header(const std::string& key) const {
         auto it = headers.find(key);
-        return it != headers.end() ? it->second : "";
+        return (it != headers.end() && !it->second.empty()) ? it->second[0] : "";
+    }
+
+    // 获取所有 header 值
+    std::vector<std::string> get_headers(const std::string& key) const {
+        auto it = headers.find(key);
+        return it != headers.end() ? it->second : std::vector<std::string>{};
     }
 
     bool has_header(const std::string& key) const {
         return headers.count(key) > 0;
     }
+
+    // 添加 header（支持多值）
+    void add_header(const std::string& key, const std::string& value) {
+        headers[key].push_back(value);
+    }
 };
 
 // HTTP 响应
+// 注意：headers 使用 vector 存储值，支持多值 Header（如多个 Set-Cookie）
 struct HttpResponse {
     HttpStatus status = HttpStatus::OK;
-    std::unordered_map<std::string, std::string> headers;
+    std::unordered_map<std::string, std::vector<std::string>> headers;
     std::string body;
 
-    // 设置响应头
+    // 设置响应头（覆盖）
     HttpResponse& set_header(const std::string& key, const std::string& value) {
-        headers[key] = value;
+        headers[key] = {value};
+        return *this;
+    }
+
+    // 添加响应头（追加，用于 Set-Cookie 等）
+    HttpResponse& add_header(const std::string& key, const std::string& value) {
+        headers[key].push_back(value);
         return *this;
     }
 
@@ -347,7 +370,7 @@ bool HttpParser::parse_headers() {
             value.erase(0, 1);
         }
 
-        _request.headers[key] = value;
+        _request.headers[key].push_back(value);
     }
 }
 
@@ -379,7 +402,7 @@ void HttpParser::reset() {
 
 #include "http_types.hpp"
 #include "http_parser.hpp"
-#include "neustack/transport/tcp_layer.hpp"
+#include "neustack/transport/stream.hpp"  // 使用抽象接口
 #include <unordered_map>
 
 namespace neustack {
@@ -387,21 +410,24 @@ namespace neustack {
 /**
  * HTTP 服务器
  *
+ * 依赖 IStreamServer 抽象接口，可运行在：
+ * - TCP (HTTP/1.1)
+ * - TLS (HTTPS)
+ * - QUIC (HTTP/3)
+ *
  * 使用示例:
- *   HttpServer server(tcp_layer);
+ *   HttpServer server(tcp_layer);  // tcp_layer 实现了 IStreamServer
  *
  *   server.get("/", [](const HttpRequest& req) {
  *       return HttpResponse().set_body("Hello, World!");
  *   });
  *
- *   server.get("/api/users", handle_users);
- *   server.post("/api/login", handle_login);
- *
  *   server.listen(80);
  */
 class HttpServer {
 public:
-    explicit HttpServer(TCPLayer& tcp) : _tcp(tcp) {}
+    // 依赖抽象接口，而非具体的 TCPLayer
+    explicit HttpServer(IStreamServer& transport) : _transport(transport) {}
 
     // 注册路由
     void get(const std::string& path, HttpHandler handler);
@@ -419,7 +445,7 @@ public:
     int listen(uint16_t port);
 
 private:
-    TCPLayer& _tcp;
+    IStreamServer& _transport;  // 抽象接口引用
 
     // 路由表: method -> path -> handler
     std::unordered_map<HttpMethod,
@@ -434,18 +460,17 @@ private:
         HttpParser parser;
         bool keep_alive = true;
     };
-    std::unordered_map<TCB*, ConnectionState> _connections;
+    std::unordered_map<IStreamConnection*, ConnectionState> _connections;
 
     // 处理连接
-    void on_connect(TCB* tcb);
-    void on_receive(TCB* tcb, const uint8_t* data, size_t len);
-    void on_close(TCB* tcb);
+    void on_receive(IStreamConnection* conn, const uint8_t* data, size_t len);
+    void on_close(IStreamConnection* conn);
 
     // 分发请求
     HttpResponse dispatch(const HttpRequest& request);
 
     // 发送响应
-    void send_response(TCB* tcb, const HttpResponse& response);
+    void send_response(IStreamConnection* conn, const HttpResponse& response);
 };
 
 } // namespace neustack
@@ -461,6 +486,55 @@ private:
 #include "neustack/common/log.hpp"
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
+
+namespace {
+
+// MIME 类型映射表
+const std::unordered_map<std::string, std::string> MIME_TYPES = {
+    // 文本
+    {".html", "text/html"},
+    {".htm",  "text/html"},
+    {".css",  "text/css"},
+    {".js",   "application/javascript"},
+    {".json", "application/json"},
+    {".xml",  "application/xml"},
+    {".txt",  "text/plain"},
+
+    // 图片
+    {".png",  "image/png"},
+    {".jpg",  "image/jpeg"},
+    {".jpeg", "image/jpeg"},
+    {".gif",  "image/gif"},
+    {".svg",  "image/svg+xml"},
+    {".ico",  "image/x-icon"},
+    {".webp", "image/webp"},
+
+    // 字体
+    {".woff",  "font/woff"},
+    {".woff2", "font/woff2"},
+    {".ttf",   "font/ttf"},
+
+    // 其他
+    {".pdf",  "application/pdf"},
+    {".zip",  "application/zip"},
+    {".wasm", "application/wasm"},
+};
+
+// 获取文件扩展名
+std::string get_extension(const std::string& path) {
+    auto pos = path.rfind('.');
+    if (pos == std::string::npos) return "";
+    return path.substr(pos);
+}
+
+// 根据扩展名获取 MIME 类型
+const char* get_mime_type(const std::string& path) {
+    auto it = MIME_TYPES.find(get_extension(path));
+    return (it != MIME_TYPES.end()) ? it->second.c_str() : "application/octet-stream";
+}
+
+} // anonymous namespace
 
 using namespace neustack;
 
@@ -491,27 +565,26 @@ void HttpServer::serve_static(const std::string& url_prefix,
 }
 
 int HttpServer::listen(uint16_t port) {
-    return _tcp.listen(port, [this](TCB* tcb) {
-        on_connect(tcb);
+    // 使用 IStreamServer 接口监听
+    return _transport.listen(port, [this](IStreamConnection* conn) -> StreamCallbacks {
+        // 新连接：初始化状态
+        _connections[conn] = ConnectionState{};
+        LOG_DEBUG(APP, "HTTP: new connection from %s:%u",
+                  ip_to_string(conn->remote_ip()).c_str(), conn->remote_port());
 
-        return TCPCallbacks{
-            .on_receive = [this](TCB* tcb, const uint8_t* data, size_t len) {
-                on_receive(tcb, data, len);
+        return StreamCallbacks{
+            .on_receive = [this](IStreamConnection* conn, const uint8_t* data, size_t len) {
+                on_receive(conn, data, len);
             },
-            .on_close = [this](TCB* tcb) {
-                on_close(tcb);
+            .on_close = [this](IStreamConnection* conn) {
+                on_close(conn);
             }
         };
     });
 }
 
-void HttpServer::on_connect(TCB* tcb) {
-    _connections[tcb] = ConnectionState{};
-    LOG_DEBUG(HTTP, "New connection");
-}
-
-void HttpServer::on_receive(TCB* tcb, const uint8_t* data, size_t len) {
-    auto it = _connections.find(tcb);
+void HttpServer::on_receive(IStreamConnection* conn, const uint8_t* data, size_t len) {
+    auto it = _connections.find(conn);
     if (it == _connections.end()) return;
 
     auto& state = it->second;
@@ -521,13 +594,13 @@ void HttpServer::on_receive(TCB* tcb, const uint8_t* data, size_t len) {
     while (state.parser.is_complete()) {
         HttpRequest request = state.parser.take_request();
 
-        LOG_INFO(HTTP, "%s %s",
+        LOG_INFO(APP, "HTTP: %s %s",
                  http_method_name(request.method),
                  request.path.c_str());
 
         // 检查 Keep-Alive
-        std::string conn = request.get_header("Connection");
-        state.keep_alive = (conn != "close");
+        std::string conn_header = request.get_header("Connection");
+        state.keep_alive = (conn_header != "close");
 
         // 分发并发送响应
         HttpResponse response = dispatch(request);
@@ -537,33 +610,33 @@ void HttpServer::on_receive(TCB* tcb, const uint8_t* data, size_t len) {
             response.set_header("Connection", "close");
         }
 
-        send_response(tcb, response);
+        send_response(conn, response);
 
         // 重置解析器以处理下一个请求
         state.parser.reset();
 
         // 非 Keep-Alive 则关闭连接
         if (!state.keep_alive) {
-            _tcp.close(tcb);
+            conn->close();
             break;
         }
     }
 
     if (state.parser.has_error()) {
-        LOG_WARN(HTTP, "Parse error: %s", state.parser.error().c_str());
+        LOG_WARN(APP, "HTTP: parse error: %s", state.parser.error().c_str());
 
         HttpResponse response;
         response.status = HttpStatus::BadRequest;
         response.set_body("Bad Request");
-        send_response(tcb, response);
+        send_response(conn, response);
 
-        _tcp.close(tcb);
+        conn->close();
     }
 }
 
-void HttpServer::on_close(TCB* tcb) {
-    _connections.erase(tcb);
-    LOG_DEBUG(HTTP, "Connection closed");
+void HttpServer::on_close(IStreamConnection* conn) {
+    _connections.erase(conn);
+    LOG_DEBUG(APP, "HTTP: connection closed");
 }
 
 HttpResponse HttpServer::dispatch(const HttpRequest& request) {
@@ -591,19 +664,7 @@ HttpResponse HttpServer::dispatch(const HttpRequest& request) {
 
             HttpResponse response;
             response.set_body(buffer.str());
-
-            // 简单的 MIME 类型推断
-            if (file_path.ends_with(".html")) {
-                response.content_type("text/html");
-            } else if (file_path.ends_with(".css")) {
-                response.content_type("text/css");
-            } else if (file_path.ends_with(".js")) {
-                response.content_type("application/javascript");
-            } else if (file_path.ends_with(".json")) {
-                response.content_type("application/json");
-            } else {
-                response.content_type("application/octet-stream");
-            }
+            response.content_type(get_mime_type(file_path));
 
             return response;
         }
@@ -621,79 +682,9 @@ HttpResponse HttpServer::dispatch(const HttpRequest& request) {
     return response;
 }
 
-void HttpServer::send_response(TCB* tcb, const HttpResponse& response) {
+void HttpServer::send_response(IStreamConnection* conn, const HttpResponse& response) {
     std::string data = response.serialize();
-    _tcp.send(tcb, reinterpret_cast<const uint8_t*>(data.data()), data.size());
-}
-
-// ========== 辅助函数实现 ==========
-
-std::string HttpResponse::serialize() const {
-    std::string result;
-
-    // 状态行
-    result += "HTTP/1.1 ";
-    result += std::to_string(static_cast<int>(status));
-    result += " ";
-    result += http_status_text(status);
-    result += "\r\n";
-
-    // 响应头
-    for (const auto& [key, value] : headers) {
-        result += key;
-        result += ": ";
-        result += value;
-        result += "\r\n";
-    }
-
-    // 空行
-    result += "\r\n";
-
-    // 响应体
-    result += body;
-
-    return result;
-}
-
-const char* neustack::http_method_name(HttpMethod method) {
-    switch (method) {
-        case HttpMethod::GET:     return "GET";
-        case HttpMethod::POST:    return "POST";
-        case HttpMethod::PUT:     return "PUT";
-        case HttpMethod::DELETE:  return "DELETE";
-        case HttpMethod::HEAD:    return "HEAD";
-        case HttpMethod::OPTIONS: return "OPTIONS";
-        default:                  return "UNKNOWN";
-    }
-}
-
-HttpMethod neustack::parse_http_method(const std::string& method) {
-    if (method == "GET")     return HttpMethod::GET;
-    if (method == "POST")    return HttpMethod::POST;
-    if (method == "PUT")     return HttpMethod::PUT;
-    if (method == "DELETE")  return HttpMethod::DELETE;
-    if (method == "HEAD")    return HttpMethod::HEAD;
-    if (method == "OPTIONS") return HttpMethod::OPTIONS;
-    return HttpMethod::UNKNOWN;
-}
-
-const char* neustack::http_status_text(HttpStatus status) {
-    switch (status) {
-        case HttpStatus::OK:                  return "OK";
-        case HttpStatus::Created:             return "Created";
-        case HttpStatus::NoContent:           return "No Content";
-        case HttpStatus::MovedPermanently:    return "Moved Permanently";
-        case HttpStatus::Found:               return "Found";
-        case HttpStatus::BadRequest:          return "Bad Request";
-        case HttpStatus::Unauthorized:        return "Unauthorized";
-        case HttpStatus::Forbidden:           return "Forbidden";
-        case HttpStatus::NotFound:            return "Not Found";
-        case HttpStatus::MethodNotAllowed:    return "Method Not Allowed";
-        case HttpStatus::InternalServerError: return "Internal Server Error";
-        case HttpStatus::NotImplemented:      return "Not Implemented";
-        case HttpStatus::ServiceUnavailable:  return "Service Unavailable";
-        default:                              return "Unknown";
-    }
+    conn->send(reinterpret_cast<const uint8_t*>(data.data()), data.size());
 }
 ```
 
@@ -707,6 +698,7 @@ const char* neustack::http_status_text(HttpStatus status) {
 int main() {
     // ... 初始化 HAL, IP, TCP ...
 
+    // tcp_layer 实现了 IStreamServer
     HttpServer http(tcp_layer);
 
     // 首页
@@ -738,11 +730,12 @@ int main() {
 
     // 自定义 404
     http.set_not_found_handler([](const HttpRequest& req) {
-        return HttpResponse()
-            .status = HttpStatus::NotFound,
-            .content_type("text/html")
-            .set_body("<h1>Page Not Found</h1>"
+        HttpResponse resp;
+        resp.status = HttpStatus::NotFound;
+        resp.content_type("text/html");
+        resp.set_body("<h1>Page Not Found</h1>"
                       "<p>The page " + req.path + " does not exist.</p>");
+        return resp;
     });
 
     http.listen(80);
@@ -796,5 +789,8 @@ open http://192.168.100.2/
 2. **路由系统**: 方法 + 路径匹配
 3. **Keep-Alive**: 连接复用
 4. **静态文件**: 简单文件服务
+5. **传输抽象**: 依赖 `IStreamServer` 接口，不绑定具体传输层
 
-下一教程我们将实现 DNS 客户端，让协议栈能够解析域名。
+HTTP 服务器通过 `IStreamServer` 抽象接口与传输层交互，可以无修改地运行在 TCP、TLS、QUIC 等不同传输层上。
+
+下一教程我们将实现 HTTP 客户端，让协议栈能够主动发起 HTTP 请求。

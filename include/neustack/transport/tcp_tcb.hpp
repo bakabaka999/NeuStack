@@ -9,8 +9,9 @@
 #include <chrono>
 #include <list>
 
-#include "tcp_state.hpp"
+#include "neustack/transport/tcp_state.hpp"
 #include "neustack/common/isn_generator.hpp"
+#include "neustack/common/ring_buffer.hpp"
 
 namespace neustack {
 
@@ -230,9 +231,11 @@ struct TCB {
     uint32_t dup_ack_count = 0;
     uint32_t last_ack_num = 0;
 
-    // ─── 缓冲区 ───
-    std::vector<uint8_t> send_buffer; // 待发送数据
-    std::vector<uint8_t> recv_buffer; // 已接收数据
+    // ─── 缓冲区(改用环形缓冲区) ───
+    // std::vector<uint8_t> send_buffer; // 待发送数据
+    // std::vector<uint8_t> recv_buffer; // 已接收数据
+    StreamBuffer send_buffer;
+    StreamBuffer recv_buffer;
 
     // ─── 回调函数 ───
     TCPConnectCallback on_connect;
@@ -252,6 +255,13 @@ struct TCB {
 
     // ─── 关闭相关 ───
     bool close_pending = false;  // 应用层已调用 close()，等缓冲区发完后发 FIN
+
+    // 构造时初始化
+    TCB()
+        : send_buffer(65536)   // 64KB 发送缓冲区
+        , recv_buffer(65536)   // 64KB 接收缓冲区
+    {}
+
 
     // ─── 辅助方法 ───
 
@@ -279,6 +289,8 @@ struct TCB {
 
     // 应用选项到 TCB
     void apply_options(const TCPOptions& opts) {
+        send_buffer = StreamBuffer(opts.send_buffer_size);
+        recv_buffer = StreamBuffer(opts.recv_buffer_size);
         options = opts;
         rto_us = opts.initial_rto_us;
         rcv_wnd = opts.recv_buffer_size;

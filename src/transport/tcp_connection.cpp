@@ -99,9 +99,7 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
     }
 
     // 检查发送缓冲区是否有空间
-    size_t buffer_space = tcb->options.send_buffer_size > tcb->send_buffer.size()
-                        ? tcb->options.send_buffer_size - tcb->send_buffer.size()
-                        : 0;
+    size_t buffer_space = tcb->send_buffer.available();
     if (buffer_space == 0) {
         LOG_WARN(TCP, "Send buffer full, cannot accept more data");
         return -1;  // 缓冲区已满，无法接受更多数据
@@ -115,7 +113,7 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
     // 关键：如果 send_buffer 已经有数据在排队，新数据必须追加到队尾
     // 否则会导致乱序发送！
     if (!tcb->send_buffer.empty()) {
-        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + accepted);
+        tcb->send_buffer.write(data, accepted);
         LOG_DEBUG(TCP, "Appended %zu bytes to existing buffer (%zu total)",
                   accepted, tcb->send_buffer.size());
         return static_cast<ssize_t>(accepted);
@@ -127,7 +125,7 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
         accepted < mss) {                 // 当前数据小于 MSS
 
         // 缓冲数据，等待 ACK 或凑够 MSS
-        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + accepted);
+        tcb->send_buffer.write(data, accepted);
         LOG_DEBUG(TCP, "Nagle: buffered %zu bytes", accepted);
         return static_cast<ssize_t>(accepted);
     }
@@ -141,7 +139,7 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
 
     if (available == 0) {
         // 窗口已满，将数据放入发送缓冲区等待
-        tcb->send_buffer.insert(tcb->send_buffer.end(), data, data + accepted);
+        tcb->send_buffer.write(data, accepted);
         LOG_DEBUG(TCP, "Window full, buffered %zu bytes", accepted);
         return static_cast<ssize_t>(accepted);
     }
@@ -154,8 +152,7 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
 
     // 剩余数据放入缓冲区
     if (to_send < accepted) {
-        tcb->send_buffer.insert(tcb->send_buffer.end(),
-                                data + to_send, data + accepted);
+        tcb->send_buffer.write(data + to_send, accepted - to_send);
     }
 
     LOG_DEBUG(TCP, "Sent %zu bytes, buffered %zu bytes", to_send, accepted - to_send);
@@ -1292,15 +1289,15 @@ void TCPConnectionManager::send_buffered_data(TCB *tcb) {
         }
 
         size_t mss = tcb->options.mss;
-        size_t to_send = std::min({tcb->send_buffer.size(),
+        auto span = tcb->send_buffer.peek_contiguous();
+        size_t to_send = std::min({span.len,
                                    static_cast<size_t>(available), mss});
 
         send_segment(tcb, TCPFlags::ACK | TCPFlags::PSH,
-                     tcb->send_buffer.data(), to_send);
+                     span.data, to_send);
 
         // 从缓冲区移除已发送的数据
-        tcb->send_buffer.erase(tcb->send_buffer.begin(),
-                               tcb->send_buffer.begin() + to_send);
+        tcb->send_buffer.consume(to_send);
 
         LOG_DEBUG(TCP, "Sent %zu bytes from buffer, %zu remaining",
                   to_send, tcb->send_buffer.size());
@@ -1335,7 +1332,8 @@ void TCPConnectionManager::send_zero_window_probe(TCB *tcb) {
     }
 
     // 取 send_buffer 的第一个字节，但不移除
-    uint8_t probe_byte = tcb->send_buffer[0];
+    uint8_t probe_byte = 0;
+    tcb->send_buffer.peek(&probe_byte, 1);
 
     // 手动构建探测包，不使用 send_segment
     // 因为零窗口探测不应该移动 snd_nxt，也不应该加入重传队列

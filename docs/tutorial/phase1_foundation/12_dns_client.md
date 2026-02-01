@@ -1,4 +1,4 @@
-# 教程 11: DNS 客户端实现
+# 教程 12: DNS 客户端实现
 
 ## 概述
 
@@ -7,6 +7,8 @@ DNS（Domain Name System）是互联网的"电话簿"，将人类可读的域名
 - 解析域名为 IP 地址
 - 理解 DNS 协议格式
 - 使用 UDP 进行查询
+
+结合上一教程的 HTTP 客户端，我们就能实现通过域名访问网站的完整功能。
 
 ## DNS 协议基础
 
@@ -183,13 +185,12 @@ using DNSCallback = std::function<void(std::optional<DNSResponse>)>;
 /**
  * DNS 客户端
  *
+ * 异步、非阻塞设计（符合单线程协议栈架构）
+ *
  * 使用示例:
  *   DNSClient dns(udp_handler, 0x08080808);  // Google DNS
+ *   dns.init();
  *
- *   // 同步查询
- *   auto ip = dns.resolve("www.example.com");
- *
- *   // 异步查询
  *   dns.resolve_async("www.example.com", [](auto response) {
  *       if (response) {
  *           auto ip = response->get_ip();
@@ -203,10 +204,6 @@ public:
 
     // 设置 DNS 服务器
     void set_server(uint32_t ip) { _dns_server = ip; }
-
-    // 同步解析（阻塞）
-    std::optional<uint32_t> resolve(const std::string& hostname,
-                                     std::chrono::milliseconds timeout = std::chrono::seconds(5));
 
     // 异步解析
     void resolve_async(const std::string& hostname, DNSCallback callback,
@@ -281,7 +278,8 @@ struct DNSHeader {
     uint16_t ancount;
     uint16_t nscount;
     uint16_t arcount;
-} __attribute__((packed));
+};
+static_assert(sizeof(DNSHeader) == 12, "DNSHeader must be 12 bytes");
 
 bool DNSClient::init() {
     // 随机选择一个本地端口
@@ -296,33 +294,6 @@ bool DNSClient::init() {
 
     LOG_INFO(DNS, "DNS client initialized, local port %u", _local_port);
     return true;
-}
-
-std::optional<uint32_t> DNSClient::resolve(const std::string& hostname,
-                                            std::chrono::milliseconds timeout) {
-    std::optional<uint32_t> result;
-    bool done = false;
-
-    resolve_async(hostname, [&](std::optional<DNSResponse> response) {
-        if (response) {
-            result = response->get_ip();
-        }
-        done = true;
-    });
-
-    // 等待响应
-    auto start = std::chrono::steady_clock::now();
-    while (!done) {
-        auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed > timeout) {
-            LOG_WARN(DNS, "Resolve timeout for %s", hostname.c_str());
-            break;
-        }
-        // 需要外部驱动 UDP 接收和定时器
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    return result;
 }
 
 void DNSClient::resolve_async(const std::string& hostname, DNSCallback callback,
@@ -644,36 +615,41 @@ int main() {
 
 ### 集成 HTTP 客户端
 
-```cpp
-void fetch_url(const std::string& url, DNSClient& dns, TCPLayer& tcp) {
-    // 解析 URL
-    auto host = parse_hostname(url);
+结合教程 11 的 `HttpClient`：
 
+```cpp
+void fetch_url(const std::string& hostname, DNSClient& dns, HttpClient& http) {
     // DNS 解析
-    dns.resolve_async(host, [&tcp, url](auto response) {
+    dns.resolve_async(hostname, [&http, hostname](auto response) {
         if (!response) {
-            printf("DNS failed\n");
+            printf("DNS lookup failed\n");
             return;
         }
 
         auto ip = response->get_ip();
         if (!ip) {
-            printf("No A record\n");
+            printf("No A record found\n");
             return;
         }
 
-        // 建立 TCP 连接
-        tcp.connect(*ip, 80, [url](TCB* tcb, int error) {
-            if (error) return;
+        printf("Resolved %s -> %s\n", hostname.c_str(), ip_to_string(*ip).c_str());
 
-            // 发送 HTTP 请求
-            std::string request = "GET / HTTP/1.1\r\n"
-                                  "Host: " + parse_hostname(url) + "\r\n"
-                                  "\r\n";
-            tcp_layer.send(tcb, request.data(), request.size());
+        // 使用 HttpClient 发起请求
+        http.set_default_host(hostname);
+        http.get(*ip, 80, "/", [](const HttpResponse& resp, int error) {
+            if (error != 0) {
+                printf("HTTP request failed: %d\n", error);
+                return;
+            }
+
+            printf("HTTP %d, body: %zu bytes\n",
+                   static_cast<int>(resp.status), resp.body.size());
         });
     });
 }
+
+// 使用
+fetch_url("www.example.com", dns, http);
 ```
 
 ## 测试

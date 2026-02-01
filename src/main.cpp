@@ -1,6 +1,13 @@
 /**
  * @file main.cpp
- * @brief NeuStack - User-space TCP/IP Stack
+ * @brief NeuStack Demo Application
+ *
+ * 演示 NeuStack 用户态协议栈的完整功能：
+ * - ICMP: ping 响应
+ * - UDP:  Echo 服务
+ * - TCP:  Echo 服务
+ * - HTTP: Web 服务器
+ * - DNS:  域名解析客户端
  */
 
 #include "neustack/hal/device.hpp"
@@ -8,6 +15,9 @@
 #include "neustack/net/icmp.hpp"
 #include "neustack/transport/udp.hpp"
 #include "neustack/transport/tcp_layer.hpp"
+#include "neustack/app/http_server.hpp"
+#include "neustack/app/http_client.hpp"
+#include "neustack/app/dns_client.hpp"
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/common/log.hpp"
 
@@ -16,190 +26,351 @@
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
+#include <poll.h>
+#include <unistd.h>
 
 using namespace neustack;
 
-static volatile bool running = true;
+// ============================================================================
+// 全局状态
+// ============================================================================
 
-void signal_handler(int) {
-    running = false;
+static volatile bool g_running = true;
+
+static void signal_handler(int) {
+    g_running = false;
+}
+
+// ============================================================================
+// 命令行参数
+// ============================================================================
+
+struct Config {
+    uint32_t local_ip = 0;
+    uint32_t dns_server = 0x08080808;  // 8.8.8.8
+    LogLevel log_level = LogLevel::INFO;
+    bool color = true;
+    bool timestamp = true;
+};
+
+static void print_usage(const char *prog) {
+    std::printf("NeuStack - User-space TCP/IP Stack Demo\n\n");
+    std::printf("Usage: %s [options]\n\n", prog);
+    std::printf("Options:\n");
+    std::printf("  --ip <addr>     Local IP address (default: 192.168.100.2)\n");
+    std::printf("  --dns <addr>    DNS server (default: 8.8.8.8)\n");
+    std::printf("  -v              Verbose (DEBUG level)\n");
+    std::printf("  -vv             Very verbose (TRACE level)\n");
+    std::printf("  -q              Quiet (WARN level)\n");
+    std::printf("  --no-color      Disable colored output\n");
+    std::printf("  --no-time       Disable timestamps\n");
+    std::printf("  -h, --help      Show this help\n");
+}
+
+static bool parse_args(int argc, char *argv[], Config &cfg) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--ip") == 0 && i + 1 < argc) {
+            cfg.local_ip = ip_from_string(argv[++i]);
+        } else if (std::strcmp(argv[i], "--dns") == 0 && i + 1 < argc) {
+            cfg.dns_server = ip_from_string(argv[++i]);
+        } else if (std::strcmp(argv[i], "-v") == 0) {
+            cfg.log_level = LogLevel::DEBUG;
+        } else if (std::strcmp(argv[i], "-vv") == 0) {
+            cfg.log_level = LogLevel::TRACE;
+        } else if (std::strcmp(argv[i], "-q") == 0) {
+            cfg.log_level = LogLevel::WARN;
+        } else if (std::strcmp(argv[i], "--no-color") == 0) {
+            cfg.color = false;
+        } else if (std::strcmp(argv[i], "--no-time") == 0) {
+            cfg.timestamp = false;
+        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
+            print_usage(argv[0]);
+            return false;
+        }
+    }
+
+    if (cfg.local_ip == 0) {
+        cfg.local_ip = ip_from_string("192.168.100.2");
+    }
+
+    return true;
+}
+
+// ============================================================================
+// 服务设置
+// ============================================================================
+
+static void setup_udp_echo(UDPLayer &udp) {
+    udp.bind(7, [&udp](uint32_t src_ip, uint16_t src_port,
+                        const uint8_t *data, size_t len) {
+        LOG_DEBUG(UDP, "echo %s:%u -> %zu bytes",
+                  ip_to_string(src_ip).c_str(), src_port, len);
+        udp.sendto(src_ip, src_port, 7, data, len);
+    });
+    LOG_INFO(UDP, "echo service on port 7");
+}
+
+static void setup_tcp_echo(TCPLayer &tcp) {
+    tcp.listen(7, [](IStreamConnection *conn) -> StreamCallbacks {
+        LOG_DEBUG(TCP, "echo connection from %s:%u",
+                  ip_to_string(conn->remote_ip()).c_str(), conn->remote_port());
+        return StreamCallbacks{
+            .on_receive = [](IStreamConnection *conn, const uint8_t *data, size_t len) {
+                conn->send(data, len);
+            },
+            .on_close = [](IStreamConnection *conn) {
+                conn->close();
+            }
+        };
+    });
+    LOG_INFO(TCP, "echo service on port 7");
+}
+
+static void setup_http_server(HttpServer &server, uint32_t local_ip) {
+    // 首页
+    server.get("/", [](const HttpRequest &req) {
+        return HttpResponse()
+            .content_type("text/html")
+            .set_body(
+                "<!DOCTYPE html>\n"
+                "<html><head><title>NeuStack</title></head>\n"
+                "<body>\n"
+                "<h1>Welcome to NeuStack!</h1>\n"
+                "<p>A high-performance user-space TCP/IP stack.</p>\n"
+                "<h2>API Endpoints</h2>\n"
+                "<ul>\n"
+                "  <li><a href=\"/api/status\">/api/status</a> - Stack status</li>\n"
+                "  <li><a href=\"/api/info\">/api/info</a> - Stack info</li>\n"
+                "  <li>POST /api/echo - Echo request body</li>\n"
+                "  <li>POST /api/dns?host=xxx - DNS lookup</li>\n"
+                "</ul>\n"
+                "</body></html>\n"
+            );
+    });
+
+    // 状态 API
+    server.get("/api/status", [](const HttpRequest &req) {
+        return HttpResponse()
+            .content_type("application/json")
+            .set_body(R"({"status":"running","version":"0.1.0"})");
+    });
+
+    // 信息 API
+    server.get("/api/info", [local_ip](const HttpRequest &req) {
+        std::string json = R"({"local_ip":")" + ip_to_string(local_ip) + R"(",)";
+        json += R"("services":["icmp","udp-echo:7","tcp-echo:7","http:80","dns-client"]})";
+        return HttpResponse()
+            .content_type("application/json")
+            .set_body(json);
+    });
+
+    // Echo API
+    server.post("/api/echo", [](const HttpRequest &req) {
+        return HttpResponse()
+            .content_type(req.get_header("Content-Type"))
+            .set_body(req.body);
+    });
+
+    server.listen(80);
+    LOG_INFO(HTTP, "server on port 80");
+}
+
+// ============================================================================
+// 交互式命令处理
+// ============================================================================
+
+static void print_help() {
+    std::printf("\nCommands:\n");
+    std::printf("  d <hostname>  - DNS lookup (e.g., d www.google.com)\n");
+    std::printf("  g <ip> <path> - HTTP GET (e.g., g 192.168.100.1 /)\n");
+    std::printf("  h             - Show this help\n");
+    std::printf("  q             - Quit\n\n");
+}
+
+static void handle_command(const std::string &line, DNSClient &dns, HttpClient &http) {
+    if (line.empty()) return;
+
+    if (line[0] == 'd' && line.size() > 2) {
+        // DNS lookup: d hostname
+        std::string hostname = line.substr(2);
+        LOG_INFO(DNS, "resolving %s...", hostname.c_str());
+        dns.resolve_async(hostname, [hostname](std::optional<DNSResponse> resp) {
+            if (!resp) {
+                LOG_WARN(DNS, "%s: lookup failed", hostname.c_str());
+                return;
+            }
+            if (resp->rcode != DNSRcode::NoError) {
+                LOG_WARN(DNS, "%s: error code %d", hostname.c_str(), static_cast<int>(resp->rcode));
+                return;
+            }
+            auto ip = resp->get_ip();
+            if (ip) {
+                LOG_INFO(DNS, "%s -> %s", hostname.c_str(), ip_to_string(*ip).c_str());
+            } else {
+                LOG_WARN(DNS, "%s: no A record", hostname.c_str());
+            }
+        });
+    } else if (line[0] == 'g' && line.size() > 2) {
+        // HTTP GET: g ip path
+        auto space = line.find(' ', 2);
+        if (space == std::string::npos) {
+            std::printf("Usage: g <ip> <path>\n");
+            return;
+        }
+        std::string ip_str = line.substr(2, space - 2);
+        std::string path = line.substr(space + 1);
+        uint32_t ip = ip_from_string(ip_str.c_str());
+
+        LOG_INFO(HTTP, "GET http://%s%s", ip_str.c_str(), path.c_str());
+        http.get(ip, 80, path, [](const HttpResponse &resp, int error) {
+            if (error != 0) {
+                LOG_WARN(HTTP, "request failed: %d", error);
+                return;
+            }
+            LOG_INFO(HTTP, "response: %d %s (%zu bytes)",
+                     static_cast<int>(resp.status),
+                     http_status_text(resp.status),
+                     resp.body.size());
+            if (!resp.body.empty() && resp.body.size() < 500) {
+                std::printf("%s\n", resp.body.c_str());
+            }
+        });
+    } else if (line[0] == 'h') {
+        print_help();
+    } else if (line[0] == 'q') {
+        g_running = false;
+    } else {
+        std::printf("Unknown command. Type 'h' for help.\n");
+    }
+}
+
+// ============================================================================
+// 主循环
+// ============================================================================
+
+static void run_event_loop(NetDevice &device, IPv4Layer &ip_layer,
+                           TCPLayer &tcp_layer, DNSClient &dns,
+                           HttpClient &http) {
+    uint8_t buf[2048];
+    std::string cmd_buf;
+    auto last_timer = std::chrono::steady_clock::now();
+    constexpr auto TIMER_INTERVAL = std::chrono::milliseconds(100);
+
+    while (g_running) {
+        // 收包
+        ssize_t n = device.recv(buf, sizeof(buf), 100);
+        if (n > 0) {
+            ip_layer.on_receive(buf, n);
+        } else if (n < 0 && errno != EINTR) {
+            LOG_ERROR(HAL, "recv: %s", std::strerror(errno));
+            break;
+        }
+
+        // 定时器
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_timer >= TIMER_INTERVAL) {
+            tcp_layer.on_timer();
+            dns.on_timer();
+            last_timer = now;
+        }
+
+        // 键盘输入
+        struct pollfd pfd = {STDIN_FILENO, POLLIN, 0};
+        if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+            char ch;
+            if (::read(STDIN_FILENO, &ch, 1) == 1) {
+                if (ch == '\n') {
+                    handle_command(cmd_buf, dns, http);
+                    cmd_buf.clear();
+                } else {
+                    cmd_buf += ch;
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
 // Main
 // ============================================================================
 
-static void print_usage(const char* prog) {
-    std::printf("Usage: %s [options]\n", prog);
-    std::printf("Options:\n");
-    std::printf("  -v          Verbose (DEBUG level)\n");
-    std::printf("  -vv         Very verbose (TRACE level)\n");
-    std::printf("  -q          Quiet (WARN level)\n");
-    std::printf("  --no-color  Disable colored output\n");
-    std::printf("  --no-time   Disable timestamps\n");
-}
-
-int main(int argc, char* argv[]) {
-    // 解析命令行参数
-    auto& logger = Logger::instance();
-
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "-v") == 0) {
-            logger.set_level(LogLevel::DEBUG);
-        } else if (std::strcmp(argv[i], "-vv") == 0) {
-            logger.set_level(LogLevel::TRACE);
-        } else if (std::strcmp(argv[i], "-q") == 0) {
-            logger.set_level(LogLevel::WARN);
-        } else if (std::strcmp(argv[i], "--no-color") == 0) {
-            logger.set_color(false);
-        } else if (std::strcmp(argv[i], "--no-time") == 0) {
-            logger.set_timestamp(false);
-        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
-            print_usage(argv[0]);
-            return EXIT_SUCCESS;
-        }
+int main(int argc, char *argv[]) {
+    Config cfg;
+    if (!parse_args(argc, argv, cfg)) {
+        return EXIT_SUCCESS;
     }
 
-    LOG_INFO(APP, "NeuStack v0.1.0 starting");
+    // 配置日志
+    auto &logger = Logger::instance();
+    logger.set_level(cfg.log_level);
+    logger.set_color(cfg.color);
+    logger.set_timestamp(cfg.timestamp);
 
-    // 注册信号处理
+    LOG_INFO(APP, "NeuStack v0.1.0");
+
+    // 信号处理
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    // 创建设备
+    // ─── HAL 层 ───
     auto device = NetDevice::create();
-    if (!device) {
-        LOG_FATAL(HAL, "failed to create device");
+    if (!device || device->open() < 0) {
+        LOG_FATAL(HAL, "failed to open device");
         return EXIT_FAILURE;
     }
+    LOG_INFO(HAL, "device: %s", device->get_name().c_str());
 
-    // 打开设备
-    if (device->open() < 0) {
-        LOG_FATAL(HAL, "failed to open device (need sudo?)");
-        return EXIT_FAILURE;
-    }
-
-    LOG_INFO(HAL, "device %s opened (fd=%d)", device->get_name().c_str(), device->get_fd());
-
-    // 创建 IPv4 层
+    // ─── 网络层 ───
     IPv4Layer ip_layer(*device);
-    uint32_t local_ip = ip_from_string("192.168.100.2");
-    ip_layer.set_local_ip(local_ip);
+    ip_layer.set_local_ip(cfg.local_ip);
 
-    // 创建 ICMP 处理器并注册到 IPv4 层
-    ICMPHandler icmp_handler(ip_layer);
-    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::ICMP), &icmp_handler);
+    ICMPHandler icmp(ip_layer);
+    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::ICMP), &icmp);
 
-    // 创建 UDP 层并注册到 IPv4 层
-    UDPLayer udp_layer(ip_layer);
-    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::UDP), &udp_layer);
+    // ─── 传输层 ───
+    UDPLayer udp(ip_layer);
+    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::UDP), &udp);
 
-    // 创建 TCP 层并注册到 IPv4 层
-    TCPLayer tcp_layer(ip_layer, local_ip);
-    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::TCP), &tcp_layer);
+    TCPLayer tcp(ip_layer, cfg.local_ip);
+    tcp.set_default_options(TCPOptions::interactive());
+    ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::TCP), &tcp);
 
-    // 设置 TCP 默认选项（交互式应用：禁用 Nagle，启用延迟 ACK）
-    tcp_layer.set_default_options(TCPOptions::interactive());
+    // ─── 应用层 ───
+    setup_udp_echo(udp);
+    setup_tcp_echo(tcp);
 
-    // ─── UDP Echo 服务 (端口 7) ───
-    uint16_t echo_port = udp_layer.bind(7, [&udp_layer](uint32_t src_ip, uint16_t src_port,
-                                                         const uint8_t *data, size_t len) {
-        LOG_INFO(UDP, "echo: received %zu bytes from %s:%u",
-                 len, ip_to_string(src_ip).c_str(), src_port);
-        LOG_HEXDUMP(UDP, DEBUG, data, len);
-        udp_layer.sendto(src_ip, src_port, 7, data, len);
-        LOG_DEBUG(UDP, "echo: sent %zu bytes back", len);
-    });
+    HttpServer http_server(tcp);
+    setup_http_server(http_server, cfg.local_ip);
 
-    if (echo_port == 0) {
-        LOG_FATAL(UDP, "failed to bind UDP echo port");
-        return EXIT_FAILURE;
-    }
+    HttpClient http_client(tcp);
 
-    // ─── TCP Echo 服务 (端口 7) ───
-    int tcp_listen_result = tcp_layer.listen(7, [&tcp_layer](TCB* tcb) -> TCPCallbacks {
-        LOG_INFO(TCP, "New TCP connection from %s:%u",
-                 ip_to_string(tcb->t_tuple.remote_ip).c_str(),
-                 tcb->t_tuple.remote_port);
+    DNSClient dns(udp, cfg.dns_server);
+    dns.init();
 
-        return TCPCallbacks{
-            // on_receive: echo 收到的数据
-            .on_receive = [&tcp_layer](TCB* tcb, const uint8_t* data, size_t len) {
-                LOG_INFO(TCP, "echo: received %zu bytes, sending back", len);
-                tcp_layer.send(tcb, data, len);
-            },
-            // on_close: 对方关闭连接，我们也关闭
-            .on_close = [&tcp_layer](TCB* tcb) {
-                LOG_INFO(TCP, "echo: peer closed, closing our side");
-                tcp_layer.close(tcb);
-            }
-        };
-    });
+    // ─── 启动信息 ───
+    LOG_INFO(APP, "local IP: %s", ip_to_string(cfg.local_ip).c_str());
+    LOG_INFO(APP, "DNS server: %s", ip_to_string(cfg.dns_server).c_str());
 
-    if (tcp_listen_result < 0) {
-        LOG_FATAL(TCP, "failed to listen on TCP port 7");
-        return EXIT_FAILURE;
-    }
-
-    LOG_INFO(APP, "local IP: %s", ip_to_string(local_ip).c_str());
-    LOG_INFO(UDP, "UDP echo service on port %u", echo_port);
-    LOG_INFO(TCP, "TCP echo service on port 7");
-
-    // 配置提示
-    std::printf("\nConfigure interface in another terminal:\n");
-    std::printf("  sudo ifconfig %s 192.168.100.1 192.168.100.2 up\n\n",
-        device->get_name().c_str());
-    std::printf("Test with:\n");
+    std::printf("\n");
+    std::printf("Setup (in another terminal):\n");
+    std::printf("  sudo ifconfig %s 192.168.100.1 192.168.100.2 up\n",
+                device->get_name().c_str());
+    std::printf("\n");
+    std::printf("Test:\n");
     std::printf("  ping 192.168.100.2\n");
-    std::printf("  echo 'Hello' | nc -u 192.168.100.2 7    # UDP echo\n");
-    std::printf("  nc 192.168.100.2 7                      # TCP echo (interactive)\n");
-    std::printf("  nc -v 192.168.100.2 7                   # TCP with verbose\n\n");
+    std::printf("  curl http://192.168.100.2/\n");
+    std::printf("  curl http://192.168.100.2/api/status\n");
+    std::printf("\n");
+    std::printf("For DNS (requires forwarding from host):\n");
+    std::printf("  # Terminal 2: socat UDP4-LISTEN:53,bind=192.168.100.1,fork UDP4:8.8.8.8:53\n");
+    std::printf("  # Then run with: ./neustack --dns 192.168.100.1\n");
+    std::printf("\n");
+    print_help();
 
-    // 主循环
-    uint8_t buf[2048];
-    int pkt_count = 0;
-    auto last_timer = std::chrono::steady_clock::now();
-    constexpr auto TIMER_INTERVAL = std::chrono::milliseconds(100);
+    // ─── 主循环 ───
+    run_event_loop(*device, ip_layer, tcp, dns, http_client);
 
-    while (running) {
-        ssize_t n = device->recv(buf, sizeof(buf), 100);  // 100ms 超时
-
-        if (n > 0) {
-            pkt_count++;
-
-            auto pkt = IPv4Parser::parse(buf, n);
-            if (pkt) {
-                LOG_DEBUG(IPv4, "[#%d] %s -> %s, proto=%u, len=%u",
-                    pkt_count,
-                    ip_to_string(pkt->src_addr).c_str(),
-                    ip_to_string(pkt->dst_addr).c_str(),
-                    pkt->protocol,
-                    pkt->total_length);
-
-                LOG_HEXDUMP(IPv4, TRACE, pkt->payload,
-                    pkt->payload_length > 64 ? 64 : pkt->payload_length);
-
-                ip_layer.on_receive(buf, n);
-            } else {
-                LOG_WARN(IPv4, "[#%d] invalid packet (%zd bytes)", pkt_count, n);
-            }
-        } else if (n < 0) {
-            if (errno == EINTR) {
-                continue;  // 被信号中断，继续循环（running 会被设为 false）
-            }
-            LOG_ERROR(HAL, "recv error: %s", std::strerror(errno));
-            break;
-        }
-
-        // 定时器处理
-        auto now = std::chrono::steady_clock::now();
-        if (now - last_timer >= TIMER_INTERVAL) {
-            tcp_layer.on_timer();
-            last_timer = now;
-        }
-    }
-
-    LOG_INFO(APP, "shutting down, total packets: %d", pkt_count);
+    LOG_INFO(APP, "shutdown");
     device->close();
 
     return EXIT_SUCCESS;

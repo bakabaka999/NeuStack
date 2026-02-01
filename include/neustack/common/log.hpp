@@ -35,7 +35,9 @@ enum class LogModule : uint8_t {
     ARP  = 3,
     UDP  = 4,
     TCP  = 5,
-    APP  = 6,
+    HTTP = 6,
+    DNS  = 7,
+    APP  = 8,
     MAX_MODULES
 };
 
@@ -224,13 +226,25 @@ private:
 
     static const char* module_color(LogModule module) {
         switch (module) {
-            case LogModule::HAL:  return "\033[35m";  // Magenta
+            // 物理层/链路层 (深灰/白)：像背景一样，平时不关注，只看状态
+            case LogModule::HAL:  return "\033[90m";  // Gray (Bright Black)
+
+            // 网络层 (青色/蓝色系)：核心基础设施
+            case LogModule::ARP:  return "\033[36m";  // Cyan
             case LogModule::IPv4: return "\033[34m";  // Blue
-            case LogModule::ICMP: return "\033[36m";  // Cyan
-            case LogModule::ARP:  return "\033[33m";  // Yellow
-            case LogModule::UDP:  return "\033[32m";  // Green
-            case LogModule::TCP:  return "\033[31m";  // Red
-            case LogModule::APP:  return "\033[37m";  // White
+            case LogModule::ICMP: return "\033[96m";  // Bright Cyan (与IPv4区分)
+
+            // 传输层 (鲜艳的对比色)：这是你最常调试的“修罗场”
+            case LogModule::UDP:  return "\033[32m";  // Green (UDP通常简单、快速)
+            case LogModule::TCP:  return "\033[31m";  // Red (TCP逻辑最重，红色醒目)
+
+            // 应用层协议 (高亮度色系)：业务逻辑
+            case LogModule::DNS:  return "\033[33m";  // Yellow (查询类，用黄色)
+            case LogModule::HTTP: return "\033[35m";  // Magenta (HTTP报文通常很长)
+
+            // 顶层应用 (纯白或加粗)：你写的业务逻辑
+            case LogModule::APP:  return "\033[1;37m"; // Bold White (最显眼)
+
             default: return RESET;
         }
     }
@@ -243,6 +257,8 @@ private:
             case LogModule::ARP:  return "ARP ";
             case LogModule::UDP:  return "UDP ";
             case LogModule::TCP:  return "TCP ";
+            case LogModule::HTTP: return "HTTP";
+            case LogModule::DNS:  return "DNS ";
             case LogModule::APP:  return "APP ";
             default: return "????";
         }

@@ -3,33 +3,46 @@
 
 #include "neustack/net/ipv4.hpp"
 #include "neustack/net/protocol_handler.hpp"
+#include "neustack/transport/stream.hpp"
 #include "neustack/transport/tcp_connection.hpp"
 #include "neustack/transport/tcp_segment.hpp"
+#include "neustack/common/ring_buffer.hpp"
+#include "neustack/common/spsc_queue.hpp"
+#include "neustack/ai/intelligence_plane.hpp"
 
 #include <memory>
 
 namespace neustack {
 
 // ============================================================================
-// TCP 监听器回调
+// TCPStreamConnection - TCP 连接的 IStreamConnection 适配器
 // ============================================================================
 
-// 新连接回调：返回该连接的数据接收和关闭回调
-struct TCPCallbacks {
-    TCPReceiveCallback on_receive;
-    TCPCloseCallback on_close;
-};
+class TCPLayer;  // 前向声明
 
-// 接受新连接时的回调
-// 参数：tcb - 新连接
-// 返回：该连接的回调函数
-using TCPAcceptCallback = std::function<TCPCallbacks(TCB *tcb)>;
+class TCPStreamConnection : public IStreamConnection {
+public:
+    TCPStreamConnection(TCPLayer &layer, TCB *tcb) : _layer(layer), _tcb(tcb) {}
+
+    ssize_t send(const uint8_t *data, size_t len) override;
+    void close() override;
+
+    uint32_t remote_ip() const override;
+    uint16_t remote_port() const override;
+
+    // 获取底层 TCB（内部使用）
+    TCB *tcb() const { return _tcb; }
+
+private:
+    TCPLayer &_layer;
+    TCB *_tcb;
+};
 
 // ============================================================================
 // TCPLayer - TCP 传输层
 // ============================================================================
 
-class TCPLayer : public IProtocolHandler {
+class TCPLayer : public IProtocolHandler, public IStreamServer, public IStreamClient {
 public:
     /**
      * @brief 构造 TCP 层
@@ -52,7 +65,7 @@ public:
      */
     void on_timer();
 
-    // ─── 服务器 API ───
+    // ─── IStreamServer 接口 ───
 
     /**
      * @brief 监听端口
@@ -60,18 +73,28 @@ public:
      * @param on_accept 新连接回调
      * @return 0 成功，-1 失败
      */
-    int listen(uint16_t port, TCPAcceptCallback on_accept);
+    int listen(uint16_t port, StreamAcceptCallback on_accept) override;
 
     /**
      * @brief 停止监听
      * @param port 端口号
      */
-    void unlisten(uint16_t port);
+    void unlisten(uint16_t port) override;
 
     // ─── 客户端 API ───
 
     /**
-     * @brief 连接远程主机
+     * @brief 连接远程主机 (IStreamClient 接口)
+     */
+    int connect(uint32_t remote_ip, uint16_t remote_port,
+                IStreamClient::ConnectCallback on_connect,
+                std::function<void(IStreamConnection *, const uint8_t *, size_t)> on_receive,
+                std::function<void(IStreamConnection *)> on_close) override {
+        return connect(remote_ip, remote_port, 0, on_connect, on_receive, on_close);
+    }
+
+    /**
+     * @brief 连接远程主机（指定本地端口）
      * @param remote_ip 远程 IP
      * @param remote_port 远程端口
      * @param local_port 本地端口（0 = 自动分配）
@@ -81,27 +104,9 @@ public:
      * @return 0 成功（异步），-1 失败
      */
     int connect(uint32_t remote_ip, uint16_t remote_port, uint16_t local_port,
-                TCPConnectCallback on_connect,
-                TCPReceiveCallback on_receive,
-                TCPCloseCallback on_close);
-
-    // ─── 数据传输 API ───
-
-    /**
-     * @brief 发送数据
-     * @param tcb 连接
-     * @param data 数据
-     * @param len 长度
-     * @return 发送的字节数，-1 失败
-     */
-    ssize_t send(TCB *tcb, const uint8_t *data, size_t len);
-
-    /**
-     * @brief 关闭连接
-     * @param tcb 连接
-     * @return 0 成功，-1 失败
-     */
-    int close(TCB *tcb);
+                IStreamClient::ConnectCallback on_connect,
+                std::function<void(IStreamConnection *, const uint8_t *, size_t)> on_receive,
+                std::function<void(IStreamConnection *)> on_close);
 
     // ─── 连接配置 API ───
 
@@ -119,24 +124,75 @@ public:
      */
     const TCPOptions &default_options() const { return _default_options; }
 
-    /**
-     * @brief 设置单个连接的选项
-     * @param tcb 连接
-     * @param opts 选项
-     */
-    static void set_options(TCB *tcb, const TCPOptions &opts) { tcb->apply_options(opts); }
-
 private:
+    friend class TCPStreamConnection;  // 允许访问 _tcp_mgr
+
     IPv4Layer &_ip_layer;
     TCPConnectionManager _tcp_mgr;
     TCPOptions _default_options;
 
-    // 监听回调表
-    std::unordered_map<uint16_t, TCPAcceptCallback> _accept_callbacks;
+    // Stream 接口的回调和连接管理
+    std::unordered_map<uint16_t, StreamAcceptCallback> _accept_callbacks;
+    std::unordered_map<TCB *, std::unique_ptr<TCPStreamConnection>> _connections;
+    std::unordered_map<TCB *, StreamCallbacks> _callbacks;
+
+    // 内部：通过 TCB 查找或创建 TCPStreamConnection
+    TCPStreamConnection *get_or_create_connection(TCB *tcb);
+    void remove_connection(TCB *tcb);
 
     // 临时端口分配
     uint16_t _next_ephemeral_port = 49152;
     uint16_t allocate_ephemeral_port();
+
+    // AI 相关的字段与方法
+    // ─── AI 通信通道 ───
+    MetricsBuffer<TCPSample, 1024> _metrics_buf; // → 智能面
+    SPSCQueue<AIAction, 16> _action_queue;       // ← 智能面
+
+    // ─── 智能面线程 (用 unique_ptr 延迟初始化) ───
+    std::unique_ptr<IntelligencePlane> _ai;
+
+    // 启动智能面
+    void start_ai() {
+        _ai = std::make_unique<IntelligencePlane>(_metrics_buf, _action_queue);
+        _ai->start();
+    }
+
+    // 停止智能面
+    void stop_ai() {
+        if (_ai) {
+            _ai->stop();
+            _ai.reset();
+        }
+    }
+
+    // 在事件循环中检查 AI 决策
+    void process_ai_actions() {
+        AIAction action;
+        while (_action_queue.try_pop(action)) {
+            switch (action.type) {
+                case AIAction::Type::CWND_ADJUST:
+                    apply_cwnd_action(action);
+                    break;
+                case AIAction::Type::ANOMALY_ALERT:
+                    handle_anomaly(action);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    // AI 动作处理 (待实现)
+    void apply_cwnd_action(const AIAction& action) {
+        // TODO: 根据 action.conn_id 找到对应 TCB，调整 cwnd
+        (void)action;
+    }
+
+    void handle_anomaly(const AIAction& action) {
+        // TODO: 记录日志，触发告警
+        (void)action;
+    }
 };
 
 } // namespace neustack
