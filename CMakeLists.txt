@@ -83,6 +83,15 @@ set(TRANSPORT_SOURCES
     src/transport/tcp_layer.cpp
 )
 
+# Application layer sources
+set(APP_SOURCES
+    src/app/http_types.cpp
+    src/app/http_parser.cpp
+    src/app/http_server.cpp
+    src/app/http_client.cpp
+    src/app/dns_client.cpp
+)
+
 # Platform-specific HAL sources
 if(NEUSTACK_PLATFORM_MACOS)
     set(HAL_SOURCES
@@ -120,6 +129,7 @@ add_library(neustack_lib STATIC
     ${COMMON_SOURCES}
     ${NET_SOURCES}
     ${TRANSPORT_SOURCES}
+    ${APP_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
 )
