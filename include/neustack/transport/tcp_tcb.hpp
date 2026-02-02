@@ -256,6 +256,14 @@ struct TCB {
     // ─── 关闭相关 ───
     bool close_pending = false;  // 应用层已调用 close()，等缓冲区发完后发 FIN
 
+    // ─── AI 指标采集 ───
+    uint32_t min_rtt_us = 0;                  // 历史最小 RTT (基线延迟)
+    uint64_t last_sample_time_us = 0;         // 上次采样时间
+    uint16_t packets_sent_period = 0;         // 本采样周期发送的包数
+    uint16_t packets_lost_period = 0;         // 本采样周期丢失的包数 (重传)
+    uint8_t  ecn_ce_period = 0;               // 本采样周期 ECN CE 标记数
+    static constexpr uint64_t SAMPLE_INTERVAL_US = 10000;  // 采样间隔 10ms
+
     // 构造时初始化
     TCB()
         : send_buffer(65536)   // 64KB 发送缓冲区

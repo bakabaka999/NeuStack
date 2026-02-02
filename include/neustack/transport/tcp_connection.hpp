@@ -5,6 +5,9 @@
 #include "neustack/transport/tcp_segment.hpp"
 #include "neustack/transport/tcp_builder.hpp"
 #include "neustack/transport/tcp_seq.hpp"
+#include "neustack/common/ring_buffer.hpp"
+#include "neustack/metrics/tcp_sample.hpp"
+#include "neustack/metrics/global_metrics.hpp"
 
 #include <unordered_map>
 #include <functional>
@@ -34,6 +37,9 @@ public:
     void set_send_callback(TCPSendCallback cb) { _send_cb = std::move(cb); }
     void set_default_options(const TCPOptions &opts) { _default_options = opts; }
     const TCPOptions &default_options() const { return _default_options; }
+
+    // AI 指标采集：设置采样缓冲区 (由 TCPLayer 调用)
+    void set_metrics_buffer(MetricsBuffer<TCPSample, 1024>* buf) { _metrics_buf = buf; }
 
     // 检查本地端口是否已被使用
     bool is_port_in_use(uint16_t port) const;
@@ -138,6 +144,9 @@ private:
     uint32_t _local_ip;
     TCPSendCallback _send_cb;
     TCPOptions _default_options;
+
+    // ─── AI 指标采集 ───
+    MetricsBuffer<TCPSample, 1024>* _metrics_buf = nullptr;
 
 private:
     // ─── 连接表 ───

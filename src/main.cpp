@@ -20,8 +20,10 @@
 #include "neustack/app/dns_client.hpp"
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/common/log.hpp"
+#include "neustack/metrics/global_metrics.hpp"
 
 #include <csignal>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -183,6 +185,7 @@ static void print_help() {
     std::printf("\nCommands:\n");
     std::printf("  d <hostname>  - DNS lookup (e.g., d www.google.com)\n");
     std::printf("  g <ip> <path> - HTTP GET (e.g., g 192.168.100.1 /)\n");
+    std::printf("  m             - Show AI metrics\n");
     std::printf("  h             - Show this help\n");
     std::printf("  q             - Quit\n\n");
 }
@@ -235,6 +238,21 @@ static void handle_command(const std::string &line, DNSClient &dns, HttpClient &
                 std::printf("%s\n", resp.body.c_str());
             }
         });
+    } else if (line[0] == 'm') {
+        // 打印 AI 指标采集状态
+        auto snap = global_metrics().snapshot();
+        std::printf("\n=== Global Metrics ===\n");
+        std::printf("  packets_rx:       %" PRIu64 "\n", snap.packets_rx);
+        std::printf("  packets_tx:       %" PRIu64 "\n", snap.packets_tx);
+        std::printf("  bytes_rx:         %" PRIu64 "\n", snap.bytes_rx);
+        std::printf("  bytes_tx:         %" PRIu64 "\n", snap.bytes_tx);
+        std::printf("  syn_received:     %" PRIu64 "\n", snap.syn_received);
+        std::printf("  rst_received:     %" PRIu64 "\n", snap.rst_received);
+        std::printf("  fin_received:     %" PRIu64 "\n", snap.fin_received);
+        std::printf("  conn_established: %" PRIu64 "\n", snap.conn_established);
+        std::printf("  conn_closed:      %" PRIu64 "\n", snap.conn_closed);
+        std::printf("  active_connections: %" PRIu32 "\n", snap.active_connections);
+        std::printf("======================\n\n");
     } else if (line[0] == 'h') {
         print_help();
     } else if (line[0] == 'q') {

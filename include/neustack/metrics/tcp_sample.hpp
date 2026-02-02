@@ -36,9 +36,16 @@ struct TCPSample {
     uint8_t timeout_occurred;     // 本周期是否超时
     uint8_t ecn_ce_count;         // ECN: 本周期收到的 CE 标记包数量
     uint8_t is_app_limited;       // 应用受限: 发送缓冲区空，delivery_rate 不代表真实带宽
-    uint8_t _reserved[4];         // 保留，凑齐 48 字节
+    uint16_t packets_sent;        // 本周期发送的包数
+    uint16_t packets_lost;        // 本周期丢失的包数 (重传次数)
 
     // ─── 派生指标 ───
+
+    // 丢包率 [0, 1]
+    float loss_rate() const {
+        if (packets_sent == 0) return 0.0f;
+        return static_cast<float>(packets_lost) / packets_sent;
+    }
 
     // 排队延迟 (Orca 核心输入)
     uint32_t queuing_delay_us() const {

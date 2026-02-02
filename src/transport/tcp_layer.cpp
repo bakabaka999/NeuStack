@@ -34,6 +34,9 @@ TCPLayer::TCPLayer(IPv4Layer &ip_layer, uint32_t local_ip)
     _tcp_mgr.set_send_callback([this](uint32_t dst_ip, const uint8_t *data, size_t len) {
         _ip_layer.send(dst_ip, static_cast<uint8_t>(IPProtocol::TCP), data, len);
     });
+
+    // 连接 AI 指标采集缓冲区
+    _tcp_mgr.set_metrics_buffer(&_metrics_buf);
 }
 
 void TCPLayer::handle(const IPv4Packet &pkt) {

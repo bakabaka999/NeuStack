@@ -209,7 +209,7 @@ struct OrcaFeatures {
 };
 ```
 
-### 4.2 异常检测特征
+### 4.2 异常检测特征 (5 维)
 
 ```cpp
 struct AnomalyFeatures {
@@ -223,8 +223,40 @@ struct AnomalyFeatures {
         const GlobalMetrics::Snapshot::Delta& delta,
         double interval_sec
     );
+    std::vector<float> to_vector() const;
+    static constexpr size_t dim() { return 5; }
 };
 ```
+
+### 4.3 带宽预测特征 (时序)
+
+```cpp
+/**
+ * 带宽预测特征
+ *
+ * 与 Orca/Anomaly 不同，这是时序输入：
+ * 过去 N 个采样周期的历史数据，组成 LSTM 的输入序列
+ */
+struct BandwidthFeatures {
+    std::vector<float> throughput_history;  // 历史吞吐量 (归一化)
+    std::vector<float> rtt_history;         // 历史 RTT 比值
+    std::vector<float> loss_history;        // 历史丢包率
+
+    static BandwidthFeatures from_samples(
+        const std::vector<TCPSample>& samples,
+        uint32_t est_bw = 0
+    );
+    std::vector<float> to_vector() const;  // 展平: [throughput..., rtt..., loss...]
+};
+```
+
+> **三种特征的区别**:
+>
+> | 特征 | 输入形状 | 频率 | 模型 |
+> |------|----------|------|------|
+> | OrcaFeatures | 6 维向量 | 每 10ms | DDPG (MLP) |
+> | AnomalyFeatures | 5 维向量 | 每 1s | LSTM-AE |
+> | BandwidthFeatures | N×3 时序 | 每 100ms | LSTM |
 
 ## 5. TCP 埋点位置
 

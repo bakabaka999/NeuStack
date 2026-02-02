@@ -214,6 +214,19 @@ int TCPConnectionManager::close(TCB *tcb) {
 }
 
 void TCPConnectionManager::on_segment_received(const TCPSegment &seg) {
+    // ─── AI 指标采集: 全局统计 ───
+    global_metrics().packets_rx.fetch_add(1, std::memory_order_relaxed);
+    global_metrics().bytes_rx.fetch_add(seg.data_length + 20, std::memory_order_relaxed);  // +20 for TCP header
+    if (seg.is_syn() && !seg.is_ack()) {
+        global_metrics().syn_received.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (seg.is_rst()) {
+        global_metrics().rst_received.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (seg.is_fin()) {
+        global_metrics().fin_received.fetch_add(1, std::memory_order_relaxed);
+    }
+
     LOG_DEBUG(TCP, "Received: %s:%u -> %s:%u [%s%s%s%s%s] seq=%u ack=%u len=%zu win=%u",
               ip_to_string(seg.src_addr).c_str(), seg.src_port,
               ip_to_string(seg.dst_addr).c_str(), seg.dst_port,
@@ -374,6 +387,19 @@ void TCPConnectionManager::delete_tcb(TCB *tcb) {
     // 再从连接表删除
     auto it = _connections.find(tcb->t_tuple);
     if (it != _connections.end()) {
+        // ─── AI 指标采集: 连接关闭 ───
+        // 只有曾经 ESTABLISHED 的连接才计入 active_connections
+        if (tcb->state == TCPState::ESTABLISHED ||
+            tcb->state == TCPState::FIN_WAIT_1 ||
+            tcb->state == TCPState::FIN_WAIT_2 ||
+            tcb->state == TCPState::CLOSE_WAIT ||
+            tcb->state == TCPState::CLOSING ||
+            tcb->state == TCPState::LAST_ACK ||
+            tcb->state == TCPState::TIME_WAIT) {
+            global_metrics().active_connections.fetch_sub(1, std::memory_order_relaxed);
+        }
+        global_metrics().conn_closed.fetch_add(1, std::memory_order_relaxed);
+
         LOG_DEBUG(TCP, "Deleted TCB for %s:%u <-> %s:%u",
                   ip_to_string(tcb->t_tuple.local_ip).c_str(), tcb->t_tuple.local_port,
                   ip_to_string(tcb->t_tuple.remote_ip).c_str(), tcb->t_tuple.remote_port);
@@ -444,6 +470,11 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
     // 发送
     if (_send_cb) {
         _send_cb(tcb->t_tuple.remote_ip, buffer, tcp_len);
+
+        // ─── AI 指标采集: 发包统计 ───
+        global_metrics().packets_tx.fetch_add(1, std::memory_order_relaxed);
+        global_metrics().bytes_tx.fetch_add(tcp_len, std::memory_order_relaxed);
+        tcb->packets_sent_period++;
     }
 
     // 如果有数据或者是 SYN/FIN，需要加入重传队列
@@ -624,6 +655,10 @@ void TCPConnectionManager::handle_syn_sent(TCB *tcb, const TCPSegment &seg) {
         // 进入 ESTABLISHED 状态
         tcb->state = TCPState::ESTABLISHED;
 
+        // ─── AI 指标采集: 连接建立 ───
+        global_metrics().active_connections.fetch_add(1, std::memory_order_relaxed);
+        global_metrics().conn_established.fetch_add(1, std::memory_order_relaxed);
+
         LOG_INFO(TCP, "SYN_SENT -> ESTABLISHED: connection established with %s:%u",
                  ip_to_string(seg.src_addr).c_str(), seg.src_port);
 
@@ -691,6 +726,10 @@ void TCPConnectionManager::handle_syn_rcvd(TCB *tcb, const TCPSegment &seg) {
     // 连接建立
     tcb->state = TCPState::ESTABLISHED;
     LOG_INFO(TCP, "SYN_RCVD -> ESTABLISHED");
+
+    // ─── AI 指标采集: 连接建立 ───
+    global_metrics().active_connections.fetch_add(1, std::memory_order_relaxed);
+    global_metrics().conn_established.fetch_add(1, std::memory_order_relaxed);
 
     // 通知应用层
     if (tcb->on_connect) {
@@ -983,9 +1022,55 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
     if (bytes_acked > 0) {
         send_buffered_data(tcb);
     }
+
+    // ─── AI 指标采集: 定期推送 TCPSample ───
+    if (_metrics_buf) {
+        auto now_tp = std::chrono::steady_clock::now();
+        uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            now_tp.time_since_epoch()
+        ).count();
+
+        if (now_us - tcb->last_sample_time_us >= TCB::SAMPLE_INTERVAL_US) {
+            TCPSample sample{};
+            sample.timestamp_us = now_us;
+            sample.rtt_us = tcb->srtt_us;
+            sample.min_rtt_us = tcb->min_rtt_us;
+            sample.srtt_us = tcb->srtt_us;
+            sample.cwnd = tcb->congestion_control
+                        ? tcb->congestion_control->cwnd() / tcb->options.mss
+                        : 1;
+            sample.ssthresh = tcb->congestion_control
+                            ? tcb->congestion_control->ssthresh()
+                            : UINT32_MAX;
+            sample.bytes_in_flight = (tcb->snd_nxt > tcb->snd_una)
+                                   ? tcb->snd_nxt - tcb->snd_una
+                                   : 0;
+            sample.delivery_rate = 0;  // TODO: 计算交付速率
+            sample.send_rate = 0;      // TODO: 计算发送速率
+            sample.loss_detected = (tcb->packets_lost_period > 0) ? 1 : 0;
+            sample.timeout_occurred = 0;
+            sample.ecn_ce_count = tcb->ecn_ce_period;
+            sample.is_app_limited = tcb->send_buffer.empty() ? 1 : 0;
+            sample.packets_sent = tcb->packets_sent_period;
+            sample.packets_lost = tcb->packets_lost_period;
+
+            _metrics_buf->push(sample);
+
+            // 重置周期计数器
+            tcb->last_sample_time_us = now_us;
+            tcb->packets_sent_period = 0;
+            tcb->packets_lost_period = 0;
+            tcb->ecn_ce_period = 0;
+        }
+    }
 }
 
 void TCPConnectionManager::update_rtt(TCB *tcb, uint32_t rtt_us) {
+    // ─── AI 指标采集: 跟踪最小 RTT ───
+    if (tcb->min_rtt_us == 0 || rtt_us < tcb->min_rtt_us) {
+        tcb->min_rtt_us = rtt_us;
+    }
+
     if (tcb->srtt_us == 0) {
         // 第一次测量
         tcb->srtt_us = rtt_us;
@@ -1050,6 +1135,9 @@ void TCPConnectionManager::check_retransmit(TCB *tcb, std::chrono::steady_clock:
              entry.retransmit_count, entry.seq_start, entry.seq_end,
              entry.length());
 
+    // ─── AI 指标采集: 丢包统计 (超时重传) ───
+    tcb->packets_lost_period++;
+
     // 指数退避：RTO *= 2
     tcb->rto_us = std::min(tcb->rto_us * 2, 60000000u);
 
@@ -1102,6 +1190,9 @@ void TCPConnectionManager::check_dup_ack(TCB *tcb, uint32_t ack_num) {
         // 3个重复ACK触发快速重传并进入快速恢复
         if (tcb->dup_ack_count == 3) {
             LOG_INFO(TCP, "3 dup ACKs, fast retransmit seq=%u", ack_num);
+
+            // ─── AI 指标采集: 丢包统计 (快速重传) ───
+            tcb->packets_lost_period++;
 
             // 通知拥塞控制（进入快速恢复）
             if (tcb->congestion_control) {

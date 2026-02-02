@@ -92,6 +92,11 @@ set(APP_SOURCES
     src/app/dns_client.cpp
 )
 
+# Metrics sources (AI feature extraction, always compiled)
+set(METRICS_SOURCES
+    src/metrics/ai_features.cpp
+)
+
 # Platform-specific HAL sources
 if(NEUSTACK_PLATFORM_MACOS)
     set(HAL_SOURCES
@@ -130,6 +135,7 @@ add_library(neustack_lib STATIC
     ${NET_SOURCES}
     ${TRANSPORT_SOURCES}
     ${APP_SOURCES}
+    ${METRICS_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
 )
