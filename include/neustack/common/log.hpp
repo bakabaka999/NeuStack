@@ -38,6 +38,7 @@ enum class LogModule : uint8_t {
     HTTP = 6,
     DNS  = 7,
     APP  = 8,
+    AI   = 9,
     MAX_MODULES
 };
 
@@ -244,6 +245,7 @@ private:
 
             // 顶层应用 (纯白或加粗)：你写的业务逻辑
             case LogModule::APP:  return "\033[1;37m"; // Bold White (最显眼)
+            case LogModule::AI:   return "\033[1;36m"; // Bold Cyan (AI 模块通常代表“高科技”，青色很合适)
 
             default: return RESET;
         }
@@ -260,6 +262,7 @@ private:
             case LogModule::HTTP: return "HTTP";
             case LogModule::DNS:  return "DNS ";
             case LogModule::APP:  return "APP ";
+            case LogModule::AI:   return "AI  ";
             default: return "????";
         }
     }

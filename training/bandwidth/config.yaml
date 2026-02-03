@@ -1,0 +1,22 @@
+model:
+  type: "full"  # "simple" 或 "full"
+  input_dim: 3
+  hidden_dim: 64
+  num_layers: 1
+
+training:
+  epochs: 150
+  batch_size: 64
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  early_stopping_patience: 20
+
+data:
+  history_length: 10
+  train_samples: 8000
+  val_samples: 2000
+  seed: 42
+
+output:
+  model_dir: "checkpoints"
+  onnx_path: "../../models/bandwidth_predictor.onnx"

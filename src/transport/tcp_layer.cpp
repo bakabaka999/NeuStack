@@ -50,6 +50,28 @@ void TCPLayer::handle(const IPv4Packet &pkt) {
 
 void TCPLayer::on_timer() {
     _tcp_mgr.on_timer();
+
+    // 处理 AI 决策
+    process_ai_actions();
+}
+
+void TCPLayer::enable_ai(const IntelligencePlaneConfig& config) {
+    if (_ai) {
+        LOG_WARN(TCP, "AI already enabled, stopping first");
+        disable_ai();
+    }
+
+    _ai = std::make_unique<IntelligencePlane>(_metrics_buf, _action_queue, config);
+    _ai->start();
+    LOG_INFO(TCP, "AI intelligence plane enabled");
+}
+
+void TCPLayer::disable_ai() {
+    if (_ai) {
+        _ai->stop();
+        _ai.reset();
+        LOG_INFO(TCP, "AI intelligence plane disabled");
+    }
 }
 
 int TCPLayer::listen(uint16_t port, StreamAcceptCallback on_accept) {

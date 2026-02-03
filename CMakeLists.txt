@@ -18,7 +18,7 @@ option(NEUSTACK_ENABLE_AI "Enable AI congestion control (requires ONNX Runtime)"
 # ============================================================================
 # C++ Standard
 # ============================================================================
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -117,12 +117,20 @@ endif()
 
 # AI sources (optional)
 if(NEUSTACK_ENABLE_AI)
-    set(AI_SOURCES
-        # src/ai/cc_model.cpp
-    )
-    find_package(onnxruntime QUIET)
-    if(NOT onnxruntime_FOUND)
+    # 使用自定义查找模块
+    include(cmake/FindONNXRuntime.cmake)
+
+    if(ONNXRUNTIME_FOUND)
+        set(AI_SOURCES
+            src/ai/onnx_inference.cpp
+            src/ai/orca_model.cpp
+            src/ai/anomaly_model.cpp
+            src/ai/bandwidth_model.cpp
+            src/ai/intelligence_plane.cpp
+        )
+    else()
         message(WARNING "ONNX Runtime not found, AI features disabled")
+        message(STATUS "  Run: ./scripts/download_onnxruntime.sh")
         set(NEUSTACK_ENABLE_AI OFF)
     endif()
 endif()
@@ -154,8 +162,9 @@ elseif(NEUSTACK_PLATFORM_WINDOWS)
     target_link_libraries(neustack_lib PRIVATE ws2_32 iphlpapi)
 endif()
 
-if(NEUSTACK_ENABLE_AI)
-    target_link_libraries(neustack_lib PRIVATE onnxruntime::onnxruntime)
+if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
+    target_include_directories(neustack_lib PUBLIC ${ONNXRUNTIME_INCLUDE_DIRS})
+    target_link_libraries(neustack_lib PRIVATE ${ONNXRUNTIME_LIBRARIES})
     target_compile_definitions(neustack_lib PUBLIC NEUSTACK_AI_ENABLED)
 endif()
 
@@ -164,6 +173,19 @@ endif()
 # ============================================================================
 add_executable(neustack src/main.cpp)
 target_link_libraries(neustack PRIVATE neustack_lib)
+
+# RPATH 设置 (确保运行时能找到 ONNX Runtime 动态库)
+if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
+    if(APPLE)
+        set_target_properties(neustack PROPERTIES
+            BUILD_RPATH "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/macos-arm64/lib;${CMAKE_SOURCE_DIR}/third_party/onnxruntime/macos-x64/lib"
+        )
+    elseif(UNIX)
+        set_target_properties(neustack PROPERTIES
+            BUILD_RPATH "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/linux-x64/lib"
+        )
+    endif()
+endif()
 
 # ============================================================================
 # Tests

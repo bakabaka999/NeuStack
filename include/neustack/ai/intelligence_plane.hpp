@@ -6,60 +6,107 @@
 #include "neustack/metrics/tcp_sample.hpp"
 #include "neustack/metrics/global_metrics.hpp"
 #include "neustack/metrics/ai_action.hpp"
+#include "neustack/metrics/ai_features.hpp"
+
+#ifdef NEUSTACK_AI_ENABLED
+#include "neustack/ai/orca_model.hpp"
+#include "neustack/ai/anomaly_model.hpp"
+#include "neustack/ai/bandwidth_model.hpp"
+#endif
+
 #include <thread>
 #include <atomic>
+#include <chrono>
+#include <vector>
 
 namespace neustack {
-    
+
+/**
+ * 智能面配置
+ */
+struct IntelligencePlaneConfig {
+    // 模型路径 (空字符串 = 禁用该模型)
+    std::string orca_model_path;
+    std::string anomaly_model_path;
+    std::string bandwidth_model_path;
+
+    // 推理间隔
+    std::chrono::milliseconds orca_interval{10};       // 10ms
+    std::chrono::milliseconds anomaly_interval{1000};  // 1s
+    std::chrono::milliseconds bandwidth_interval{100}; // 100ms
+
+    // 异常检测阈值
+    float anomaly_threshold = 0.5f;
+
+    // 带宽预测历史长度
+    size_t bandwidth_history_length = 10;
+};
+
+/**
+ * 智能面 - AI 推理线程
+ *
+ * 从数据面读取指标，运行 AI 模型，将决策发送回数据面
+ */
 class IntelligencePlane {
 public:
+    using Config = IntelligencePlaneConfig;
+
     IntelligencePlane(
-        MetricsBuffer<TCPSample, 1024>& metrics_buf,    // 数据面 → 读
-        SPSCQueue<AIAction, 16>& action_queue           // 写 → 数据面
-    )
-        : _metrics_buf(metrics_buf)
-        , _action_queue(action_queue)
-        , _running(false)
-    {}
+        MetricsBuffer<TCPSample, 1024> &metrics_buf, // 数据面 → 读
+        SPSCQueue<AIAction, 16> &action_queue,       // 写 → 数据面
+        const Config& config = {}
+    );
 
-    void start() {
-        _running = true;
-        _thread = std::thread([this] {run();});
-    }
+    ~IntelligencePlane();
 
-    void stop() {
-        _running = false;
-        if (_thread.joinable()) _thread.join();
-    }
+    // 禁止拷贝和移动
+    IntelligencePlane(const IntelligencePlane &) = delete;
+    IntelligencePlane &operator=(const IntelligencePlane &) = delete;
+
+    // 启动智能面线程
+    void start();
+
+    // 停止智能面线程
+    void stop();
+
+    // 是否正在运行
+    bool is_running() const { return _running.load(std::memory_order_relaxed); }
 
 private:
+    // 数据通道
     MetricsBuffer<TCPSample, 1024>& _metrics_buf;
     SPSCQueue<AIAction, 16>& _action_queue;
+
+    // AI 模型
+#ifdef NEUSTACK_AI_ENABLED
+    std::unique_ptr<OrcaModel> _orca_model;
+    std::unique_ptr<AnomalyDetector> _anomaly_model;
+    std::unique_ptr<BandwidthPredictor> _bandwidth_model;
+#endif
+
+    // 状态
+    Config _config;
     std::atomic<bool> _running;
     std::thread _thread;
 
-    void run() {
-        GlobalMetrics::Snapshot prev_snapshot = {};
+    // 历史数据 (用于带宽预测)
+    std::vector<TCPSample> _sample_history;
+    GlobalMetrics::Snapshot _prev_snapshot;
 
-        while (_running) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // 带宽预测结果缓存 (供 Orca 使用)
+    float _cached_predicted_bw = 0.0f;
 
-            // ─── 1. 读取采样数据 ───
-            auto samples = _metrics_buf.recent(100);
+    // 内部方法
+    void run_loop();
 
-            // ─── 2. 读取全局统计快照 ───
-            auto snapshot = global_metrics().snapshot();
-            auto delta = snapshot.diff(prev_snapshot);
-            prev_snapshot = snapshot;
+    void process_orca();
+    void process_anomaly(const GlobalMetrics::Snapshot::Delta& delta);
+    void process_bandwidth();
 
-            // ─── 3. AI 推理 (后续实现) ───
-            // auto features = extract_features(samples);
-            // auto action = onnx_infer(features);
-
-            // ─── 4. 传回数据面 ───
-            // _action_queue.try_push(action);
-        }
-    }
+    // 时间戳
+    std::chrono::steady_clock::time_point _last_orca_time;
+    std::chrono::steady_clock::time_point _last_anomaly_time;
+    std::chrono::steady_clock::time_point _last_bandwidth_time;
 };
 
 } // namespace neustack

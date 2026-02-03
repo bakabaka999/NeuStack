@@ -124,6 +124,24 @@ public:
      */
     const TCPOptions &default_options() const { return _default_options; }
 
+    // ─── AI 控制 API ───
+
+    /**
+     * @brief 启用 AI 智能面
+     * @param config AI 配置（模型路径等）
+     */
+    void enable_ai(const IntelligencePlaneConfig& config);
+
+    /**
+     * @brief 禁用 AI 智能面
+     */
+    void disable_ai();
+
+    /**
+     * @brief AI 是否已启用
+     */
+    bool ai_enabled() const { return _ai != nullptr && _ai->is_running(); }
+
 private:
     friend class TCPStreamConnection;  // 允许访问 _tcp_mgr
 
@@ -151,20 +169,6 @@ private:
 
     // ─── 智能面线程 (用 unique_ptr 延迟初始化) ───
     std::unique_ptr<IntelligencePlane> _ai;
-
-    // 启动智能面
-    void start_ai() {
-        _ai = std::make_unique<IntelligencePlane>(_metrics_buf, _action_queue);
-        _ai->start();
-    }
-
-    // 停止智能面
-    void stop_ai() {
-        if (_ai) {
-            _ai->stop();
-            _ai.reset();
-        }
-    }
 
     // 在事件循环中检查 AI 决策
     void process_ai_actions() {

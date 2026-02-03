@@ -4,15 +4,18 @@
             "name": "macOS",
             "includePath": [
                 "${workspaceFolder}/include/**",
-                "${workspaceFolder}/src/**"
+                "${workspaceFolder}/src/**",
+                "${workspaceFolder}/third_party/onnxruntime/macos-arm64/include",
+                "${workspaceFolder}/third_party/onnxruntime/macos-x64/include"
             ],
             "defines": [
-                "NEUSTACK_PLATFORM_MACOS"
+                "NEUSTACK_PLATFORM_MACOS",
+                "NEUSTACK_AI_ENABLED"
             ],
             "macFrameworkPath": [
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
             ],
-            "cppStandard": "c++17",
+            "cppStandard": "c++20",
             "intelliSenseMode": "macos-clang-arm64",
             "compileCommands": "${workspaceFolder}/build/compile_commands.json",
             "configurationProvider": "ms-vscode.cmake-tools"
@@ -21,12 +24,14 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/include/**",
-                "${workspaceFolder}/src/**"
+                "${workspaceFolder}/src/**",
+                "${workspaceFolder}/third_party/onnxruntime/linux-x64/include"
             ],
             "defines": [
-                "NEUSTACK_PLATFORM_LINUX"
+                "NEUSTACK_PLATFORM_LINUX",
+                "NEUSTACK_AI_ENABLED"
             ],
-            "cppStandard": "c++17",
+            "cppStandard": "c++20",
             "intelliSenseMode": "linux-gcc-x64",
             "compileCommands": "${workspaceFolder}/build/compile_commands.json",
             "configurationProvider": "ms-vscode.cmake-tools"

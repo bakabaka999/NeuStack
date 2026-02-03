@@ -34,10 +34,37 @@ compile_commands.json
 *.onnx
 !models/*.onnx
 
+# Third-party dependencies (downloaded binaries)
+third_party/onnxruntime/
+
 # Logs
 *.log
 
 # Test artifacts
 Testing/
 
-*/cite
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+venv/
+.venv/
+.python-version
+
+# PyTorch training artifacts
+training/*/checkpoints/
+*.pth
+*.pt
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data files (large)
+*.csv
+*.pkl
+*.npy
+
+# Training visualization (optional, can be committed)
+training/*/*.png

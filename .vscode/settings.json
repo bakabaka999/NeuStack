@@ -3,7 +3,7 @@
     "cmake.configureOnOpen": true,
 
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.cppStandard": "c++20",
     "C_Cpp.default.intelliSenseMode": "macos-clang-arm64",
 
     "files.associations": {
@@ -20,10 +20,14 @@
     },
 
     "files.exclude": {
-        "**/.DS_Store": true
+        "**/.DS_Store": true,
+        "**/__pycache__": true
     },
 
     "search.exclude": {
         "build/**": true
-    }
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python-envs.pythonProjects": []
 }

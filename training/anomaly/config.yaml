@@ -1,0 +1,21 @@
+model:
+  type: "simple"  # "simple" 或 "lstm"
+  input_dim: 5
+  hidden_dims: [32, 16]
+  latent_dim: 8
+
+training:
+  epochs: 100
+  batch_size: 64
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+
+data:
+  train_samples: 8000
+  val_samples: 2000
+  seed: 42
+
+output:
+  model_dir: "checkpoints"
+  onnx_path: "../../models/anomaly_detector.onnx"
