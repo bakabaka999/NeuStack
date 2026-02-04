@@ -2,7 +2,8 @@
 #include "neustack/common/log.hpp"
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/transport/tcp_reno.hpp"
-
+#include "neustack/transport/tcp_cubic.hpp"
+#include "neustack/transport/tcp_orca.hpp"
 
 using namespace neustack;
 
@@ -360,7 +361,8 @@ TCB *TCPConnectionManager::create_tcb(const TCPTuple &t_tuple) {
     tcb->apply_options(_default_options);
 
     // 创建拥塞控制器（使用 MSS 配置）
-    tcb->congestion_control = std::make_unique<TCPReno>(tcb->options.mss);
+    // tcb->congestion_control = std::make_unique<TCPReno>(tcb->options.mss);
+    tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
 
     TCB *ptr = tcb.get();
     _connections[t_tuple] = std::move(tcb);
@@ -475,6 +477,7 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
         global_metrics().packets_tx.fetch_add(1, std::memory_order_relaxed);
         global_metrics().bytes_tx.fetch_add(tcp_len, std::memory_order_relaxed);
         tcb->packets_sent_period++;
+        if (len > 0) tcb->bytes_sent_period += len;
     }
 
     // 如果有数据或者是 SYN/FIN，需要加入重传队列
@@ -976,6 +979,9 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
         tcb->congestion_control->on_ack(bytes_acked, tcb->srtt_us);
     }
 
+    // ─── AI 指标采集: 确认字节数统计 ───
+    tcb->bytes_acked_period += bytes_acked;
+
     auto now = std::chrono::steady_clock::now();
 
     // 从队列中移除已经确认的数据
@@ -1031,6 +1037,12 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
         ).count();
 
         if (now_us - tcb->last_sample_time_us >= TCB::SAMPLE_INTERVAL_US) {
+            // 计算采样间隔（秒）
+            uint64_t interval_us = (tcb->last_sample_time_us > 0)
+                                 ? (now_us - tcb->last_sample_time_us)
+                                 : TCB::SAMPLE_INTERVAL_US;
+            float interval_sec = static_cast<float>(interval_us) / 1000000.0f;
+
             TCPSample sample{};
             sample.timestamp_us = now_us;
             sample.rtt_us = tcb->srtt_us;
@@ -1045,8 +1057,15 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
             sample.bytes_in_flight = (tcb->snd_nxt > tcb->snd_una)
                                    ? tcb->snd_nxt - tcb->snd_una
                                    : 0;
-            sample.delivery_rate = 0;  // TODO: 计算交付速率
-            sample.send_rate = 0;      // TODO: 计算发送速率
+
+            // 计算交付速率和发送速率 (bytes/s)
+            sample.delivery_rate = (interval_sec > 0)
+                                 ? static_cast<uint32_t>(tcb->bytes_acked_period / interval_sec)
+                                 : 0;
+            sample.send_rate = (interval_sec > 0)
+                             ? static_cast<uint32_t>(tcb->bytes_sent_period / interval_sec)
+                             : 0;
+
             sample.loss_detected = (tcb->packets_lost_period > 0) ? 1 : 0;
             sample.timeout_occurred = 0;
             sample.ecn_ce_count = tcb->ecn_ce_period;
@@ -1061,6 +1080,8 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
             tcb->packets_sent_period = 0;
             tcb->packets_lost_period = 0;
             tcb->ecn_ce_period = 0;
+            tcb->bytes_sent_period = 0;
+            tcb->bytes_acked_period = 0;
         }
     }
 }

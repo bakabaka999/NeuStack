@@ -6,6 +6,7 @@
 #include "neustack/transport/stream.hpp"
 #include "neustack/transport/tcp_connection.hpp"
 #include "neustack/transport/tcp_segment.hpp"
+#include "neustack/transport/tcp_orca.hpp"
 #include "neustack/common/ring_buffer.hpp"
 #include "neustack/common/spsc_queue.hpp"
 #include "neustack/ai/intelligence_plane.hpp"
@@ -142,6 +143,11 @@ public:
      */
     bool ai_enabled() const { return _ai != nullptr && _ai->is_running(); }
 
+    /**
+     * @brief 获取 TCP 指标缓冲区（用于数据采集导出）
+     */
+    MetricsBuffer<TCPSample, 1024>& metrics_buffer() { return _metrics_buf; }
+
 private:
     friend class TCPStreamConnection;  // 允许访问 _tcp_mgr
 
@@ -187,10 +193,15 @@ private:
         }
     }
 
-    // AI 动作处理 (待实现)
+    // AI 动作处理
     void apply_cwnd_action(const AIAction& action) {
-        // TODO: 根据 action.conn_id 找到对应 TCB，调整 cwnd
-        (void)action;
+        // 遍历所有连接，找到使用 Orca 的连接并设置 α
+        for (auto& [tuple, tcb_ptr] : _tcp_mgr._connections) {
+            auto* orca = dynamic_cast<TCPOrca*>(tcb_ptr->congestion_control.get());
+            if (orca) {
+                orca->set_alpha(action.cwnd.alpha);
+            }
+        }
     }
 
     void handle_anomaly(const AIAction& action) {

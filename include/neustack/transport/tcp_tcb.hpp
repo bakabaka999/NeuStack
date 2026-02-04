@@ -262,6 +262,8 @@ struct TCB {
     uint16_t packets_sent_period = 0;         // 本采样周期发送的包数
     uint16_t packets_lost_period = 0;         // 本采样周期丢失的包数 (重传)
     uint8_t  ecn_ce_period = 0;               // 本采样周期 ECN CE 标记数
+    uint32_t bytes_sent_period = 0;           // 本采样周期发送的字节数
+    uint32_t bytes_acked_period = 0;          // 本采样周期确认的字节数
     static constexpr uint64_t SAMPLE_INTERVAL_US = 10000;  // 采样间隔 10ms
 
     // 构造时初始化

@@ -21,8 +21,11 @@
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/common/log.hpp"
 #include "neustack/metrics/global_metrics.hpp"
+#include "neustack/metrics/sample_exporter.hpp"
+#include "neustack/metrics/metric_exporter.hpp"
 
 #include <csignal>
+#include <memory>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -53,6 +56,8 @@ struct Config {
     LogLevel log_level = LogLevel::INFO;
     bool color = true;
     bool timestamp = true;
+    bool collect_data = false;         // 数据采集开关
+    std::string output_dir = ".";      // 数据输出目录
 };
 
 static void print_usage(const char *prog) {
@@ -66,6 +71,8 @@ static void print_usage(const char *prog) {
     std::printf("  -q              Quiet (WARN level)\n");
     std::printf("  --no-color      Disable colored output\n");
     std::printf("  --no-time       Disable timestamps\n");
+    std::printf("  --collect       Enable data collection (CSV export)\n");
+    std::printf("  --output-dir <dir>  Output directory for CSV files (default: .)\n");
     std::printf("  -h, --help      Show this help\n");
 }
 
@@ -85,6 +92,10 @@ static bool parse_args(int argc, char *argv[], Config &cfg) {
             cfg.color = false;
         } else if (std::strcmp(argv[i], "--no-time") == 0) {
             cfg.timestamp = false;
+        } else if (std::strcmp(argv[i], "--collect") == 0) {
+            cfg.collect_data = true;
+        } else if (std::strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
+            cfg.output_dir = argv[++i];
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return false;
@@ -268,7 +279,9 @@ static void handle_command(const std::string &line, DNSClient &dns, HttpClient &
 
 static void run_event_loop(NetDevice &device, IPv4Layer &ip_layer,
                            TCPLayer &tcp_layer, DNSClient &dns,
-                           HttpClient &http) {
+                           HttpClient &http,
+                           SampleExporter *sample_exp,
+                           MetricsExporter *metrics_exp) {
     uint8_t buf[2048];
     std::string cmd_buf;
     auto last_timer = std::chrono::steady_clock::now();
@@ -289,6 +302,15 @@ static void run_event_loop(NetDevice &device, IPv4Layer &ip_layer,
         if (now - last_timer >= TIMER_INTERVAL) {
             tcp_layer.on_timer();
             dns.on_timer();
+
+            // 数据导出 (每 100ms)
+            if (sample_exp) {
+                sample_exp->export_new_samples();
+            }
+            if (metrics_exp) {
+                metrics_exp->export_delta(100);
+            }
+
             last_timer = now;
         }
 
@@ -365,6 +387,24 @@ int main(int argc, char *argv[]) {
     DNSClient dns(udp, cfg.dns_server);
     dns.init();
 
+    // ─── 数据采集 (可选) ───
+    std::unique_ptr<SampleExporter> sample_exporter;
+    std::unique_ptr<MetricsExporter> metrics_exporter;
+
+    if (cfg.collect_data) {
+        std::string samples_path = cfg.output_dir + "/tcp_samples.csv";
+        std::string metrics_path = cfg.output_dir + "/global_metrics.csv";
+
+        sample_exporter = std::make_unique<SampleExporter>(
+            samples_path, tcp.metrics_buffer()
+        );
+        metrics_exporter = std::make_unique<MetricsExporter>(metrics_path);
+
+        LOG_INFO(APP, "data collection enabled");
+        LOG_INFO(APP, "  tcp_samples:    %s", samples_path.c_str());
+        LOG_INFO(APP, "  global_metrics: %s", metrics_path.c_str());
+    }
+
     // ─── 启动信息 ───
     LOG_INFO(APP, "local IP: %s", ip_to_string(cfg.local_ip).c_str());
     LOG_INFO(APP, "DNS server: %s", ip_to_string(cfg.dns_server).c_str());
@@ -386,7 +426,17 @@ int main(int argc, char *argv[]) {
     print_help();
 
     // ─── 主循环 ───
-    run_event_loop(*device, ip_layer, tcp, dns, http_client);
+    run_event_loop(*device, ip_layer, tcp, dns, http_client,
+                   sample_exporter.get(), metrics_exporter.get());
+
+    // ─── 关闭前 flush 数据 ───
+    if (sample_exporter) {
+        sample_exporter->flush();
+        LOG_INFO(APP, "exported %zu TCP samples", sample_exporter->exported_count());
+    }
+    if (metrics_exporter) {
+        metrics_exporter->flush();
+    }
 
     LOG_INFO(APP, "shutdown");
     device->close();

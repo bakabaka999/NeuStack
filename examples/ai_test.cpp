@@ -25,8 +25,7 @@ int main() {
 
     // 配置模型路径
     IntelligencePlaneConfig config;
-    // TODO: Orca 模型需要重新训练为 7 维输入 (加入 predicted_bw_normalized)
-    // config.orca_model_path = "../models/orca_actor.onnx";
+    config.orca_model_path = "../models/orca_actor.onnx";
     config.anomaly_model_path = "../models/anomaly_detector.onnx";
     config.bandwidth_model_path = "../models/bandwidth_predictor.onnx";
     config.orca_interval = std::chrono::milliseconds(100);      // 放慢方便观察

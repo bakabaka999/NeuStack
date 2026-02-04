@@ -434,10 +434,7 @@ public:
         }
         _last_rtt_us = rtt_us;
 
-        // 3. 估算吞吐量 (简化: bytes_acked / rtt)
-        if (rtt_us > 0) {
-            _last_throughput = static_cast<uint64_t>(bytes_acked) * 1000000 / rtt_us;
-        }
+        // 3. 吞吐量由 set_delivery_rate() 更新，此处不再估算
 
         // 4. 更新 in-flight
         if (_bytes_in_flight >= bytes_acked) {
@@ -489,6 +486,11 @@ public:
     // 设置带宽预测值 (供 IntelligencePlane 调用)
     void set_predicted_bandwidth(uint64_t bw) {
         _predicted_bw = bw;
+    }
+
+    // 设置实际吞吐量 (供协议栈在收到 ACK 时调用)
+    void set_delivery_rate(uint64_t rate) {
+        _last_throughput = rate;
     }
 
     // 记录发送
@@ -573,107 +575,232 @@ private:
 
 ### 4.2 Orca 使用方式
 
-**方式一：手动设置 α**
+NeuStack 的 TCP 采用 `TCPConnectionManager` 管理所有连接，每个连接的状态存储在 `TCB` (Transmission Control Block) 中。
+拥塞控制器通过 `tcb->congestion_control` 指针访问。
+
+**方式一：手动设置 α（推荐）**
+
+通过 AI 智能面输出的 `AIAction` 来设置 α：
 
 ```cpp
-// 创建 Orca 拥塞控制
-auto orca = std::make_unique<TCPOrca>(1460);
-
-// 从 IntelligencePlane 获取 AI 决策后设置
-void on_ai_action(const AIAction& action) {
-    if (action.type == AIAction::Type::CWND_ADJUST) {
+// TCPLayer 在 process_ai_actions() 中处理 AI 决策
+void apply_cwnd_action(TCB* tcb, const AIAction& action) {
+    // 将 ICongestionControl 指针转换为 TCPOrca
+    auto* orca = dynamic_cast<TCPOrca*>(tcb->congestion_control.get());
+    if (orca) {
         orca->set_alpha(action.cwnd.alpha);
     }
 }
-
-// TCPConnection 使用
-tcb->congestion_control = std::move(orca);
 ```
 
-**方式二：回调模式**
+**方式二：回调模式（自包含推理）**
+
+如果希望 Orca 内部直接调用 ONNX 模型，可以在创建时传入回调：
 
 ```cpp
-// 创建时传入回调
-auto orca = std::make_unique<TCPOrca>(1460, [&](
+// 在 TCPConnectionManager::create_tcb() 中
+auto orca = std::make_unique<TCPOrca>(tcb->options.mss, [&model](
     float throughput, float queuing_delay, float rtt_ratio,
     float loss_rate, float cwnd, float in_flight, float predicted_bw
 ) -> float {
-    // 直接调用 ONNX 模型推理
     std::vector<float> features = {
         throughput, queuing_delay, rtt_ratio,
         loss_rate, cwnd, in_flight, predicted_bw
     };
-    auto result = orca_model->run(features);
-    return result[0];  // α
+    auto result = model->run(features);
+    return result[0];  // α ∈ [-1, 1]
 });
+
+tcb->congestion_control = std::move(orca);
 ```
 
-### 4.3 与 TCPConnection 集成
+> **注意**：方式一更灵活，因为 AI 模型由独立的 `IntelligencePlane` 线程管理，
+> 不会阻塞 TCP 数据路径。方式二适合简单场景或测试。
+
+### 4.3 与 TCPConnectionManager 集成
+
+NeuStack 的实际架构是：
+
+```
+TCPLayer                    TCPConnectionManager              TCB
+────────────────────────────────────────────────────────────────────
+  │                              │                             │
+  ├── _tcp_mgr ─────────────────►│                             │
+  │                              ├── _connections ────────────►│
+  │                              │   map<TCPTuple, unique_ptr<TCB>>
+  │                              │                             │
+  ├── _metrics_buf ──────────────┼────────────────────────────►│ (采样)
+  │   MetricsBuffer<TCPSample>   │                             │
+  │                              │                             │
+  ├── _action_queue ◄────────────┼─────────────────────────────│
+  │   SPSCQueue<AIAction>        │                             │
+  │                              │                             │
+  └── process_ai_actions() ─────►│ apply_cwnd_action() ───────►│
+                                 │                    tcb->congestion_control
+```
+
+**拥塞控制算法在 TCB 创建时设置：**
 
 ```cpp
-// src/transport/tcp_connection.cpp
+// src/transport/tcp_connection.cpp 中的 create_tcb()
 
-#include "neustack/transport/tcp_cubic.hpp"
-#include "neustack/transport/tcp_orca.hpp"
+TCB *TCPConnectionManager::create_tcb(const TCPTuple &t_tuple) {
+    auto tcb = std::make_unique<TCB>();
+    tcb->t_tuple = t_tuple;
+    tcb->state = TCPState::CLOSED;
+    tcb->last_activity = std::chrono::steady_clock::now();
 
-enum class CongestionAlgorithm {
-    RENO,
-    CUBIC,
-    ORCA
-};
+    // 应用默认选项
+    tcb->apply_options(_default_options);
 
-void TCPConnection::set_congestion_algorithm(CongestionAlgorithm algo) {
-    switch (algo) {
-        case CongestionAlgorithm::RENO:
-            _tcb.congestion_control = std::make_unique<TCPReno>(_tcb.options.mss);
-            break;
-        case CongestionAlgorithm::CUBIC:
-            _tcb.congestion_control = std::make_unique<TCPCubic>(_tcb.options.mss);
-            break;
-        case CongestionAlgorithm::ORCA:
-            _tcb.congestion_control = std::make_unique<TCPOrca>(_tcb.options.mss);
-            break;
-    }
-}
+    // 创建拥塞控制器（默认使用 Reno）
+    // 如需使用 Orca，修改此处：
+    // tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
+    tcb->congestion_control = std::make_unique<TCPReno>(tcb->options.mss);
 
-// 获取 Orca 指针以设置 α
-TCPOrca* TCPConnection::orca() {
-    return dynamic_cast<TCPOrca*>(_tcb.congestion_control.get());
+    TCB *ptr = tcb.get();
+    _connections[t_tuple] = std::move(tcb);
+    return ptr;
 }
 ```
 
-### 4.4 IntelligencePlane 集成
+**AI 指标采集在 process_ack() 中进行：**
 
 ```cpp
-// src/ai/intelligence_plane.cpp
+// src/transport/tcp_connection.cpp 中的 process_ack() (已实现)
 
-void IntelligencePlane::process_orca() {
-    // ... 获取 AI 输出 alpha ...
+void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t window) {
+    // ... 前面是 ACK 处理逻辑 ...
 
-    if (result) {
-        AIAction action{};
-        action.type = AIAction::Type::CWND_ADJUST;
-        action.cwnd.alpha = result->alpha;
-        _action_queue.try_push(action);
-    }
-}
+    // ─── AI 指标采集: 定期推送 TCPSample ───
+    if (_metrics_buf) {
+        auto now = std::chrono::steady_clock::now();
+        uint64_t now_us = /* ... */;
 
-// tcp_layer.cpp 处理 AI 动作
-void TCPLayer::process_ai_actions() {
-    AIAction action;
-    while (_action_queue.try_pop(action)) {
-        if (action.type == AIAction::Type::CWND_ADJUST) {
-            // 找到对应连接，设置 α
-            // 这里简化为全局设置
-            for (auto& [tuple, conn] : _connections) {
-                if (auto* orca = conn->orca()) {
-                    orca->set_alpha(action.cwnd.alpha);
-                }
-            }
+        if (now_us - tcb->last_sample_time_us >= TCB::SAMPLE_INTERVAL_US) {
+            TCPSample sample{};
+            sample.timestamp_us = now_us;
+            sample.rtt_us = tcb->srtt_us;
+            sample.min_rtt_us = tcb->min_rtt_us;
+            sample.cwnd = tcb->congestion_control
+                        ? tcb->congestion_control->cwnd() / tcb->options.mss
+                        : 1;
+            sample.bytes_in_flight = tcb->snd_nxt - tcb->snd_una;
+            sample.packets_sent = tcb->packets_sent_period;
+            sample.packets_lost = tcb->packets_lost_period;
+            // ... 其他字段 ...
+
+            _metrics_buf->push(sample);  // 无锁推送到 AI 线程
+
+            // 重置周期计数器
+            tcb->last_sample_time_us = now_us;
+            tcb->packets_sent_period = 0;
+            tcb->packets_lost_period = 0;
         }
     }
 }
 ```
+
+### 4.4 TCPLayer 与 IntelligencePlane 集成
+
+**TCPLayer 是 TCP 的高层接口，负责：**
+1. 管理 `TCPConnectionManager`
+2. 提供 Stream 抽象（`TCPStreamConnection`）
+3. 连接 AI 智能面（`IntelligencePlane`）
+
+**数据流向：**
+
+```
+TCP 数据面线程                          AI 智能面线程
+────────────────────                   ────────────────────
+TCPConnectionManager                   IntelligencePlane
+       │                                      │
+       ├── process_ack()                      │
+       │   └── TCPSample ──────────────────►  │ (无锁)
+       │       push to _metrics_buf           │
+       │                                      ├── process_orca()
+       │                                      │   └── ONNX 推理
+       │                                      │
+       │                                      ├── AIAction
+       │       _action_queue  ◄───────────────┘ (无锁)
+       │
+TCPLayer::on_timer()
+       │
+       └── process_ai_actions()
+           └── apply_cwnd_action()
+               └── tcb->congestion_control->set_alpha()
+```
+
+**TCPLayer 中的 AI 集成代码（已实现）：**
+
+```cpp
+// include/neustack/transport/tcp_layer.hpp
+
+class TCPLayer {
+private:
+    // AI 通信通道
+    MetricsBuffer<TCPSample, 1024> _metrics_buf;  // TCP → AI
+    SPSCQueue<AIAction, 16> _action_queue;        // AI → TCP
+
+    std::unique_ptr<IntelligencePlane> _ai;
+
+    // 处理 AI 决策（在 on_timer() 中调用）
+    void process_ai_actions() {
+        AIAction action;
+        while (_action_queue.try_pop(action)) {
+            switch (action.type) {
+                case AIAction::Type::CWND_ADJUST:
+                    apply_cwnd_action(action);
+                    break;
+                case AIAction::Type::ANOMALY_ALERT:
+                    handle_anomaly(action);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    // 应用 cwnd 调整（需要实现）
+    void apply_cwnd_action(const AIAction& action) {
+        // TODO: 根据 action.conn_id 找到对应 TCB，调整 cwnd
+        // 目前简化版：遍历所有连接
+        for (auto& [tuple, tcb] : _tcp_mgr._connections) {
+            auto* orca = dynamic_cast<TCPOrca*>(tcb->congestion_control.get());
+            if (orca) {
+                orca->set_alpha(action.cwnd.alpha);
+
+                // 可选：同步带宽预测
+                // orca->set_predicted_bandwidth(action.bandwidth.predicted_bw);
+            }
+        }
+    }
+};
+```
+
+**启用 AI：**
+
+```cpp
+// 应用层代码
+TCPLayer tcp(ip_layer, local_ip);
+
+IntelligencePlaneConfig config;
+config.orca_model_path = "models/orca_actor.onnx";
+config.anomaly_model_path = "models/anomaly_detector.onnx";
+config.bandwidth_model_path = "models/bandwidth_predictor.onnx";
+
+tcp.enable_ai(config);  // 启动 AI 线程
+```
+
+**完整的 AI 集成流程：**
+
+1. `TCPLayer` 构造时，将 `_metrics_buf` 传给 `TCPConnectionManager`
+2. `enable_ai()` 创建 `IntelligencePlane`，传入 `_metrics_buf` 和 `_action_queue`
+3. TCP 数据处理（收发包）在主线程，`process_ack()` 中采集 `TCPSample`
+4. AI 线程周期性从 `_metrics_buf` 读取样本，运行 ONNX 推理
+5. AI 输出 `AIAction` 推送到 `_action_queue`
+6. `TCPLayer::on_timer()` 调用 `process_ai_actions()` 消费动作
+7. `apply_cwnd_action()` 找到对应 TCB，设置 Orca 的 α
 
 ---
 
@@ -2033,26 +2160,63 @@ Training complete!
 
 ## 13. C++ 集成
 
-### 11.1 更新 OrcaModel
+> **详细的架构说明请参考 Part 1 的 4.2-4.4 节。**
 
-模型现在是 7 维输入：
+### 13.1 Orca 模型输入
+
+模型是 7 维输入：
 
 ```cpp
-// 已在之前的教程中更新
-// include/neustack/ai/ai_model.hpp
+// include/neustack/ai/ai_model.hpp 中的 OrcaModel::Input
 
 struct Input {
-    float throughput_normalized;
-    float queuing_delay_normalized;
-    float rtt_ratio;
-    float loss_rate;
-    float cwnd_normalized;
-    float in_flight_ratio;
-    float predicted_bw_normalized;  // 第7维：带宽预测
+    float throughput_normalized;      // 吞吐量 / MAX_THROUGHPUT
+    float queuing_delay_normalized;   // (RTT - min_RTT) / min_RTT
+    float rtt_ratio;                  // RTT / min_RTT
+    float loss_rate;                  // 丢包率 [0, 1]
+    float cwnd_normalized;            // cwnd / MAX_CWND
+    float in_flight_ratio;            // bytes_in_flight / (cwnd × MSS)
+    float predicted_bw_normalized;    // 带宽预测 / MAX_THROUGHPUT (第7维)
 };
 ```
 
-### 11.2 启用 ai_test 中的 Orca
+### 13.2 启用 Orca 拥塞控制
+
+**步骤 1：修改 TCPConnectionManager 使用 Orca**
+
+```cpp
+// src/transport/tcp_connection.cpp 中的 create_tcb()
+
+#include "neustack/transport/tcp_orca.hpp"
+
+TCB *TCPConnectionManager::create_tcb(const TCPTuple &t_tuple) {
+    // ... 省略前面代码 ...
+
+    // 使用 Orca 而非 Reno
+    tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
+
+    // ... 省略后面代码 ...
+}
+```
+
+**步骤 2：实现 apply_cwnd_action()**
+
+```cpp
+// include/neustack/transport/tcp_layer.hpp 中
+
+#include "neustack/transport/tcp_orca.hpp"
+
+void apply_cwnd_action(const AIAction& action) {
+    for (auto& [tuple, tcb] : _tcp_mgr._connections) {
+        auto* orca = dynamic_cast<TCPOrca*>(tcb->congestion_control.get());
+        if (orca) {
+            orca->set_alpha(action.cwnd.alpha);
+        }
+    }
+}
+```
+
+**步骤 3：启用 ai_test 中的 Orca 模型**
 
 重新训练模型后，恢复 ai_test 中的 Orca：
 
@@ -2063,6 +2227,8 @@ IntelligencePlaneConfig config;
 config.orca_model_path = "../models/orca_actor.onnx";  // 取消注释
 config.anomaly_model_path = "../models/anomaly_detector.onnx";
 config.bandwidth_model_path = "../models/bandwidth_predictor.onnx";
+
+tcp.enable_ai(config);
 ```
 
 ---
