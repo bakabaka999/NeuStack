@@ -112,8 +112,8 @@ public:
         // 时间戳
         if (_show_timestamp) {
             auto now = std::chrono::steady_clock::now();
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - _start_time).count();
+            auto ms = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - _start_time).count());
             std::fprintf(_file, "[%6lld.%03lld] ", ms / 1000, ms % 1000);
         }
 

@@ -2,6 +2,7 @@
 #define NEUSTACK_APP_HTTP_PARSER_HPP
 
 #include "neustack/app/http_types.hpp"
+#include <cstdint>
 #include <optional>
 
 namespace neustack {
