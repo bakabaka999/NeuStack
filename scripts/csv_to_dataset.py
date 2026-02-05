@@ -25,6 +25,7 @@ scripts/csv_to_dataset.py
 import argparse
 import csv
 import os
+import glob
 import numpy as np
 from typing import List, Dict, Tuple
 
@@ -42,26 +43,78 @@ BANDWIDTH_HISTORY_LEN = 10  # 带宽预测的历史窗口
 # 通用工具函数
 # ============================================================================
 
-def load_tcp_samples(csv_path: str) -> List[Dict]:
-    """加载 tcp_samples.csv"""
-    samples = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            samples.append({k: float(v) for k, v in row.items()})
-    print(f"Loaded {len(samples)} TCP samples from {csv_path}")
-    return samples
+def find_csv_files(path: str, pattern: str) -> List[str]:
+    """如果 path 是目录，找所有匹配 pattern 的 CSV；否则返回单个文件"""
+    if os.path.isdir(path):
+        files = glob.glob(os.path.join(path, pattern))
+        files.sort()
+        if not files:
+            raise FileNotFoundError(f"No {pattern} files found in {path}")
+        print(f"  Found {len(files)} files in {path}")
+        return files
+    elif os.path.isfile(path):
+        print(f"  Using single file: {path}")
+        return [path]
+    else:
+        raise FileNotFoundError(f"Path not found: {path}")
 
 
-def load_global_metrics(csv_path: str) -> List[Dict]:
-    """加载 global_metrics.csv"""
-    samples = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            samples.append({k: float(v) for k, v in row.items()})
-    print(f"Loaded {len(samples)} global metrics from {csv_path}")
-    return samples
+def merge_tcp_samples(*csv_files) -> List[Dict]:
+    """合并多个 tcp_samples*.csv 文件"""
+    all_samples = []
+    for csv_file in csv_files:
+        samples = []
+        with open(csv_file) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    sample = {
+                        'timestamp_us': int(row['timestamp_us']),
+                        'delivery_rate': float(row['delivery_rate']),
+                        'send_rate': float(row.get('send_rate', 0)),
+                        'rtt_us': float(row['rtt_us']),
+                        'min_rtt_us': float(row['min_rtt_us']),
+                        'srtt_us': float(row['srtt_us']),
+                        'packets_sent': int(row['packets_sent']),
+                        'packets_lost': int(row['packets_lost']),
+                        'cwnd': int(row['cwnd']),
+                        'bytes_in_flight': int(row.get('bytes_in_flight', 0)),
+                        'loss_detected': int(row.get('loss_detected', 0)),
+                        'timeout_occurred': int(row.get('timeout_occurred', 0)),
+                    }
+                    samples.append(sample)
+                except (ValueError, KeyError) as e:
+                    continue
+        all_samples.extend(samples)
+        print(f"    Loaded {len(samples)} samples from {os.path.basename(csv_file)}")
+
+    print(f"  Total: {len(all_samples)} samples merged")
+    return all_samples
+
+
+def merge_global_metrics(*csv_files) -> List[Dict]:
+    """合并多个 global_metrics*.csv 文件"""
+    all_metrics = []
+    for csv_file in csv_files:
+        metrics = []
+        with open(csv_file) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    metrics.append({
+                        'packets_rx': int(row['packets_rx']),
+                        'packets_tx': int(row['packets_tx']),
+                        'bytes_rx': int(row['bytes_rx']),
+                        'bytes_tx': int(row['bytes_tx']),
+                        'active_connections': int(row['active_connections']),
+                    })
+                except (ValueError, KeyError):
+                    continue
+        all_metrics.extend(metrics)
+        print(f"    Loaded {len(metrics)} metrics from {os.path.basename(csv_file)}")
+
+    print(f"  Total: {len(all_metrics)} metrics merged")
+    return all_metrics
 
 
 def estimate_bandwidth(samples: List[Dict], window: int = 20) -> List[float]:
@@ -361,7 +414,14 @@ def main():
             print("ERROR: --tcp-samples required for orca/bandwidth models")
             return
 
-        samples = load_tcp_samples(args.tcp_samples)
+        print("[*] Loading TCP samples...")
+        try:
+            csv_files = find_csv_files(args.tcp_samples, 'tcp_samples*.csv')
+            samples = merge_tcp_samples(*csv_files)
+        except FileNotFoundError as e:
+            print(f"ERROR: {e}")
+            return
+
         if len(samples) < args.min_samples:
             print(f"ERROR: Need at least {args.min_samples} samples")
             return
@@ -414,10 +474,16 @@ def main():
             print("\n[3/3] Skipping Anomaly dataset (no --global-metrics provided)")
         else:
             print("\n[3/3] Generating Anomaly Detection dataset...")
-            metrics = load_global_metrics(args.global_metrics)
+            try:
+                csv_files = find_csv_files(args.global_metrics, 'global_metrics*.csv')
+                metrics = merge_global_metrics(*csv_files)
+            except FileNotFoundError as e:
+                print(f"WARNING: {e}, skipping anomaly dataset")
+                metrics = []
+
             if len(metrics) < 10:
                 print("  WARNING: Too few metrics samples for anomaly detection")
-            else:
+            elif metrics:
                 anomaly_data = generate_anomaly_dataset(metrics)
                 anomaly_path = os.path.join(args.output_dir, 'anomaly_dataset.npz')
                 np.savez(anomaly_path, **anomaly_data)

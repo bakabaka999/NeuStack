@@ -43,6 +43,9 @@ public:
     // 启动监听
     int listen(uint16_t port);
 
+    // 定时调用，用于 flush 待发送数据
+    void poll();
+
 private:
     IStreamServer &_transport;
 
@@ -57,6 +60,8 @@ private:
     struct ConnectionState {
         HttpRequestParser parser;
         bool keep_alive = true;
+        std::string pending_data;   // 待发送的数据
+        size_t pending_offset = 0;  // 已发送的偏移量
     };
     std::unordered_map<IStreamConnection *, ConnectionState> _connections;
 
@@ -67,8 +72,11 @@ private:
     // 分发请求
     HttpResponse dispatch(const HttpRequest &request);
 
-    // 发送响应
+    // 发送响应（支持分段发送）
     void send_response(IStreamConnection *conn, const HttpResponse &response);
+
+    // 继续发送待发送数据，返回是否全部发送完成
+    bool flush_pending(IStreamConnection *conn);
 };
 
 } // namespace neustack

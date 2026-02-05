@@ -157,6 +157,13 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
     }
 
     LOG_DEBUG(TCP, "Sent %zu bytes, buffered %zu bytes", to_send, accepted - to_send);
+
+    // 关键：初始发送后，继续发送缓冲区中的数据直到填满窗口
+    // 否则只发 1 个 MSS，剩余要等 ACK 才能发，浪费 cwnd
+    if (!tcb->send_buffer.empty()) {
+        send_buffered_data(tcb);
+    }
+
     return static_cast<ssize_t>(accepted);
 }
 

@@ -120,6 +120,16 @@ void HttpServer::on_receive(IStreamConnection *conn, const uint8_t *data, size_t
     if (it == _connections.end()) return; // 没找到
 
     auto &state = it->second;
+
+    // 如果还有待发送数据，先尝试发送
+    if (!state.pending_data.empty()) {
+        flush_pending(conn);
+        // 如果还没发完，暂不处理新请求
+        if (!state.pending_data.empty()) {
+            return;
+        }
+    }
+
     state.parser.feed(data, len);
 
     // 请求完整时再处理
@@ -129,7 +139,7 @@ void HttpServer::on_receive(IStreamConnection *conn, const uint8_t *data, size_t
         LOG_INFO(HTTP, "%s %s",
                  http_method_name(request.method),
                  request.path.c_str());
-        
+
         // 检查 Keep-Alive
         std::string conn_header = request.get_header("Connection");
         state.keep_alive = (conn_header != "close");
@@ -146,6 +156,11 @@ void HttpServer::on_receive(IStreamConnection *conn, const uint8_t *data, size_t
 
         // 重置解析器以处理下一个请求
         state.parser.reset();
+
+        // 如果响应还没发完，暂停处理后续请求
+        if (!state.pending_data.empty()) {
+            break;
+        }
 
         // 非 Keep-Alive，关闭连接
         if (!state.keep_alive) {
@@ -227,6 +242,60 @@ HttpResponse HttpServer::dispatch(const HttpRequest &request) {
 }
 
 void HttpServer::send_response(IStreamConnection *conn, const HttpResponse &response) {
-    std::string data = response.serialize();
-    conn->send(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+    auto it = _connections.find(conn);
+    if (it == _connections.end()) return;
+
+    auto &state = it->second;
+
+    // 序列化响应
+    state.pending_data = response.serialize();
+    state.pending_offset = 0;
+
+    // 尝试发送
+    flush_pending(conn);
+}
+
+bool HttpServer::flush_pending(IStreamConnection *conn) {
+    auto it = _connections.find(conn);
+    if (it == _connections.end()) return true;
+
+    auto &state = it->second;
+
+    while (state.pending_offset < state.pending_data.size()) {
+        const uint8_t *data = reinterpret_cast<const uint8_t*>(
+            state.pending_data.data() + state.pending_offset);
+        size_t remaining = state.pending_data.size() - state.pending_offset;
+
+        ssize_t sent = conn->send(data, remaining);
+
+        if (sent <= 0) {
+            // 缓冲区满或出错，稍后重试
+            LOG_DEBUG(HTTP, "send buffer full, %zu bytes pending", remaining);
+            return false;
+        }
+
+        state.pending_offset += sent;
+        LOG_DEBUG(HTTP, "sent %zd bytes, %zu remaining",
+                  sent, state.pending_data.size() - state.pending_offset);
+    }
+
+    // 全部发送完成，清理
+    state.pending_data.clear();
+    state.pending_offset = 0;
+
+    // 如果是非 Keep-Alive，现在可以关闭了
+    if (!state.keep_alive) {
+        conn->close();
+    }
+
+    return true;
+}
+
+void HttpServer::poll() {
+    // 遍历所有连接，尝试 flush 待发送数据
+    for (auto &[conn, state] : _connections) {
+        if (!state.pending_data.empty()) {
+            flush_pending(conn);
+        }
+    }
 }

@@ -1,8 +1,8 @@
 #!/bin/bash
 # scripts/mac/traffic.sh
 #
-# 从 Mac 向 Linux 服务器请求流量，让 NeuStack 发送数据
-# 用于生成真实网络环境下的训练数据
+# 向 NeuStack 请求 HTTP 下载，让 NeuStack 发送数据
+# 用于生成拥塞控制训练数据
 #
 # 核心思路：用 HTTP 下载让 NeuStack 发送数据，触发拥塞控制
 # - Discard 服务只收不发，无法采集拥塞控制数据
@@ -14,11 +14,12 @@
 #
 # 选项:
 #   --duration N    持续时间 (分钟, 默认: 10)
-#   --http-port N   HTTP 端口 (默认: 8080)
+#   --http-port N   HTTP 端口 (默认: 本地192.168.x.x用80, 其他用8080)
 #   --mode MODE     模式: quick, normal, heavy (默认: normal)
 #
 # 示例:
-#   bash scripts/mac/traffic.sh 1.2.3.4                    # 远程 (socat 转发)
+#   bash scripts/mac/traffic.sh 192.168.100.2              # 本地 TUN (端口 80)
+#   bash scripts/mac/traffic.sh 1.2.3.4                    # 远程服务器 (端口 8080)
 #   bash scripts/mac/traffic.sh 1.2.3.4 --duration 30 --mode heavy
 
 set -e
@@ -26,7 +27,7 @@ set -e
 # ─── 参数解析 ───
 SERVER_IP=""
 DURATION=10
-HTTP_PORT=8080
+HTTP_PORT=""  # 空表示自动检测
 MODE="normal"
 
 while [ $# -gt 0 ]; do
@@ -44,9 +45,18 @@ if [ -z "$SERVER_IP" ]; then
     echo ""
     echo "Options:"
     echo "  --duration N   Duration in minutes (default: 10)"
-    echo "  --http-port N  HTTP port (default: 8080)"
+    echo "  --http-port N  HTTP port (default: auto - 80 for local, 8080 for remote)"
     echo "  --mode MODE    quick|normal|heavy (default: normal)"
     exit 1
+fi
+
+# 自动检测端口：本地 TUN (192.168.x.x) 用 80，远程用 8080
+if [ -z "$HTTP_PORT" ]; then
+    if [[ "$SERVER_IP" == 192.168.* ]]; then
+        HTTP_PORT=80
+    else
+        HTTP_PORT=8080
+    fi
 fi
 
 # 模式配置
@@ -94,12 +104,16 @@ else
     exit 1
 fi
 
-# 测试下载端点
-if curl -s -m 5 "http://$SERVER_IP:$HTTP_PORT/download/1m" -o /dev/null 2>&1; then
+# 测试下载端点（只检查响应头，不下载完整文件）
+HTTP_CODE=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "http://$SERVER_IP:$HTTP_PORT/download/1m" 2>/dev/null || echo "000")
+if [ "$HTTP_CODE" = "200" ]; then
     echo "  ✓ Download endpoint OK"
-else
-    echo "  ✗ Download endpoint not available"
+elif [ "$HTTP_CODE" = "000" ]; then
+    echo "  ✗ Download endpoint not available (connection failed)"
     echo "  Make sure NeuStack has /download/1m endpoint"
+    exit 1
+else
+    echo "  ✗ Download endpoint returned HTTP $HTTP_CODE"
     exit 1
 fi
 
@@ -113,7 +127,7 @@ for i in $(seq 1 $DOWNLOAD_ROUNDS); do
     SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
 
     START=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
-    curl -s -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE"
+    curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE"
     END=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
 
     case "$SIZE" in
@@ -139,7 +153,7 @@ for conns in "${PARALLEL_CONNS[@]}"; do
         for j in $(seq 1 $conns); do
             # 随机选择大小，制造不同完成时间
             SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-            curl -s -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
+            curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
         done
         wait
         echo -n "."
@@ -159,7 +173,7 @@ for i in $(seq 1 $BURST_ROUNDS); do
 
     for j in $(seq 1 $BURST_SIZE); do
         SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-        curl -s -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
+        curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
     done
     wait
 
@@ -181,7 +195,7 @@ while [ $SECONDS -lt $END_TIME ]; do
     CONNS=$((RANDOM % 6 + 1))
     for j in $(seq 1 $CONNS); do
         SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-        curl -s -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
+        curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
     done
     wait
     echo -n "."

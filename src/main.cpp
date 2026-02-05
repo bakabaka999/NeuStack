@@ -313,7 +313,7 @@ static void handle_command(const std::string &line, DNSClient &dns, HttpClient &
 
 static void run_event_loop(NetDevice &device, IPv4Layer &ip_layer,
                            TCPLayer &tcp_layer, DNSClient &dns,
-                           HttpClient &http,
+                           HttpClient &http, HttpServer &http_server,
                            SampleExporter *sample_exp,
                            MetricsExporter *metrics_exp) {
     uint8_t buf[2048];
@@ -330,6 +330,9 @@ static void run_event_loop(NetDevice &device, IPv4Layer &ip_layer,
             LOG_ERROR(HAL, "recv: %s", std::strerror(errno));
             break;
         }
+
+        // HTTP 分段发送：TCP ACK 释放缓冲区空间后继续发送
+        http_server.poll();
 
         // 定时器
         auto now = std::chrono::steady_clock::now();
@@ -469,7 +472,7 @@ int main(int argc, char *argv[]) {
     print_help();
 
     // ─── 主循环 ───
-    run_event_loop(*device, ip_layer, tcp, dns, http_client,
+    run_event_loop(*device, ip_layer, tcp, dns, http_client, http_server,
                    sample_exporter.get(), metrics_exporter.get());
 
     // ─── 关闭前 flush 数据 ───
