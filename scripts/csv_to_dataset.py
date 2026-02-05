@@ -106,6 +106,10 @@ def merge_global_metrics(*csv_files) -> List[Dict]:
                         'packets_tx': int(row['packets_tx']),
                         'bytes_rx': int(row['bytes_rx']),
                         'bytes_tx': int(row['bytes_tx']),
+                        'syn_received': int(row.get('syn_received', 0)),
+                        'rst_received': int(row.get('rst_received', 0)),
+                        'conn_established': int(row.get('conn_established', 0)),
+                        'conn_reset': int(row.get('conn_reset', 0)),
                         'active_connections': int(row['active_connections']),
                     })
                 except (ValueError, KeyError):

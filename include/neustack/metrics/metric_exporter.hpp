@@ -16,8 +16,9 @@ public:
         : _file(filepath), _prev_snapshot(global_metrics().snapshot())
     {
         // 写入 CSV 头
-        _file << "timestamp_ms,syn_received,rst_received,conn_established,"
-              << "conn_reset,packets_rx,bytes_rx\n";
+        _file << "timestamp_ms,packets_rx,packets_tx,bytes_rx,bytes_tx,"
+              << "syn_received,rst_received,conn_established,conn_reset,"
+              << "active_connections\n";
     }
 
     ~MetricsExporter() {
@@ -36,13 +37,17 @@ public:
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now.time_since_epoch()).count();
 
+        // 导出 delta 值（累计计数器的变化量）和瞬时值（active_connections）
         _file << ms << ","
+              << delta.packets_rx << ","
+              << delta.packets_tx << ","
+              << delta.bytes_rx << ","
+              << delta.bytes_tx << ","
               << delta.syn_received << ","
               << delta.rst_received << ","
               << delta.conn_established << ","
               << delta.conn_reset << ","
-              << delta.packets_rx << ","
-              << delta.bytes_rx << "\n";
+              << snapshot.active_connections << "\n";
 
         _prev_snapshot = snapshot;
     }

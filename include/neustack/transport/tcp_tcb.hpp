@@ -217,6 +217,7 @@ struct TCB {
     uint32_t srtt_us = 0;       // 平滑 RTT
     uint32_t rttvar_us = 0;     // RTT 方差
     uint32_t rto_us = 1000000;  // 重传超时（初始化为1s）
+    uint32_t last_rtt_us = 0;   // 最近一次瞬时 RTT 样本（用于采样导出）
 
     // 是否有未确认的 RTT 测量
     bool rtt_measuring = false;

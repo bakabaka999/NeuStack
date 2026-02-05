@@ -1055,7 +1055,7 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
 
             TCPSample sample{};
             sample.timestamp_us = now_us;
-            sample.rtt_us = tcb->srtt_us;
+            sample.rtt_us = tcb->last_rtt_us > 0 ? tcb->last_rtt_us : tcb->srtt_us;
             sample.min_rtt_us = tcb->min_rtt_us;
             sample.srtt_us = tcb->srtt_us;
             sample.cwnd = tcb->congestion_control
@@ -1097,6 +1097,9 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
 }
 
 void TCPConnectionManager::update_rtt(TCB *tcb, uint32_t rtt_us) {
+    // ─── AI 指标采集: 保存瞬时 RTT ───
+    tcb->last_rtt_us = rtt_us;
+
     // ─── AI 指标采集: 跟踪最小 RTT ───
     // 只在 ESTABLISHED 状态后才更新 min_rtt
     // 原因：TUN 设备的 SYN/SYN-ACK 是本地处理 (~18us)，会污染 min_rtt

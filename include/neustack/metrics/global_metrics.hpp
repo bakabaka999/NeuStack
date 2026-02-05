@@ -63,7 +63,9 @@ struct GlobalMetrics {
         // 与上一次快照的差值 (用于计算速率)
         struct Delta {
             uint64_t packets_rx;
+            uint64_t packets_tx;
             uint64_t bytes_rx;
+            uint64_t bytes_tx;
             uint64_t syn_received;
             uint64_t rst_received;
             uint64_t conn_established;
@@ -73,7 +75,9 @@ struct GlobalMetrics {
         Delta diff(const Snapshot& prev) const {
             return {
                 .packets_rx = packets_rx - prev.packets_rx,
+                .packets_tx = packets_tx - prev.packets_tx,
                 .bytes_rx = bytes_rx - prev.bytes_rx,
+                .bytes_tx = bytes_tx - prev.bytes_tx,
                 .syn_received = syn_received - prev.syn_received,
                 .rst_received = rst_received - prev.rst_received,
                 .conn_established = conn_established - prev.conn_established,
