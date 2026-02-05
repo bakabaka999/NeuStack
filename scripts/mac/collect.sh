@@ -1,98 +1,191 @@
 #!/bin/bash
 # scripts/mac/collect.sh
 #
-# macOS 本地数据采集
+# 场景1: macOS 本地数据采集（流畅网络）
+#
+# NeuStack 通过 TUN 设备直连，无真实网络延迟
+# 用于采集理想网络条件下的拥塞控制行为
 #
 # 用法:
-#   sudo bash scripts/mac/collect.sh [output_dir]
+#   sudo bash scripts/mac/collect.sh [options]
 #
-# 示例:
-#   sudo bash scripts/mac/collect.sh
-#   sudo bash scripts/mac/collect.sh /tmp/neustack_data
+# 选项:
+#   --duration N     采集时长 (分钟, 默认: 10)
+#   --output-dir DIR 数据输出目录 (默认: collected_data/)
+#   --mode MODE      流量模式: quick, normal, heavy (默认: normal)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUTPUT_DIR="${1:-$PROJECT_ROOT/collected_data}"
+
+# ─── 参数解析 ───
+DURATION=10
+OUTPUT_DIR="$PROJECT_ROOT/collected_data"
+MODE="normal"
 NEUSTACK_IP="192.168.100.2"
 HOST_IP="192.168.100.1"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --duration)   DURATION="$2"; shift 2;;
+        --output-dir) OUTPUT_DIR="$2"; shift 2;;
+        --mode)       MODE="$2"; shift 2;;
+        *)            echo "Unknown: $1"; exit 1;;
+    esac
+done
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "ERROR: Must run as root (sudo)"
     exit 1
 fi
 
+if [ ! -f "$PROJECT_ROOT/build/neustack" ]; then
+    echo "ERROR: neustack binary not found"
+    echo "  Run: bash scripts/mac/setup.sh"
+    exit 1
+fi
+
+# 模式配置
+case "$MODE" in
+    quick)
+        DOWNLOAD_SIZES=("1m")
+        DOWNLOAD_ROUNDS=5
+        PARALLEL_CONNS=(2 3)
+        ;;
+    normal)
+        DOWNLOAD_SIZES=("1m" "5m" "10m")
+        DOWNLOAD_ROUNDS=15
+        PARALLEL_CONNS=(2 4 6)
+        ;;
+    heavy)
+        DOWNLOAD_SIZES=("1m" "5m" "10m")
+        DOWNLOAD_ROUNDS=30
+        PARALLEL_CONNS=(4 8 12)
+        ;;
+    *)
+        echo "Unknown mode: $MODE (use quick|normal|heavy)"
+        exit 1
+        ;;
+esac
+
+mkdir -p "$OUTPUT_DIR"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
 echo "=============================================="
-echo "  NeuStack macOS Data Collection"
+echo "  NeuStack macOS Local Collection"
 echo "=============================================="
-echo "  Output: $OUTPUT_DIR"
+echo "  Scenario:  Local (low latency TUN)"
+echo "  NeuStack:  $NEUSTACK_IP"
+echo "  Duration:  ${DURATION}m"
+echo "  Mode:      $MODE"
+echo "  Output:    $OUTPUT_DIR"
 echo "=============================================="
 echo ""
 
-mkdir -p "$OUTPUT_DIR"
+# ─── PID 追踪 ───
+NEUSTACK_PID=""
 
-# 时间戳文件名
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-
-# 清理函数
 cleanup() {
     echo ""
     echo "Stopping..."
     [ -n "$NEUSTACK_PID" ] && kill $NEUSTACK_PID 2>/dev/null || true
+    sleep 1
 
-    # 统计
-    if [ -f "$OUTPUT_DIR/tcp_samples.csv" ]; then
-        LINES=$(wc -l < "$OUTPUT_DIR/tcp_samples.csv")
-        echo "  TCP samples:    $LINES lines"
-        # 重命名加时间戳
-        mv "$OUTPUT_DIR/tcp_samples.csv" "$OUTPUT_DIR/tcp_samples_${TIMESTAMP}.csv"
-    fi
-    if [ -f "$OUTPUT_DIR/global_metrics.csv" ]; then
-        LINES=$(wc -l < "$OUTPUT_DIR/global_metrics.csv")
-        echo "  Global metrics: $LINES lines"
-        mv "$OUTPUT_DIR/global_metrics.csv" "$OUTPUT_DIR/global_metrics_${TIMESTAMP}.csv"
-    fi
+    # 重命名带时间戳
+    for f in tcp_samples.csv global_metrics.csv; do
+        SRC="$OUTPUT_DIR/$f"
+        if [ -f "$SRC" ]; then
+            BASE="${f%.csv}"
+            DST="$OUTPUT_DIR/${BASE}_local_${TIMESTAMP}.csv"
+            mv "$SRC" "$DST"
+            LINES=$(wc -l < "$DST")
+            echo "  $DST ($LINES lines)"
+        fi
+    done
     echo ""
-    echo "Files saved to: $OUTPUT_DIR"
+    echo "Done! Data saved to: $OUTPUT_DIR"
 }
 trap cleanup EXIT
 
-# 启动 NeuStack
-echo "Starting NeuStack..."
+# ─── 1. 启动 NeuStack ───
+echo "[1/3] Starting NeuStack..."
 cd "$PROJECT_ROOT/build"
 ./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" -v &
 NEUSTACK_PID=$!
 sleep 2
 
-# 获取 utun 设备名
-UTUN_DEV=$(./neustack --help 2>&1 | head -1 || true)  # 占位，实际从日志解析
-# 简单方法：查找最新的 utun
-UTUN_DEV=$(ifconfig -l | tr ' ' '\n' | grep utun | tail -1)
+# ─── 2. 配置 TUN ───
+echo "[2/3] Configuring TUN device..."
 
+# 查找 utun 设备
+UTUN_DEV=$(ifconfig -l | tr ' ' '\n' | grep utun | tail -1)
 if [ -z "$UTUN_DEV" ]; then
-    echo "Waiting for utun device..."
     sleep 2
     UTUN_DEV=$(ifconfig -l | tr ' ' '\n' | grep utun | tail -1)
 fi
 
-echo "Configuring $UTUN_DEV..."
+if [ -z "$UTUN_DEV" ]; then
+    echo "ERROR: Cannot find utun device"
+    exit 1
+fi
+
 ifconfig "$UTUN_DEV" "$HOST_IP" "$NEUSTACK_IP" up
+echo "  $UTUN_DEV: $HOST_IP <-> $NEUSTACK_IP"
+
+# 等待设备就绪
+sleep 1
+
+# 验证连通性
+echo "  Testing connectivity..."
+if curl -s -m 3 "http://$NEUSTACK_IP/api/status" > /dev/null 2>&1; then
+    echo "  ✓ HTTP OK"
+else
+    echo "  ✗ Cannot connect to NeuStack"
+    exit 1
+fi
+
+# ─── 3. 生成流量 ───
+echo "[3/3] Generating traffic..."
+echo ""
+
+# Phase 1: 串行下载
+echo "  [Phase 1] Serial downloads (mixed sizes)..."
+for i in $(seq 1 $DOWNLOAD_ROUNDS); do
+    SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
+    curl -s -o /dev/null "http://$NEUSTACK_IP/download/$SIZE"
+    [ $((i % 5)) -eq 0 ] && echo "    [$i/$DOWNLOAD_ROUNDS]"
+done
+
+# Phase 2: 并行下载
+echo "  [Phase 2] Parallel downloads..."
+for conns in "${PARALLEL_CONNS[@]}"; do
+    echo "    $conns connections..."
+    for round in $(seq 1 3); do
+        for j in $(seq 1 $conns); do
+            SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
+            curl -s -o /dev/null "http://$NEUSTACK_IP/download/$SIZE" &
+        done
+        wait
+    done
+done
+
+# Phase 3: 持续负载
+echo "  [Phase 3] Sustained load..."
+SUSTAINED_DURATION=$((DURATION * 60 / 2))
+END_TIME=$((SECONDS + SUSTAINED_DURATION))
+while [ $SECONDS -lt $END_TIME ]; do
+    CONNS=$((RANDOM % 6 + 1))
+    for j in $(seq 1 $CONNS); do
+        SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
+        curl -s -o /dev/null "http://$NEUSTACK_IP/download/$SIZE" &
+    done
+    wait
+    echo -n "."
+done
+echo ""
 
 echo ""
-echo "=============================================="
-echo "  Ready! Test commands:"
-echo ""
-echo "  # 基础测试"
-echo "  ping $NEUSTACK_IP"
-echo "  curl http://$NEUSTACK_IP/"
-echo ""
-echo "  # 生成流量"
-echo "  for i in \$(seq 1 100); do curl -s http://$NEUSTACK_IP/api/status; done"
-echo "  yes test | head -c 1000000 | nc $NEUSTACK_IP 7"
-echo ""
-echo "  Press Ctrl+C to stop"
-echo "=============================================="
+echo "  ✓ Traffic generation complete"
 
-# 等待
-wait $NEUSTACK_PID
+# cleanup 由 trap 自动调用
