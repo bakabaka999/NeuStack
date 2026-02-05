@@ -361,8 +361,9 @@ TCB *TCPConnectionManager::create_tcb(const TCPTuple &t_tuple) {
     tcb->apply_options(_default_options);
 
     // 创建拥塞控制器（使用 MSS 配置）
-    // tcb->congestion_control = std::make_unique<TCPReno>(tcb->options.mss);
-    tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
+    // 临时使用 CUBIC 用于数据采集（禁用 Orca AI）
+    tcb->congestion_control = std::make_unique<TCPCubic>(tcb->options.mss);
+    // tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
 
     TCB *ptr = tcb.get();
     _connections[t_tuple] = std::move(tcb);
@@ -1030,7 +1031,9 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
     }
 
     // ─── AI 指标采集: 定期推送 TCPSample ───
-    if (_metrics_buf) {
+    // 只有在本周期内有发送数据时才采样，避免采集无意义的数据
+    // (Discard 服务只收不发，cwnd/bytes_in_flight 永远是初始值)
+    if (_metrics_buf && tcb->bytes_sent_period > 0) {
         auto now_tp = std::chrono::steady_clock::now();
         uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
             now_tp.time_since_epoch()

@@ -3,8 +3,13 @@
 #
 # Linux 服务器数据采集
 #
-# 启动 NeuStack + TUN 配置 + 端口转发
-# 外部客户端 (Mac) 连接到服务器端口即可生成训练数据
+# 启动 NeuStack + TUN 配置 + HTTP 端口转发
+# Mac 客户端通过 HTTP 下载触发 NeuStack 发送数据，产生拥塞控制训练样本
+#
+# 核心原理：
+# - NeuStack 作为 HTTP 服务器，提供 /download/1m, /download/10m 等端点
+# - Mac 用 curl 下载，NeuStack 发送数据，触发拥塞控制算法
+# - 拥塞控制的 cwnd/ssthresh/delivery_rate 等指标被采集到 CSV
 #
 # 用法:
 #   sudo bash scripts/linux/collect.sh [options]
@@ -12,7 +17,6 @@
 # 选项:
 #   --hours N        采集时长 (默认: 不限, Ctrl+C 停止)
 #   --http-port N    HTTP 转发端口 (默认: 8080)
-#   --echo-port N    TCP Echo 转发端口 (默认: 8007)
 #   --output-dir DIR 数据输出目录 (默认: collected_data/)
 #   --ip IP          NeuStack IP (默认: 10.0.1.2)
 
@@ -24,8 +28,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # ─── 参数解析 ───
 HOURS=0
 HTTP_PORT=8080
-ECHO_PORT=8007
-DISCARD_PORT=8009
 OUTPUT_DIR="$PROJECT_ROOT/collected_data"
 NEUSTACK_IP="10.0.1.2"
 HOST_IP="10.0.1.1"
@@ -34,8 +36,6 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --hours)      HOURS="$2"; shift 2;;
         --http-port)  HTTP_PORT="$2"; shift 2;;
-        --echo-port)  ECHO_PORT="$2"; shift 2;;
-        --discard-port) DISCARD_PORT="$2"; shift 2;;
         --output-dir) OUTPUT_DIR="$2"; shift 2;;
         --ip)         NEUSTACK_IP="$2"; shift 2;;
         *)            echo "Unknown: $1"; exit 1;;
@@ -66,8 +66,6 @@ echo "=============================================="
 echo "  Server IP:     $SERVER_IP"
 echo "  NeuStack IP:   $NEUSTACK_IP"
 echo "  HTTP forward:  :$HTTP_PORT -> $NEUSTACK_IP:80"
-echo "  Echo forward:  :$ECHO_PORT -> $NEUSTACK_IP:7"
-echo "  Discard fwd:   :$DISCARD_PORT -> $NEUSTACK_IP:9"
 echo "  Output:        $OUTPUT_DIR"
 if [ $HOURS -gt 0 ]; then
     echo "  Duration:      ${HOURS}h"
@@ -136,14 +134,6 @@ socat TCP-LISTEN:$HTTP_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:80 &
 PIDS+=($!)
 echo "  :$HTTP_PORT -> $NEUSTACK_IP:80 (HTTP)"
 
-socat TCP-LISTEN:$ECHO_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:7 &
-PIDS+=($!)
-echo "  :$ECHO_PORT -> $NEUSTACK_IP:7 (TCP Echo)"
-
-socat TCP-LISTEN:$DISCARD_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:9 &
-PIDS+=($!)
-echo "  :$DISCARD_PORT -> $NEUSTACK_IP:9 (TCP Discard)"
-
 # ─── 就绪 ───
 echo ""
 echo "=============================================="
@@ -152,8 +142,11 @@ echo ""
 echo "  # Quick test"
 echo "  curl http://$SERVER_IP:$HTTP_PORT/api/status"
 echo ""
-echo "  # Auto traffic generation"
-echo "  bash scripts/mac/traffic.sh $SERVER_IP"
+echo "  # Auto traffic generation (recommended)"
+echo "  bash scripts/mac/traffic.sh $SERVER_IP --http-port $HTTP_PORT"
+echo ""
+echo "  # Manual download test"
+echo "  curl -o /dev/null http://$SERVER_IP:$HTTP_PORT/download/10m"
 echo ""
 echo "  Press Ctrl+C to stop collection"
 echo "=============================================="

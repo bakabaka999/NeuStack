@@ -4,7 +4,12 @@
 # 场景3: 带宽突变采集 (在服务器上运行)
 #
 # 在 collect.sh 的基础上，额外用 tc 动态改变网络条件
-# Mac 端照常跑 traffic.sh 发流量即可
+# Mac 端照常跑 traffic.sh 下载数据，服务器端 tc 模拟各种网络状况
+#
+# 核心原理：
+# - Mac 通过 HTTP 下载让 NeuStack 发送数据
+# - 服务器用 tc 模拟带宽限制、延迟、丢包等
+# - 采集 NeuStack 在各种网络条件下的拥塞控制行为
 #
 # 用法:
 #   sudo bash scripts/linux/collect_bwvar.sh [options]
@@ -15,7 +20,6 @@
 #   --output-dir DIR 数据输出目录 (默认: collected_data/)
 #   --ip IP          NeuStack IP (默认: 10.0.1.2)
 #   --http-port N    HTTP 转发端口 (默认: 8080)
-#   --echo-port N    TCP Echo 转发端口 (默认: 8007)
 
 set -e
 
@@ -30,8 +34,6 @@ OUTPUT_DIR="$PROJECT_ROOT/collected_data"
 NEUSTACK_IP="10.0.1.2"
 HOST_IP="10.0.1.1"
 HTTP_PORT=8080
-ECHO_PORT=8007
-DISCARD_PORT=8009
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -40,8 +42,6 @@ while [ $# -gt 0 ]; do
         --output-dir) OUTPUT_DIR="$2"; shift 2;;
         --ip)         NEUSTACK_IP="$2"; shift 2;;
         --http-port)  HTTP_PORT="$2"; shift 2;;
-        --echo-port)  ECHO_PORT="$2"; shift 2;;
-        --discard-port) DISCARD_PORT="$2"; shift 2;;
         *)            echo "Unknown: $1"; exit 1;;
     esac
 done
@@ -84,8 +84,6 @@ echo "  Interface:     $IFACE"
 echo "  Rounds:        $ROUNDS"
 echo "  Total time:    ~${TOTAL_TIME}s (~$((TOTAL_TIME/60))min)"
 echo "  HTTP forward:  :$HTTP_PORT -> $NEUSTACK_IP:80"
-echo "  Echo forward:  :$ECHO_PORT -> $NEUSTACK_IP:7"
-echo "  Discard fwd:   :$DISCARD_PORT -> $NEUSTACK_IP:9"
 echo "  Output:        $OUTPUT_DIR"
 echo "=============================================="
 echo ""
@@ -147,20 +145,12 @@ socat TCP-LISTEN:$HTTP_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:80 &
 PIDS+=($!)
 echo "  :$HTTP_PORT -> $NEUSTACK_IP:80 (HTTP)"
 
-socat TCP-LISTEN:$ECHO_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:7 &
-PIDS+=($!)
-echo "  :$ECHO_PORT -> $NEUSTACK_IP:7 (TCP Echo)"
-
-socat TCP-LISTEN:$DISCARD_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:9 &
-PIDS+=($!)
-echo "  :$DISCARD_PORT -> $NEUSTACK_IP:9 (TCP Discard)"
-
 # ─── 就绪 ───
 echo ""
 echo "=============================================="
 echo "  Ready! Now run on Mac:"
 echo ""
-echo "  bash scripts/mac/traffic.sh $SERVER_IP --duration $((TOTAL_TIME / 60 + 1)) --mode normal"
+echo "  bash scripts/mac/traffic.sh $SERVER_IP --http-port $HTTP_PORT --duration $((TOTAL_TIME / 60 + 1)) --mode heavy"
 echo ""
 echo "=============================================="
 echo ""

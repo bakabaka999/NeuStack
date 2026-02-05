@@ -155,7 +155,12 @@ static void setup_http_server(HttpServer &server, uint32_t local_ip) {
                 "  <li><a href=\"/api/status\">/api/status</a> - Stack status</li>\n"
                 "  <li><a href=\"/api/info\">/api/info</a> - Stack info</li>\n"
                 "  <li>POST /api/echo - Echo request body</li>\n"
-                "  <li>POST /api/dns?host=xxx - DNS lookup</li>\n"
+                "</ul>\n"
+                "<h2>Download (for data collection)</h2>\n"
+                "<ul>\n"
+                "  <li><a href=\"/download/1m\">/download/1m</a> - 1MB random data</li>\n"
+                "  <li><a href=\"/download/5m\">/download/5m</a> - 5MB random data</li>\n"
+                "  <li><a href=\"/download/10m\">/download/10m</a> - 10MB random data</li>\n"
                 "</ul>\n"
                 "</body></html>\n"
             );
@@ -182,6 +187,35 @@ static void setup_http_server(HttpServer &server, uint32_t local_ip) {
         return HttpResponse()
             .content_type(req.get_header("Content-Type"))
             .set_body(req.body);
+    });
+
+    // 下载端点 - 用于数据采集（生成指定大小的随机数据）
+    // 客户端用 curl -o /dev/null 下载，NeuStack 发送数据触发拥塞控制
+    auto download_handler = [](const HttpRequest &req, size_t size_bytes) {
+        std::string data(size_bytes, '\0');
+        // 用简单伪随机填充（不需要真随机，只是为了产生流量）
+        uint32_t state = 0xDEADBEEF;
+        for (size_t i = 0; i < size_bytes; i += 4) {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            size_t remaining = std::min(size_bytes - i, static_cast<size_t>(4));
+            std::memcpy(&data[i], &state, remaining);
+        }
+        return HttpResponse()
+            .content_type("application/octet-stream")
+            .set_header("Cache-Control", "no-cache")
+            .set_body(data);
+    };
+
+    server.get("/download/1m", [download_handler](const HttpRequest &req) {
+        return download_handler(req, 1 * 1024 * 1024);
+    });
+    server.get("/download/5m", [download_handler](const HttpRequest &req) {
+        return download_handler(req, 5 * 1024 * 1024);
+    });
+    server.get("/download/10m", [download_handler](const HttpRequest &req) {
+        return download_handler(req, 10 * 1024 * 1024);
     });
 
     server.listen(80);
