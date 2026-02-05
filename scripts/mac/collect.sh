@@ -3,16 +3,15 @@
 #
 # 场景1: macOS 本地数据采集（流畅网络）
 #
-# NeuStack 通过 TUN 设备直连，无真实网络延迟
-# 用于采集理想网络条件下的拥塞控制行为
+# 启动 NeuStack + 配置 TUN，流量由另一个终端运行 traffic.sh 生成
 #
 # 用法:
 #   sudo bash scripts/mac/collect.sh [options]
 #
 # 选项:
-#   --duration N     采集时长 (分钟, 默认: 10)
+#   --hours N        采集时长 (默认: 不限, Ctrl+C 停止)
 #   --output-dir DIR 数据输出目录 (默认: collected_data/)
-#   --mode MODE      流量模式: quick, normal, heavy (默认: normal)
+#   --ip IP          NeuStack IP (默认: 192.168.100.2)
 
 set -e
 
@@ -20,20 +19,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ─── 参数解析 ───
-DURATION=10
+HOURS=0
 OUTPUT_DIR="$PROJECT_ROOT/collected_data"
-MODE="normal"
 NEUSTACK_IP="192.168.100.2"
 HOST_IP="192.168.100.1"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --duration)   DURATION="$2"; shift 2;;
+        --hours)      HOURS="$2"; shift 2;;
         --output-dir) OUTPUT_DIR="$2"; shift 2;;
-        --mode)       MODE="$2"; shift 2;;
+        --ip)         NEUSTACK_IP="$2"; shift 2;;
         *)            echo "Unknown: $1"; exit 1;;
     esac
 done
+
+# 从 NeuStack IP 推导 Host IP
+HOST_IP=$(echo "$NEUSTACK_IP" | sed 's/\.[0-9]*$/.1/')
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "ERROR: Must run as root (sudo)"
@@ -46,29 +47,6 @@ if [ ! -f "$PROJECT_ROOT/build/neustack" ]; then
     exit 1
 fi
 
-# 模式配置
-case "$MODE" in
-    quick)
-        DOWNLOAD_SIZES=("1m")
-        DOWNLOAD_ROUNDS=5
-        PARALLEL_CONNS=(2 3)
-        ;;
-    normal)
-        DOWNLOAD_SIZES=("1m" "5m" "10m")
-        DOWNLOAD_ROUNDS=15
-        PARALLEL_CONNS=(2 4 6)
-        ;;
-    heavy)
-        DOWNLOAD_SIZES=("1m" "5m" "10m")
-        DOWNLOAD_ROUNDS=30
-        PARALLEL_CONNS=(4 8 12)
-        ;;
-    *)
-        echo "Unknown mode: $MODE (use quick|normal|heavy)"
-        exit 1
-        ;;
-esac
-
 mkdir -p "$OUTPUT_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
@@ -77,9 +55,12 @@ echo "  NeuStack macOS Local Collection"
 echo "=============================================="
 echo "  Scenario:  Local (low latency TUN)"
 echo "  NeuStack:  $NEUSTACK_IP"
-echo "  Duration:  ${DURATION}m"
-echo "  Mode:      $MODE"
 echo "  Output:    $OUTPUT_DIR"
+if [ $HOURS -gt 0 ]; then
+    echo "  Duration:  ${HOURS}h"
+else
+    echo "  Duration:  unlimited (Ctrl+C to stop)"
+fi
 echo "=============================================="
 echo ""
 
@@ -109,14 +90,14 @@ cleanup() {
 trap cleanup EXIT
 
 # ─── 1. 启动 NeuStack ───
-echo "[1/3] Starting NeuStack..."
+echo "[1/2] Starting NeuStack..."
 cd "$PROJECT_ROOT/build"
 ./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" -v &
 NEUSTACK_PID=$!
 sleep 2
 
 # ─── 2. 配置 TUN ───
-echo "[2/3] Configuring TUN device..."
+echo "[2/2] Configuring TUN device..."
 
 # 查找 utun 设备
 UTUN_DEV=$(ifconfig -l | tr ' ' '\n' | grep utun | tail -1)
@@ -133,59 +114,24 @@ fi
 ifconfig "$UTUN_DEV" "$HOST_IP" "$NEUSTACK_IP" up
 echo "  $UTUN_DEV: $HOST_IP <-> $NEUSTACK_IP"
 
-# 等待设备就绪
-sleep 1
+# ─── 就绪 ───
+echo ""
+echo "=============================================="
+echo "  Ready! In another terminal run:"
+echo ""
+echo "  # Quick test"
+echo "  curl http://$NEUSTACK_IP/api/status"
+echo ""
+echo "  # Generate traffic"
+echo "  bash scripts/mac/traffic.sh $NEUSTACK_IP --duration 10"
+echo ""
+echo "  Press Ctrl+C to stop collection"
+echo "=============================================="
+echo ""
 
-# 验证连通性
-echo "  Testing connectivity..."
-if curl -s -m 3 "http://$NEUSTACK_IP/api/status" > /dev/null 2>&1; then
-    echo "  ✓ HTTP OK"
+# 等待
+if [ $HOURS -gt 0 ]; then
+    sleep $((HOURS * 3600))
 else
-    echo "  ✗ Cannot connect to NeuStack"
-    exit 1
+    wait $NEUSTACK_PID
 fi
-
-# ─── 3. 生成流量 ───
-echo "[3/3] Generating traffic..."
-echo ""
-
-# Phase 1: 串行下载
-echo "  [Phase 1] Serial downloads (mixed sizes)..."
-for i in $(seq 1 $DOWNLOAD_ROUNDS); do
-    SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-    curl -s -o /dev/null "http://$NEUSTACK_IP/download/$SIZE"
-    [ $((i % 5)) -eq 0 ] && echo "    [$i/$DOWNLOAD_ROUNDS]"
-done
-
-# Phase 2: 并行下载
-echo "  [Phase 2] Parallel downloads..."
-for conns in "${PARALLEL_CONNS[@]}"; do
-    echo "    $conns connections..."
-    for round in $(seq 1 3); do
-        for j in $(seq 1 $conns); do
-            SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-            curl -s -o /dev/null "http://$NEUSTACK_IP/download/$SIZE" &
-        done
-        wait
-    done
-done
-
-# Phase 3: 持续负载
-echo "  [Phase 3] Sustained load..."
-SUSTAINED_DURATION=$((DURATION * 60 / 2))
-END_TIME=$((SECONDS + SUSTAINED_DURATION))
-while [ $SECONDS -lt $END_TIME ]; do
-    CONNS=$((RANDOM % 6 + 1))
-    for j in $(seq 1 $CONNS); do
-        SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-        curl -s -o /dev/null "http://$NEUSTACK_IP/download/$SIZE" &
-    done
-    wait
-    echo -n "."
-done
-echo ""
-
-echo ""
-echo "  ✓ Traffic generation complete"
-
-# cleanup 由 trap 自动调用
