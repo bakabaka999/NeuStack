@@ -92,8 +92,15 @@ class DDPGAgent:
         """存储经验"""
         self.replay_buffer.push(state, action, reward, next_state, done)
 
-    def update(self) -> Tuple[float, float]:
-        """更新网络"""
+    def update(self, bc_weight: float = 0.0) -> Tuple[float, float]:
+        """
+        更新网络
+
+        参数:
+            bc_weight: 行为克隆正则化权重 (离线训练时使用)
+                       0.0 = 纯 DDPG (在线训练)
+                       >0  = TD3+BC 风格 (离线训练，推荐 2.5)
+        """
         if len(self.replay_buffer) < self.batch_size:
             return 0.0, 0.0
 
@@ -111,19 +118,37 @@ class DDPGAgent:
             next_actions = self.actor_target(next_states)
             target_q = self.critic_target(next_states, next_actions)
             target_q = rewards + (1 - dones) * self.gamma * target_q
+            # 限制 target Q 范围，防止自举误差导致发散
+            # reward 在 [-2, 1]，γ=0.95 时理论 Q ∈ [-40, 20]
+            target_q = torch.clamp(target_q, -50, 25)
 
         current_q = self.critic(states, actions)
         critic_loss = nn.MSELoss()(current_q, target_q)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        # 梯度裁剪防止爆炸
+        nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
 
         # ─── 更新 Actor ───
-        actor_loss = -self.critic(states, self.actor(states)).mean()
+        # TD3+BC: actor_loss = λ * (-Q(s, π(s))) + ||π(s) - a||²
+        predicted_actions = self.actor(states)
+        q_values = self.critic(states, predicted_actions)
+
+        if bc_weight > 0:
+            # 行为克隆正则化：让 Actor 保持接近数据中的动作
+            bc_loss = nn.MSELoss()(predicted_actions, actions)
+            # 归一化 λ 使 Q-loss 和 BC-loss 在相同尺度 (TD3+BC 论文的技巧)
+            lmbda = bc_weight / (q_values.abs().mean().detach() + 1e-8)
+            actor_loss = -lmbda * q_values.mean() + bc_loss
+        else:
+            actor_loss = -q_values.mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        # 梯度裁剪防止爆炸
+        nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
 
         # ─── 软更新 target 网络 ───

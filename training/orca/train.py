@@ -7,6 +7,7 @@ from collections import deque
 
 from env import SimpleNetworkEnv, MultiFlowEnv
 from ddpg import DDPGAgent
+from replay_buffer import ReplayBuffer
 
 
 def load_config(path: str) -> dict:
@@ -129,9 +130,124 @@ def plot_training(
     plt.close()
 
 
+def plot_offline_training(
+    critic_losses: list,
+    actor_losses: list,
+    save_path: str
+):
+    """绘制离线训练曲线"""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # Critic Loss
+    ax = axes[0]
+    ax.plot(critic_losses, alpha=0.5)
+    window = min(100, len(critic_losses) // 10 + 1)
+    if len(critic_losses) >= window:
+        ma = np.convolve(critic_losses, np.ones(window)/window, mode='valid')
+        ax.plot(range(window-1, len(critic_losses)), ma, 'r-', linewidth=2)
+    ax.set_xlabel('Update Step')
+    ax.set_ylabel('Critic Loss')
+    ax.set_title('Critic Loss')
+    ax.grid(True)
+
+    # Actor Loss
+    ax = axes[1]
+    ax.plot(actor_losses, alpha=0.5)
+    if len(actor_losses) >= window:
+        ma = np.convolve(actor_losses, np.ones(window)/window, mode='valid')
+        ax.plot(range(window-1, len(actor_losses)), ma, 'r-', linewidth=2)
+    ax.set_xlabel('Update Step')
+    ax.set_ylabel('Actor Loss')
+    ax.set_title('Actor Loss')
+    ax.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def train_offline(config: dict, data_path: str, output_dir: str):
+    """
+    离线训练模式：从 npz 文件加载数据训练
+
+    使用 TD3+BC 算法防止 Q 值发散：
+    - bc_weight > 0: 添加行为克隆正则化，防止 Actor 选择 OOD 动作
+    """
+    print("=" * 50)
+    print("  Offline Training Mode (TD3+BC)")
+    print("=" * 50)
+
+    # 创建 agent
+    agent = DDPGAgent(
+        state_dim=config['agent']['state_dim'],
+        action_dim=config['agent']['action_dim'],
+        hidden_dims=config['agent']['hidden_dims'],
+        lr_actor=config['agent']['lr_actor'],
+        lr_critic=config['agent']['lr_critic'],
+        gamma=config['agent']['gamma'],
+        tau=config['agent']['tau'],
+        buffer_size=config['agent']['buffer_size'],
+        batch_size=config['agent']['batch_size'],
+    )
+
+    # 加载数据到 replay buffer
+    print(f"Loading data from: {data_path}")
+    n_samples = agent.replay_buffer.load_from_npz(data_path)
+    print(f"Loaded {n_samples} transitions")
+
+    # 训练参数
+    num_updates = config.get('offline_training', {}).get('num_updates', 10000)
+    log_interval = config.get('offline_training', {}).get('log_interval', 100)
+    save_interval = config.get('offline_training', {}).get('save_interval', 1000)
+    bc_weight = config.get('offline_training', {}).get('bc_weight', 2.5)
+
+    print(f"Training for {num_updates} updates")
+    print(f"Batch size: {config['agent']['batch_size']}")
+    print(f"BC weight: {bc_weight}")
+    print()
+
+    # 训练循环
+    critic_losses = []
+    actor_losses = []
+
+    for step in range(num_updates):
+        critic_loss, actor_loss = agent.update(bc_weight=bc_weight)
+        critic_losses.append(critic_loss)
+        actor_losses.append(actor_loss)
+
+        if (step + 1) % log_interval == 0:
+            avg_critic = np.mean(critic_losses[-log_interval:])
+            avg_actor = np.mean(actor_losses[-log_interval:])
+            print(f"Step {step + 1:5d}/{num_updates} | "
+                  f"Critic Loss: {avg_critic:.6f} | Actor Loss: {avg_actor:.6f}")
+
+        if (step + 1) % save_interval == 0:
+            agent.save(os.path.join(output_dir, f'checkpoint_{step+1}.pth'))
+
+    # 保存最终模型
+    agent.save(os.path.join(output_dir, 'final_model.pth'))
+
+    # 绘制训练曲线
+    plot_offline_training(
+        critic_losses,
+        actor_losses,
+        os.path.join(output_dir, 'offline_training_curves.png')
+    )
+
+    print()
+    print("=" * 50)
+    print("  Offline Training Complete!")
+    print("=" * 50)
+    print(f"Final Critic Loss: {np.mean(critic_losses[-100:]):.6f}")
+    print(f"Final Actor Loss: {np.mean(actor_losses[-100:]):.6f}")
+    print(f"Model saved to: {output_dir}/final_model.pth")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Train Orca DDPG')
     parser.add_argument('--config', type=str, default='config.yaml')
+    parser.add_argument('--data', type=str, default=None,
+                        help='Path to npz data file (enables offline training)')
     args = parser.parse_args()
 
     # 加载配置
@@ -140,6 +256,17 @@ def main():
     # 创建输出目录
     os.makedirs(config['output']['model_dir'], exist_ok=True)
 
+    # 根据是否提供数据文件选择训练模式
+    if args.data:
+        # 离线训练模式
+        train_offline(config, args.data, config['output']['model_dir'])
+    else:
+        # 在线训练模式
+        train_online(config)
+
+
+def train_online(config: dict):
+    """在线训练模式：与模拟环境交互"""
     # 创建环境和 agent
     env = create_env(config)
     agent = DDPGAgent(
@@ -168,14 +295,14 @@ def main():
         agent.noise.reset()
         episode_reward = 0
 
-        for step in range(config['training']['max_steps_per_episode']):
+        for _ in range(config['training']['max_steps_per_episode']):
             # 选择动作
             action = agent.select_action(state, add_noise=True)
             action = action * noise_scale  # 噪声衰减
             action = np.clip(action, -1, 1)
 
             # 执行动作
-            next_state, reward, done, info = env.step(action[0])
+            next_state, reward, done, _ = env.step(action[0])
 
             # 存储经验
             agent.store_transition(state, action, reward, next_state, done)

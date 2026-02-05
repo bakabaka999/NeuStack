@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from typing import Dict, Tuple
 
 from model import SimpleLSTMPredictor, LSTMBandwidthPredictor
-from dataset import create_dataloaders
+from dataset import create_dataloaders, create_dataloaders_from_npz
 
 
 def load_config(config_path: str) -> Dict:
@@ -161,6 +161,8 @@ def plot_predictions(
 def main():
     parser = argparse.ArgumentParser(description='Train bandwidth prediction model')
     parser.add_argument('--config', type=str, default='config.yaml')
+    parser.add_argument('--data', type=str, default=None,
+                        help='Path to npz data file (overrides synthetic data)')
     args = parser.parse_args()
 
     # 加载配置
@@ -174,13 +176,24 @@ def main():
     os.makedirs(config['output']['model_dir'], exist_ok=True)
 
     # 创建数据加载器
-    train_loader, val_loader = create_dataloaders(
-        train_samples=config['data']['train_samples'],
-        val_samples=config['data']['val_samples'],
-        history_length=config['data']['history_length'],
-        batch_size=config['training']['batch_size'],
-        seed=config['data']['seed']
-    )
+    if args.data:
+        # 使用真实数据
+        print(f"Loading real data from: {args.data}")
+        train_loader, val_loader = create_dataloaders_from_npz(
+            npz_path=args.data,
+            train_ratio=0.8,
+            batch_size=config['training']['batch_size'],
+            seed=config['data']['seed']
+        )
+    else:
+        # 使用合成数据
+        train_loader, val_loader = create_dataloaders(
+            train_samples=config['data']['train_samples'],
+            val_samples=config['data']['val_samples'],
+            history_length=config['data']['history_length'],
+            batch_size=config['training']['batch_size'],
+            seed=config['data']['seed']
+        )
     print(f"Train samples: {len(train_loader.dataset)}, Val samples: {len(val_loader.dataset)}")
     print(f"History length: {config['data']['history_length']}")
 

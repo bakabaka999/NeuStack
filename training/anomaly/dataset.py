@@ -162,3 +162,85 @@ class RealTrafficDataset(Dataset):
 
     def __getitem__(self, idx):
         return torch.from_numpy(self.data[idx]), int(self.labels[idx])
+
+
+class NpzDataset(Dataset):
+    """从 npz 文件加载的数据集 (真实采集数据)"""
+
+    def __init__(self, npz_path: str, labels: Optional[np.ndarray] = None):
+        """
+        Args:
+            npz_path: npz 文件路径，需包含 'inputs' 键
+            labels: 可选的标签数组，默认全为 0 (正常)
+        """
+        data = np.load(npz_path)
+        self.data = data['inputs'].astype(np.float32)
+
+        if labels is not None:
+            self.labels = labels
+        else:
+            # 真实数据默认标签为 0 (正常)
+            self.labels = np.zeros(len(self.data))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return torch.from_numpy(self.data[idx]), int(self.labels[idx])
+
+
+def create_dataloaders_from_npz(
+    npz_path: str,
+    train_ratio: float = 0.8,
+    batch_size: int = 64,
+    seed: int = 42
+) -> Tuple[DataLoader, DataLoader]:
+    """从 npz 文件创建训练和验证数据加载器"""
+    data = np.load(npz_path)
+    inputs = data['inputs'].astype(np.float32)
+
+    # 打乱并分割数据
+    np.random.seed(seed)
+    indices = np.random.permutation(len(inputs))
+    split = int(len(inputs) * train_ratio)
+
+    train_indices = indices[:split]
+    val_indices = indices[split:]
+
+    # 训练集：正常数据 (标签 0)
+    train_data = inputs[train_indices]
+    train_labels = np.zeros(len(train_data))
+
+    # 验证集：正常数据 (标签 0)
+    # 注意：真实数据没有异常标签，评估时只能看重构误差分布
+    val_data = inputs[val_indices]
+    val_labels = np.zeros(len(val_data))
+
+    class SimpleDataset(Dataset):
+        def __init__(self, data, labels):
+            self.data = data
+            self.labels = labels
+
+        def __len__(self):
+            return len(self.data)
+
+        def __getitem__(self, idx):
+            return torch.from_numpy(self.data[idx]), int(self.labels[idx])
+
+    train_loader = DataLoader(
+        SimpleDataset(train_data, train_labels),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=True
+    )
+
+    val_loader = DataLoader(
+        SimpleDataset(val_data, val_labels),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True
+    )
+
+    return train_loader, val_loader

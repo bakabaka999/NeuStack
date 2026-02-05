@@ -1088,8 +1088,13 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
 
 void TCPConnectionManager::update_rtt(TCB *tcb, uint32_t rtt_us) {
     // ─── AI 指标采集: 跟踪最小 RTT ───
-    if (tcb->min_rtt_us == 0 || rtt_us < tcb->min_rtt_us) {
-        tcb->min_rtt_us = rtt_us;
+    // 只在 ESTABLISHED 状态后才更新 min_rtt
+    // 原因：TUN 设备的 SYN/SYN-ACK 是本地处理 (~18us)，会污染 min_rtt
+    // 真实网络 RTT 通常在几毫秒到几十毫秒
+    if (tcb->state == TCPState::ESTABLISHED) {
+        if (tcb->min_rtt_us == 0 || rtt_us < tcb->min_rtt_us) {
+            tcb->min_rtt_us = rtt_us;
+        }
     }
 
     if (tcb->srtt_us == 0) {

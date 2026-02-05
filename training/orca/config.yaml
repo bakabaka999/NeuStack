@@ -8,12 +8,12 @@ env:
   num_flows: 2  # 仅 multi_flow 使用
 
 agent:
-  state_dim: 7
+  state_dim: 6      # 真实数据有 6 个特征
   action_dim: 1
   hidden_dims: [256, 256]
   lr_actor: 0.0001
   lr_critic: 0.001
-  gamma: 0.99
+  gamma: 0.95       # 降低 discount factor，减少自举误差累积
   tau: 0.005
   buffer_size: 100000
   batch_size: 256
@@ -26,6 +26,13 @@ training:
   save_interval: 100
   noise_decay: 0.995
   min_noise: 0.1
+
+# 离线训练配置 (使用 --data 参数时生效)
+offline_training:
+  num_updates: 10000
+  log_interval: 100
+  save_interval: 2000
+  bc_weight: 2.5  # 行为克隆正则化权重 (TD3+BC，防止 Q 值发散)
 
 output:
   model_dir: "checkpoints"

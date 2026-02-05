@@ -167,3 +167,63 @@ class RealBandwidthDataset(Dataset):
             torch.from_numpy(self.sequences[idx]),
             torch.tensor(self.targets[idx])
         )
+
+
+class NpzBandwidthDataset(Dataset):
+    """从 npz 文件加载的带宽预测数据集"""
+
+    def __init__(self, inputs: np.ndarray, targets: np.ndarray):
+        """
+        Args:
+            inputs: 形状 (N, history_length, 3) 的序列数据
+            targets: 形状 (N, 1) 或 (N,) 的目标值
+        """
+        self.sequences = inputs.astype(np.float32)
+        self.targets = targets.flatten().astype(np.float32)
+
+    def __len__(self):
+        return len(self.sequences)
+
+    def __getitem__(self, idx):
+        return (
+            torch.from_numpy(self.sequences[idx]),
+            torch.tensor(self.targets[idx])
+        )
+
+
+def create_dataloaders_from_npz(
+    npz_path: str,
+    train_ratio: float = 0.8,
+    batch_size: int = 64,
+    seed: int = 42
+) -> Tuple[DataLoader, DataLoader]:
+    """从 npz 文件创建训练和验证数据加载器"""
+    data = np.load(npz_path)
+    inputs = data['inputs']
+    targets = data['targets']
+
+    # 打乱并分割数据
+    np.random.seed(seed)
+    indices = np.random.permutation(len(inputs))
+    split = int(len(inputs) * train_ratio)
+
+    train_indices = indices[:split]
+    val_indices = indices[split:]
+
+    train_loader = DataLoader(
+        NpzBandwidthDataset(inputs[train_indices], targets[train_indices]),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=True
+    )
+
+    val_loader = DataLoader(
+        NpzBandwidthDataset(inputs[val_indices], targets[val_indices]),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True
+    )
+
+    return train_loader, val_loader

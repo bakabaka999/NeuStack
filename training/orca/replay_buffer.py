@@ -25,6 +25,31 @@ class ReplayBuffer:
             np.array(dones, dtype=np.float32).reshape(-1, 1),
         )
 
+    def load_from_npz(self, npz_path: str):
+        """从 npz 文件加载离线数据"""
+        data = np.load(npz_path)
+        states = data['states']
+        actions = data['actions']
+        rewards = data['rewards']
+        next_states = data['next_states']
+        dones = data['dones']
+
+        # 确保形状正确
+        actions = actions.reshape(-1, 1) if actions.ndim == 1 else actions
+        rewards = rewards.flatten()
+        dones = dones.flatten()
+
+        for i in range(len(states)):
+            self.push(
+                states[i],
+                actions[i],
+                rewards[i],
+                next_states[i],
+                dones[i]
+            )
+
+        return len(states)
+
     def __len__(self):
         return len(self.buffer)
 

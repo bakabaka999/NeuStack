@@ -372,7 +372,7 @@ int main(int argc, char *argv[]) {
     ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::UDP), &udp);
 
     TCPLayer tcp(ip_layer, cfg.local_ip);
-    tcp.set_default_options(TCPOptions::interactive());
+    tcp.set_default_options(TCPOptions::high_throughput());
     ip_layer.register_handler(static_cast<uint8_t>(IPProtocol::TCP), &tcp);
 
     // ─── 应用层 ───
