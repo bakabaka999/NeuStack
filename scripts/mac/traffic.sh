@@ -14,8 +14,9 @@
 #   --mode MODE     模式: quick, normal, heavy (默认: normal)
 #
 # 示例:
-#   bash scripts/mac/traffic.sh 1.2.3.4
+#   bash scripts/mac/traffic.sh 1.2.3.4                    # 远程 (socat 转发)
 #   bash scripts/mac/traffic.sh 1.2.3.4 --duration 30 --mode heavy
+#   bash scripts/mac/traffic.sh 192.168.100.2 --local      # 本地 (直连 NeuStack)
 
 set -e
 
@@ -25,6 +26,7 @@ DURATION=10
 HTTP_PORT=8080
 ECHO_PORT=8007
 MODE="normal"
+LOCAL_MODE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -32,6 +34,7 @@ while [ $# -gt 0 ]; do
         --http-port)  HTTP_PORT="$2"; shift 2;;
         --echo-port)  ECHO_PORT="$2"; shift 2;;
         --mode)       MODE="$2"; shift 2;;
+        --local)      LOCAL_MODE=1; shift;;
         -*)           echo "Unknown: $1"; exit 1;;
         *)            SERVER_IP="$1"; shift;;
     esac
@@ -42,10 +45,22 @@ if [ -z "$SERVER_IP" ]; then
     echo ""
     echo "Options:"
     echo "  --duration N   Duration in minutes (default: 10)"
-    echo "  --http-port N  HTTP port (default: 8080)"
-    echo "  --echo-port N  Echo port (default: 8007)"
+    echo "  --http-port N  HTTP port (default: 8080, or 80 for --local)"
+    echo "  --echo-port N  Echo port (default: 8007, or 7 for --local)"
     echo "  --mode MODE    quick|normal|heavy (default: normal)"
+    echo "  --local        Local mode (direct to NeuStack, no socat)"
     exit 1
+fi
+
+# 自动检测本地模式: 192.168.100.x
+if [[ "$SERVER_IP" =~ ^192\.168\.100\. ]]; then
+    LOCAL_MODE=1
+fi
+
+# 本地模式使用 NeuStack 直接端口
+if [ $LOCAL_MODE -eq 1 ]; then
+    [ $HTTP_PORT -eq 8080 ] && HTTP_PORT=80
+    [ $ECHO_PORT -eq 8007 ] && ECHO_PORT=7
 fi
 
 # 模式配置

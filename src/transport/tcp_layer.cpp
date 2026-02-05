@@ -55,6 +55,7 @@ void TCPLayer::on_timer() {
     process_ai_actions();
 }
 
+#ifdef NEUSTACK_AI_ENABLED
 void TCPLayer::enable_ai(const IntelligencePlaneConfig& config) {
     if (_ai) {
         LOG_WARN(TCP, "AI already enabled, stopping first");
@@ -73,6 +74,7 @@ void TCPLayer::disable_ai() {
         LOG_INFO(TCP, "AI intelligence plane disabled");
     }
 }
+#endif
 
 int TCPLayer::listen(uint16_t port, StreamAcceptCallback on_accept) {
     // 保存 accept 回调

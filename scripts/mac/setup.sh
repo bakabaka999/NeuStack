@@ -76,7 +76,7 @@ BUILD_DIR="$PROJECT_ROOT/build"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-cmake .. -DNEUSTACK_ENABLE_AI=ON
+cmake .. -DNEUSTACK_ENABLE_AI=OFF
 make -j$(sysctl -n hw.ncpu)
 
 echo ""

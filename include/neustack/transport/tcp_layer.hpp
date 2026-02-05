@@ -6,10 +6,13 @@
 #include "neustack/transport/stream.hpp"
 #include "neustack/transport/tcp_connection.hpp"
 #include "neustack/transport/tcp_segment.hpp"
-#include "neustack/transport/tcp_orca.hpp"
 #include "neustack/common/ring_buffer.hpp"
 #include "neustack/common/spsc_queue.hpp"
+
+#ifdef NEUSTACK_AI_ENABLED
+#include "neustack/transport/tcp_orca.hpp"
 #include "neustack/ai/intelligence_plane.hpp"
+#endif
 
 #include <memory>
 
@@ -127,6 +130,7 @@ public:
 
     // ─── AI 控制 API ───
 
+#ifdef NEUSTACK_AI_ENABLED
     /**
      * @brief 启用 AI 智能面
      * @param config AI 配置（模型路径等）
@@ -142,6 +146,9 @@ public:
      * @brief AI 是否已启用
      */
     bool ai_enabled() const { return _ai != nullptr && _ai->is_running(); }
+#else
+    bool ai_enabled() const { return false; }
+#endif
 
     /**
      * @brief 获取 TCP 指标缓冲区（用于数据采集导出）
@@ -170,7 +177,9 @@ private:
 
     // AI 相关的字段与方法
     // ─── AI 通信通道 ───
-    MetricsBuffer<TCPSample, 1024> _metrics_buf; // → 智能面
+    MetricsBuffer<TCPSample, 1024> _metrics_buf; // → 智能面 (also used for data collection)
+
+#ifdef NEUSTACK_AI_ENABLED
     SPSCQueue<AIAction, 16> _action_queue;       // ← 智能面
 
     // ─── 智能面线程 (用 unique_ptr 延迟初始化) ───
@@ -208,6 +217,9 @@ private:
         // TODO: 记录日志，触发告警
         (void)action;
     }
+#else
+    void process_ai_actions() {} // no-op when AI disabled
+#endif
 };
 
 } // namespace neustack
