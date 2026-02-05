@@ -25,6 +25,7 @@ SERVER_IP=""
 DURATION=10
 HTTP_PORT=8080
 ECHO_PORT=8007
+DISCARD_PORT=8009
 MODE="normal"
 LOCAL_MODE=0
 
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
         --duration)   DURATION="$2"; shift 2;;
         --http-port)  HTTP_PORT="$2"; shift 2;;
         --echo-port)  ECHO_PORT="$2"; shift 2;;
+        --discard-port) DISCARD_PORT="$2"; shift 2;;
         --mode)       MODE="$2"; shift 2;;
         --local)      LOCAL_MODE=1; shift;;
         -*)           echo "Unknown: $1"; exit 1;;
@@ -61,6 +63,7 @@ fi
 if [ $LOCAL_MODE -eq 1 ]; then
     [ $HTTP_PORT -eq 8080 ] && HTTP_PORT=80
     [ $ECHO_PORT -eq 8007 ] && ECHO_PORT=7
+    [ $DISCARD_PORT -eq 8009 ] && DISCARD_PORT=9
 fi
 
 # 模式配置
@@ -89,6 +92,7 @@ echo "=============================================="
 echo "  Server:   $SERVER_IP"
 echo "  HTTP:     :$HTTP_PORT"
 echo "  Echo:     :$ECHO_PORT"
+echo "  Discard:  :$DISCARD_PORT"
 echo "  Duration: ${DURATION}m"
 echo "  Mode:     $MODE"
 echo "=============================================="
@@ -156,7 +160,7 @@ if [ $HAS_NC -eq 1 ]; then
     for size in "${BULK_SIZES[@]}"; do
         echo "  Sending ${size}MB..."
         START=$(python3 -c 'import time; print(time.time())')
-        dd if=/dev/urandom bs=1M count=$size 2>/dev/null | nc -w 60 "$SERVER_IP" "$ECHO_PORT" > /dev/null
+        dd if=/dev/urandom bs=1M count=$size 2>/dev/null | nc -w 60 "$SERVER_IP" "$DISCARD_PORT" > /dev/null
         END=$(python3 -c 'import time; print(time.time())')
         SPEED=$(python3 -c "print(f'{$size / ($END - $START):.2f}')")
         echo "    Speed: ${SPEED} MB/s"
@@ -184,7 +188,7 @@ fi
 # 后台 TCP
 if [ $HAS_NC -eq 1 ]; then
     for i in 1 2 3; do
-        dd if=/dev/urandom bs=1M count=100 2>/dev/null | nc -w 120 "$SERVER_IP" "$ECHO_PORT" > /dev/null &
+        dd if=/dev/urandom bs=1M count=100 2>/dev/null | nc -w 120 "$SERVER_IP" "$DISCARD_PORT" > /dev/null &
     done
 fi
 

@@ -31,6 +31,7 @@ NEUSTACK_IP="10.0.1.2"
 HOST_IP="10.0.1.1"
 HTTP_PORT=8080
 ECHO_PORT=8007
+DISCARD_PORT=8009
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -40,6 +41,7 @@ while [ $# -gt 0 ]; do
         --ip)         NEUSTACK_IP="$2"; shift 2;;
         --http-port)  HTTP_PORT="$2"; shift 2;;
         --echo-port)  ECHO_PORT="$2"; shift 2;;
+        --discard-port) DISCARD_PORT="$2"; shift 2;;
         *)            echo "Unknown: $1"; exit 1;;
     esac
 done
@@ -83,6 +85,7 @@ echo "  Rounds:        $ROUNDS"
 echo "  Total time:    ~${TOTAL_TIME}s (~$((TOTAL_TIME/60))min)"
 echo "  HTTP forward:  :$HTTP_PORT -> $NEUSTACK_IP:80"
 echo "  Echo forward:  :$ECHO_PORT -> $NEUSTACK_IP:7"
+echo "  Discard fwd:   :$DISCARD_PORT -> $NEUSTACK_IP:9"
 echo "  Output:        $OUTPUT_DIR"
 echo "=============================================="
 echo ""
@@ -147,6 +150,10 @@ echo "  :$HTTP_PORT -> $NEUSTACK_IP:80 (HTTP)"
 socat TCP-LISTEN:$ECHO_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:7 &
 PIDS+=($!)
 echo "  :$ECHO_PORT -> $NEUSTACK_IP:7 (TCP Echo)"
+
+socat TCP-LISTEN:$DISCARD_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:9 &
+PIDS+=($!)
+echo "  :$DISCARD_PORT -> $NEUSTACK_IP:9 (TCP Discard)"
 
 # ─── 就绪 ───
 echo ""

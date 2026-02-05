@@ -379,6 +379,15 @@ int main(int argc, char *argv[]) {
     setup_udp_echo(udp);
     setup_tcp_echo(tcp);
 
+    // TCP Discard 服务 (端口 9) - 只收不回，用于大数据传输测试
+    tcp.listen(9, [](IStreamConnection *) -> StreamCallbacks {
+        return StreamCallbacks{
+            .on_receive = [](IStreamConnection *, const uint8_t *, size_t) {},
+            .on_close = [](IStreamConnection *conn) { conn->close(); }
+        };
+    });
+    LOG_INFO(TCP, "discard service on port 9");
+
     HttpServer http_server(tcp);
     setup_http_server(http_server, cfg.local_ip);
 

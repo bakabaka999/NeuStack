@@ -25,6 +25,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HOURS=0
 HTTP_PORT=8080
 ECHO_PORT=8007
+DISCARD_PORT=8009
 OUTPUT_DIR="$PROJECT_ROOT/collected_data"
 NEUSTACK_IP="10.0.1.2"
 HOST_IP="10.0.1.1"
@@ -34,6 +35,7 @@ while [ $# -gt 0 ]; do
         --hours)      HOURS="$2"; shift 2;;
         --http-port)  HTTP_PORT="$2"; shift 2;;
         --echo-port)  ECHO_PORT="$2"; shift 2;;
+        --discard-port) DISCARD_PORT="$2"; shift 2;;
         --output-dir) OUTPUT_DIR="$2"; shift 2;;
         --ip)         NEUSTACK_IP="$2"; shift 2;;
         *)            echo "Unknown: $1"; exit 1;;
@@ -65,6 +67,7 @@ echo "  Server IP:     $SERVER_IP"
 echo "  NeuStack IP:   $NEUSTACK_IP"
 echo "  HTTP forward:  :$HTTP_PORT -> $NEUSTACK_IP:80"
 echo "  Echo forward:  :$ECHO_PORT -> $NEUSTACK_IP:7"
+echo "  Discard fwd:   :$DISCARD_PORT -> $NEUSTACK_IP:9"
 echo "  Output:        $OUTPUT_DIR"
 if [ $HOURS -gt 0 ]; then
     echo "  Duration:      ${HOURS}h"
@@ -136,6 +139,10 @@ echo "  :$HTTP_PORT -> $NEUSTACK_IP:80 (HTTP)"
 socat TCP-LISTEN:$ECHO_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:7 &
 PIDS+=($!)
 echo "  :$ECHO_PORT -> $NEUSTACK_IP:7 (TCP Echo)"
+
+socat TCP-LISTEN:$DISCARD_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:9 &
+PIDS+=($!)
+echo "  :$DISCARD_PORT -> $NEUSTACK_IP:9 (TCP Discard)"
 
 # ─── 就绪 ───
 echo ""
