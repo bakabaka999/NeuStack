@@ -2,7 +2,7 @@ model:
   type: "full"  # "simple" 或 "full"
   input_dim: 3
   hidden_dim: 64
-  num_layers: 1
+  num_layers: 2
 
 training:
   epochs: 150
@@ -12,7 +12,7 @@ training:
   early_stopping_patience: 20
 
 data:
-  history_length: 10
+  history_length: 30
   train_samples: 8000
   val_samples: 2000
   seed: 42

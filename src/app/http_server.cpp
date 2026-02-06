@@ -87,6 +87,10 @@ void HttpServer::del(const std::string& path, HttpHandler handler) {
     _routes[HttpMethod::DELETE][path] = std::move(handler);
 }
 
+void HttpServer::get_chunked(const std::string &path, ChunkedHandler handler) {
+    _chunked_routes[path] = std::move(handler);
+}
+
 void HttpServer::set_not_found_handler(HttpHandler handler) {
     _not_found_handler = std::move(handler);
 }
@@ -121,6 +125,12 @@ void HttpServer::on_receive(IStreamConnection *conn, const uint8_t *data, size_t
 
     auto &state = it->second;
 
+    // 如果正在进行流式发送，继续发送
+    if (state.chunked_generator) {
+        send_next_chunk(conn);
+        return;
+    }
+
     // 如果还有待发送数据，先尝试发送
     if (!state.pending_data.empty()) {
         flush_pending(conn);
@@ -143,6 +153,13 @@ void HttpServer::on_receive(IStreamConnection *conn, const uint8_t *data, size_t
         // 检查 Keep-Alive
         std::string conn_header = request.get_header("Connection");
         state.keep_alive = (conn_header != "close");
+
+        // 尝试流式路由
+        if (request.method == HttpMethod::GET && dispatch_chunked(conn, request)) {
+            // 流式响应已开始，重置解析器并返回
+            state.parser.reset();
+            return;
+        }
 
         // 分发并发送响应
         HttpResponse response = dispatch(request);
@@ -292,10 +309,135 @@ bool HttpServer::flush_pending(IStreamConnection *conn) {
 }
 
 void HttpServer::poll() {
-    // 遍历所有连接，尝试 flush 待发送数据
+    // 遍历所有连接，尝试 flush 待发送数据或继续流式发送
     for (auto &[conn, state] : _connections) {
-        if (!state.pending_data.empty()) {
+        if (state.chunked_generator) {
+            send_next_chunk(conn);
+        } else if (!state.pending_data.empty()) {
             flush_pending(conn);
         }
     }
+}
+
+bool HttpServer::dispatch_chunked(IStreamConnection *conn, const HttpRequest &request) {
+    auto it = _chunked_routes.find(request.path);
+    if (it == _chunked_routes.end()) {
+        return false;
+    }
+
+    auto state_it = _connections.find(conn);
+    if (state_it == _connections.end()) {
+        return false;
+    }
+
+    auto &state = state_it->second;
+
+    // 创建生成器
+    state.chunked_generator = it->second(request);
+    if (!state.chunked_generator) {
+        return false;
+    }
+
+    state.chunked_header_sent = false;
+
+    // 开始发送
+    send_next_chunk(conn);
+    return true;
+}
+
+bool HttpServer::send_next_chunk(IStreamConnection *conn) {
+    auto it = _connections.find(conn);
+    if (it == _connections.end()) return true;
+
+    auto &state = it->second;
+
+    if (!state.chunked_generator) {
+        return true;  // 没有流式响应
+    }
+
+    // 先发送 HTTP 头（只发送一次）
+    if (!state.chunked_header_sent) {
+        size_t total = state.chunked_generator->total_size();
+        std::string content_type = state.chunked_generator->content_type();
+
+        std::string header = "HTTP/1.1 200 OK\r\n";
+        header += "Content-Type: " + content_type + "\r\n";
+        header += "Cache-Control: no-cache\r\n";
+
+        if (total > 0) {
+            // 已知大小，使用 Content-Length
+            header += "Content-Length: " + std::to_string(total) + "\r\n";
+        } else {
+            // 未知大小，使用 chunked transfer encoding
+            header += "Transfer-Encoding: chunked\r\n";
+        }
+
+        if (!state.keep_alive) {
+            header += "Connection: close\r\n";
+        }
+        header += "\r\n";
+
+        state.pending_data = std::move(header);
+        state.pending_offset = 0;
+        state.chunked_header_sent = true;
+    }
+
+    // 先发送待发送的数据（头或上一个 chunk）
+    if (!state.pending_data.empty()) {
+        while (state.pending_offset < state.pending_data.size()) {
+            const uint8_t *data = reinterpret_cast<const uint8_t*>(
+                state.pending_data.data() + state.pending_offset);
+            size_t remaining = state.pending_data.size() - state.pending_offset;
+
+            ssize_t sent = conn->send(data, remaining);
+            if (sent <= 0) {
+                // 缓冲区满，稍后重试
+                return false;
+            }
+            state.pending_offset += sent;
+        }
+
+        // 清理已发送的数据
+        state.pending_data.clear();
+        state.pending_offset = 0;
+    }
+
+    // 生成并发送下一块数据
+    while (state.chunked_generator->has_more()) {
+        // 生成一块数据（32KB）
+        std::string chunk = state.chunked_generator->next_chunk(32768);
+        if (chunk.empty()) {
+            break;
+        }
+
+        // 直接发送数据（因为我们用 Content-Length，不需要 chunked 格式）
+        const uint8_t *data = reinterpret_cast<const uint8_t*>(chunk.data());
+        size_t len = chunk.size();
+        size_t offset = 0;
+
+        while (offset < len) {
+            ssize_t sent = conn->send(data + offset, len - offset);
+            if (sent <= 0) {
+                // 缓冲区满，保存剩余数据到 pending
+                state.pending_data = chunk.substr(offset);
+                state.pending_offset = 0;
+                return false;
+            }
+            offset += sent;
+        }
+    }
+
+    // 检查是否完成
+    if (!state.chunked_generator->has_more()) {
+        LOG_DEBUG(HTTP, "chunked response complete");
+        state.chunked_generator.reset();
+
+        // 非 Keep-Alive，关闭连接
+        if (!state.keep_alive) {
+            conn->close();
+        }
+        return true;
+    }
+
+    return false;
 }

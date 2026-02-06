@@ -35,8 +35,8 @@ from typing import List, Dict, Tuple
 # ============================================================================
 
 MSS = 1460
-MAX_BW = 100e6  # 100 MB/s (归一化用)
-BANDWIDTH_HISTORY_LEN = 10  # 带宽预测的历史窗口
+MAX_BW = 10e6  # 10 MB/s (归一化用，根据实际采集数据调整)
+BANDWIDTH_HISTORY_LEN = 30  # 带宽预测的历史窗口（增大以捕捉更长趋势）
 
 
 # ============================================================================
@@ -285,37 +285,40 @@ def generate_orca_dataset(samples: List[Dict], est_bw_list: List[float], min_rtt
 # 异常检测数据集生成 (Autoencoder: 只需要输入, 无标签)
 # ============================================================================
 
-def compute_anomaly_features(
-    current: Dict,
-    prev: Dict,
-    interval_sec: float = 1.0
-) -> np.ndarray:
+def compute_anomaly_features(current: Dict) -> np.ndarray:
     """
-    从 GlobalMetrics delta 提取 5 维 AnomalyFeatures
+    从 GlobalMetrics delta 提取 8 维 AnomalyFeatures
 
-    与 C++ ai_features.hpp 中的 AnomalyFeatures::from_delta() 保持一致
+    注意：MetricsExporter 已经导出 delta 值，无需再做 diff
+
+    8 维特征：
+    - 5 个速率特征（包量、字节量、SYN、RST、连接）
+    - 2 个比率特征（发送/接收比、平均包大小）
+    - 1 个瞬时值（活跃连接数）
     """
-    # 计算 delta (确保非负)
-    delta_syn = max(0, current.get('syn_received', 0) - prev.get('syn_received', 0))
-    delta_rst = max(0, current.get('rst_received', 0) - prev.get('rst_received', 0))
-    delta_conn = max(0, current.get('conn_established', 0) - prev.get('conn_established', 0))
-    delta_packets = max(0, current.get('packets_rx', 0) - prev.get('packets_rx', 0))
-    delta_bytes = max(0, current.get('bytes_rx', 0) - prev.get('bytes_rx', 0))
+    packets_rx = current.get('packets_rx', 0)
+    packets_tx = current.get('packets_tx', 0)
+    bytes_rx = current.get('bytes_rx', 0)
+    bytes_tx = current.get('bytes_tx', 0)
+    syn_received = current.get('syn_received', 0)
+    rst_received = current.get('rst_received', 0)
+    conn_established = current.get('conn_established', 0)
+    active_connections = current.get('active_connections', 0)
 
-    # 归一化为速率
-    syn_rate = delta_syn / interval_sec
-    rst_rate = delta_rst / interval_sec
-    new_conn_rate = delta_conn / interval_sec
-    packet_rate = delta_packets / interval_sec
-    avg_packet_size = delta_bytes / max(delta_packets, 1)
+    # 比率特征
+    total_packets = packets_rx + packets_tx
+    tx_rx_ratio = packets_tx / max(packets_rx, 1) if total_packets > 0 else 0
+    avg_pkt_size = bytes_tx / max(packets_tx, 1) if packets_tx > 0 else 0
 
-    # 归一化到 [0, 1] 范围 (用 np.clip 确保上下界)
     return np.array([
-        np.clip(syn_rate / 1000, 0, 1),           # 归一化: 0-1000 SYN/s
-        np.clip(rst_rate / 100, 0, 1),            # 归一化: 0-100 RST/s
-        np.clip(new_conn_rate / 500, 0, 1),       # 归一化: 0-500 conn/s
-        np.clip(packet_rate / 100000, 0, 1),      # 归一化: 0-100K pkt/s
-        np.clip(avg_packet_size / 1500, 0, 1),    # 归一化: 0-MTU
+        np.clip(packets_rx / 2000, 0, 1),           # 收包速率
+        np.clip(packets_tx / 2000, 0, 1),            # 发包速率
+        np.clip(bytes_tx / 3000000, 0, 1),           # 发送字节速率
+        np.clip(syn_received / 10, 0, 1),            # SYN 速率
+        np.clip(rst_received / 10, 0, 1),            # RST 速率
+        np.clip(conn_established / 10, 0, 1),        # 新建连接速率
+        np.clip(tx_rx_ratio / 10, 0, 1),             # 发送/接收包比率
+        np.clip(active_connections / 100, 0, 1),     # 活跃连接数
     ], dtype=np.float32)
 
 
@@ -327,13 +330,21 @@ def generate_anomaly_dataset(metrics: List[Dict]) -> Dict:
     - 输入 = 输出 (重构目标)
     - 训练时只用正常数据
     - 推理时重构误差大 = 异常
+
+    过滤掉空闲时段（全零样本），只保留有流量的时段。
+    否则 Autoencoder 学到"没流量=正常"，无法区分正常流量和轻微异常。
     """
     features = []
 
-    for i in range(1, len(metrics)):
-        feat = compute_anomaly_features(metrics[i], metrics[i-1], interval_sec=0.1)
+    skipped = 0
+    for i in range(len(metrics)):
+        feat = compute_anomaly_features(metrics[i])
+        if feat.sum() == 0:
+            skipped += 1
+            continue
         features.append(feat)
 
+    print(f"    Filtered: kept {len(features)}, skipped {skipped} idle samples")
     features = np.array(features, dtype=np.float32)
 
     return {

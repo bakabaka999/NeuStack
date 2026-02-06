@@ -65,6 +65,7 @@ training/*/checkpoints/
 *.csv
 *.pkl
 *.npy
+*.npz
 
 # Training visualization (optional, can be committed)
 training/*/*.png

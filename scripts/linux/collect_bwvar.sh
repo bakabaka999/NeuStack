@@ -73,7 +73,7 @@ fi
 mkdir -p "$OUTPUT_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SERVER_IP=$(hostname -I | awk '{print $1}')
-TOTAL_TIME=$((ROUNDS * PHASE_DURATION * 4))
+TOTAL_TIME=$((ROUNDS * PHASE_DURATION * 10))
 
 echo "=============================================="
 echo "  NeuStack Bandwidth Variation Collection"
@@ -125,7 +125,7 @@ trap cleanup EXIT INT TERM
 # ─── 1. 启动 NeuStack ───
 echo "[1/4] Starting NeuStack..."
 cd "$PROJECT_ROOT/build"
-./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" -v &
+./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" &
 PIDS+=($!)
 sleep 2
 
@@ -162,24 +162,65 @@ echo ""
 for round in $(seq 1 $ROUNDS); do
     echo "━━━ Round $round/$ROUNDS ━━━"
 
-    echo "  [$(date +%H:%M:%S)] Phase 1: Normal (no limit) - ${PHASE_DURATION}s"
+    # Phase 1: 正常（无限制）
+    echo "  [$(date +%H:%M:%S)] Phase 1/10: Normal (no limit) - ${PHASE_DURATION}s"
     tc qdisc del dev "$IFACE" root 2>/dev/null || true
     sleep $PHASE_DURATION
 
-    echo "  [$(date +%H:%M:%S)] Phase 2: 1Mbit + 50ms delay - ${PHASE_DURATION}s"
+    # Phase 2: 轻微延迟
+    echo "  [$(date +%H:%M:%S)] Phase 2/10: 20ms delay - ${PHASE_DURATION}s"
     tc qdisc del dev "$IFACE" root 2>/dev/null || true
-    tc qdisc add dev "$IFACE" root handle 1: netem delay 50ms 10ms
+    tc qdisc add dev "$IFACE" root netem delay 20ms 5ms
+    sleep $PHASE_DURATION
+
+    # Phase 3: 中等延迟
+    echo "  [$(date +%H:%M:%S)] Phase 3/10: 50ms delay - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root netem delay 50ms 10ms
+    sleep $PHASE_DURATION
+
+    # Phase 4: 高延迟
+    echo "  [$(date +%H:%M:%S)] Phase 4/10: 100ms delay + jitter - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root netem delay 100ms 30ms distribution normal
+    sleep $PHASE_DURATION
+
+    # Phase 5: 极端延迟
+    echo "  [$(date +%H:%M:%S)] Phase 5/10: 200ms delay - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root netem delay 200ms 50ms
+    sleep $PHASE_DURATION
+
+    # Phase 6: 轻微丢包
+    echo "  [$(date +%H:%M:%S)] Phase 6/10: 1% loss + 20ms - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root netem loss 1% delay 20ms 5ms
+    sleep $PHASE_DURATION
+
+    # Phase 7: 中等丢包
+    echo "  [$(date +%H:%M:%S)] Phase 7/10: 5% loss + 30ms - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root netem loss 5% delay 30ms 10ms
+    sleep $PHASE_DURATION
+
+    # Phase 8: 高丢包
+    echo "  [$(date +%H:%M:%S)] Phase 8/10: 10% loss + 50ms - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root netem loss 10% delay 50ms 15ms
+    sleep $PHASE_DURATION
+
+    # Phase 9: 带宽限制
+    echo "  [$(date +%H:%M:%S)] Phase 9/10: 1Mbit + 30ms - ${PHASE_DURATION}s"
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc add dev "$IFACE" root handle 1: netem delay 30ms 10ms
     tc qdisc add dev "$IFACE" parent 1:1 tbf rate 1mbit burst 32kbit latency 200ms
     sleep $PHASE_DURATION
 
-    echo "  [$(date +%H:%M:%S)] Phase 3: 5% loss + 20ms delay - ${PHASE_DURATION}s"
+    # Phase 10: 组合恶劣条件
+    echo "  [$(date +%H:%M:%S)] Phase 10/10: 512Kbit + 100ms + 3% loss - ${PHASE_DURATION}s"
     tc qdisc del dev "$IFACE" root 2>/dev/null || true
-    tc qdisc add dev "$IFACE" root netem loss 5% delay 20ms 5ms
-    sleep $PHASE_DURATION
-
-    echo "  [$(date +%H:%M:%S)] Phase 4: 100ms + jitter - ${PHASE_DURATION}s"
-    tc qdisc del dev "$IFACE" root 2>/dev/null || true
-    tc qdisc add dev "$IFACE" root netem delay 100ms 30ms distribution normal
+    tc qdisc add dev "$IFACE" root handle 1: netem delay 100ms 20ms loss 3%
+    tc qdisc add dev "$IFACE" parent 1:1 tbf rate 512kbit burst 16kbit latency 300ms
     sleep $PHASE_DURATION
 
     echo ""

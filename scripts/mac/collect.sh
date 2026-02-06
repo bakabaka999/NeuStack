@@ -92,7 +92,7 @@ trap cleanup EXIT
 # ─── 1. 启动 NeuStack ───
 echo "[1/2] Starting NeuStack..."
 cd "$PROJECT_ROOT/build"
-./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" -v &
+./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" &
 NEUSTACK_PID=$!
 sleep 2
 

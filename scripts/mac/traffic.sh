@@ -186,7 +186,19 @@ echo "  ✓ Done"
 # ─── 5. 持续压力测试 ───
 echo "[5/5] Sustained load (continuous downloads)..."
 
-SUSTAINED_DURATION=$((DURATION * 60 / 3))
+# 确保 DURATION 是整数，并计算剩余时间
+DURATION_INT=$(printf "%.0f" "$DURATION" 2>/dev/null || echo "$DURATION")
+TOTAL_SECONDS=$((DURATION_INT * 60))
+ELAPSED=$SECONDS
+REMAINING=$((TOTAL_SECONDS - ELAPSED))
+
+# 至少运行 60 秒，或者剩余时间
+if [ $REMAINING -lt 60 ]; then
+    SUSTAINED_DURATION=60
+else
+    SUSTAINED_DURATION=$REMAINING
+fi
+
 echo "  Running for ${SUSTAINED_DURATION}s with varying parallelism..."
 
 END_TIME=$((SECONDS + SUSTAINED_DURATION))

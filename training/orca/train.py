@@ -199,7 +199,7 @@ def train_offline(config: dict, data_path: str, output_dir: str):
     num_updates = config.get('offline_training', {}).get('num_updates', 10000)
     log_interval = config.get('offline_training', {}).get('log_interval', 100)
     save_interval = config.get('offline_training', {}).get('save_interval', 1000)
-    bc_weight = config.get('offline_training', {}).get('bc_weight', 2.5)
+    bc_weight = config.get('offline_training', {}).get('bc_weight', 1.0)
 
     print(f"Training for {num_updates} updates")
     print(f"Batch size: {config['agent']['batch_size']}")

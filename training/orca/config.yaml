@@ -32,7 +32,7 @@ offline_training:
   num_updates: 10000
   log_interval: 100
   save_interval: 2000
-  bc_weight: 2.5  # 行为克隆正则化权重 (TD3+BC，防止 Q 值发散)
+  bc_weight: 1.5  # 行为克隆正则化权重 (TD3+BC，防止 Q 值发散)
 
 output:
   model_dir: "checkpoints"

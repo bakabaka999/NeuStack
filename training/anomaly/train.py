@@ -145,11 +145,19 @@ def generate_synthetic_anomalies(n_samples: int, seed: int = 42, difficulty: str
     """
     生成多种类型的合成异常数据用于严格评估
 
-    特征顺序: [syn_rate, rst_rate, new_conn_rate, packet_rate, avg_packet_size]
-    所有值归一化到 [0, 1]
+    8 维特征顺序 (与 csv_to_dataset.py compute_anomaly_features 一致):
+    [packets_rx, packets_tx, bytes_tx, syn_received, rst_received,
+     conn_established, tx_rx_ratio, active_connections]
+
+    归一化参考:
+    - packets_rx/tx: /2000, clip(0,1)
+    - bytes_tx: /3000000, clip(0,1)
+    - syn/rst/conn: /10, clip(0,1)
+    - tx_rx_ratio: /10, clip(0,1)
+    - active_connections: /100, clip(0,1)
 
     difficulty:
-      - 'easy': 明显异常 (原来的方式)
+      - 'easy': 明显异常 (高流量攻击)
       - 'hard': 边界异常，更接近正常数据，更难检测
     """
     np.random.seed(seed)
@@ -158,109 +166,141 @@ def generate_synthetic_anomalies(n_samples: int, seed: int = 42, difficulty: str
     anomalies = []
 
     if difficulty == 'easy':
-        # === 明显异常 (原来的方式) ===
+        # === 明显异常 ===
 
-        # SYN Flood
+        # 1. SYN Flood: 高 SYN，高连接建立，低 RST
         syn_flood = np.column_stack([
-            np.random.uniform(0.7, 1.0, n_per_type),
-            np.random.uniform(0.0, 0.1, n_per_type),
-            np.random.uniform(0.6, 1.0, n_per_type),
-            np.random.uniform(0.5, 0.9, n_per_type),
-            np.random.uniform(0.02, 0.08, n_per_type),
+            np.random.uniform(0.3, 0.6, n_per_type),    # packets_rx: 中高
+            np.random.uniform(0.1, 0.3, n_per_type),    # packets_tx: 响应
+            np.random.uniform(0.05, 0.15, n_per_type),  # bytes_tx: 低 (SYN-ACK 小包)
+            np.random.uniform(0.7, 1.0, n_per_type),    # syn_received: 极高!
+            np.random.uniform(0.0, 0.1, n_per_type),    # rst_received: 低
+            np.random.uniform(0.5, 0.9, n_per_type),    # conn_established: 高
+            np.random.uniform(0.2, 0.5, n_per_type),    # tx_rx_ratio: 低 (收多发少)
+            np.random.uniform(0.5, 1.0, n_per_type),    # active_connections: 高
         ])
         anomalies.append(syn_flood)
 
-        # Port Scan
+        # 2. Port Scan: 高 SYN，高 RST (大量端口关闭)
         port_scan = np.column_stack([
-            np.random.uniform(0.4, 0.8, n_per_type),
-            np.random.uniform(0.6, 1.0, n_per_type),
-            np.random.uniform(0.3, 0.7, n_per_type),
-            np.random.uniform(0.3, 0.6, n_per_type),
-            np.random.uniform(0.02, 0.06, n_per_type),
+            np.random.uniform(0.2, 0.5, n_per_type),    # packets_rx: 中
+            np.random.uniform(0.2, 0.5, n_per_type),    # packets_tx: 中
+            np.random.uniform(0.02, 0.08, n_per_type),  # bytes_tx: 低 (RST 小包)
+            np.random.uniform(0.4, 0.8, n_per_type),    # syn_received: 高
+            np.random.uniform(0.6, 1.0, n_per_type),    # rst_received: 极高!
+            np.random.uniform(0.1, 0.3, n_per_type),    # conn_established: 低
+            np.random.uniform(0.8, 1.2, n_per_type),    # tx_rx_ratio: ~1 (对等)
+            np.random.uniform(0.1, 0.3, n_per_type),    # active_connections: 低
         ])
         anomalies.append(port_scan)
 
-        # DDoS Flood
+        # 3. DDoS Flood: 极高流量
         ddos_flood = np.column_stack([
-            np.random.uniform(0.1, 0.4, n_per_type),
-            np.random.uniform(0.0, 0.2, n_per_type),
-            np.random.uniform(0.1, 0.3, n_per_type),
-            np.random.uniform(0.85, 1.0, n_per_type),
-            np.random.uniform(0.3, 0.8, n_per_type),
+            np.random.uniform(0.8, 1.0, n_per_type),    # packets_rx: 极高!
+            np.random.uniform(0.6, 0.9, n_per_type),    # packets_tx: 高
+            np.random.uniform(0.7, 1.0, n_per_type),    # bytes_tx: 极高!
+            np.random.uniform(0.1, 0.3, n_per_type),    # syn_received: 正常
+            np.random.uniform(0.0, 0.1, n_per_type),    # rst_received: 低
+            np.random.uniform(0.1, 0.3, n_per_type),    # conn_established: 正常
+            np.random.uniform(0.6, 0.9, n_per_type),    # tx_rx_ratio: 偏高
+            np.random.uniform(0.3, 0.6, n_per_type),    # active_connections: 中高
         ])
         anomalies.append(ddos_flood)
 
-        # Slowloris
+        # 4. Slowloris: 高连接数，低流量
         slowloris = np.column_stack([
-            np.random.uniform(0.3, 0.6, n_per_type),
-            np.random.uniform(0.0, 0.05, n_per_type),
-            np.random.uniform(0.5, 0.9, n_per_type),
-            np.random.uniform(0.01, 0.1, n_per_type),
-            np.random.uniform(0.01, 0.05, n_per_type),
+            np.random.uniform(0.01, 0.05, n_per_type),  # packets_rx: 极低
+            np.random.uniform(0.01, 0.05, n_per_type),  # packets_tx: 极低
+            np.random.uniform(0.005, 0.02, n_per_type), # bytes_tx: 极低
+            np.random.uniform(0.3, 0.6, n_per_type),    # syn_received: 中高
+            np.random.uniform(0.0, 0.05, n_per_type),   # rst_received: 极低
+            np.random.uniform(0.3, 0.6, n_per_type),    # conn_established: 中高
+            np.random.uniform(0.8, 1.2, n_per_type),    # tx_rx_ratio: ~1
+            np.random.uniform(0.8, 1.0, n_per_type),    # active_connections: 极高!
         ])
         anomalies.append(slowloris)
 
-        # Large Packet
-        large_packet = np.column_stack([
-            np.random.uniform(0.05, 0.2, n_per_type),
-            np.random.uniform(0.0, 0.1, n_per_type),
-            np.random.uniform(0.05, 0.2, n_per_type),
-            np.random.uniform(0.1, 0.4, n_per_type),
-            np.random.uniform(0.9, 1.0, n_per_type),
+        # 5. Amplification Attack: 收发比异常 (收少发多)
+        amplification = np.column_stack([
+            np.random.uniform(0.05, 0.15, n_per_type),  # packets_rx: 低
+            np.random.uniform(0.5, 0.8, n_per_type),    # packets_tx: 高
+            np.random.uniform(0.6, 0.9, n_per_type),    # bytes_tx: 高
+            np.random.uniform(0.02, 0.08, n_per_type),  # syn_received: 低
+            np.random.uniform(0.0, 0.05, n_per_type),   # rst_received: 低
+            np.random.uniform(0.02, 0.08, n_per_type),  # conn_established: 低
+            np.random.uniform(3.0, 10.0, n_per_type),   # tx_rx_ratio: 极高!
+            np.random.uniform(0.1, 0.3, n_per_type),    # active_connections: 正常
         ])
-        anomalies.append(large_packet)
+        # tx_rx_ratio 归一化到 [0,1]: 已经 /10 在特征提取时
+        amplification[:, 6] = np.clip(amplification[:, 6] / 10, 0, 1)
+        anomalies.append(amplification)
 
     else:
         # === 边界异常 (更难检测) ===
-        # 基于真实数据分布：大部分值接近 0，异常在边界处
+        # 基于真实数据分布：正常数据大部分特征接近 0
 
-        # 1. 轻微 SYN 异常 - 只比正常稍高
+        # 1. 轻微 SYN 异常
         syn_mild = np.column_stack([
-            np.random.uniform(0.01, 0.08, n_per_type),   # syn_rate: 比 p95(0) 稍高
-            np.random.uniform(0.0, 0.01, n_per_type),    # rst_rate: 接近 0
-            np.random.uniform(0.01, 0.05, n_per_type),   # new_conn_rate: 稍高
-            np.random.uniform(0.02, 0.05, n_per_type),   # packet_rate: 正常偏高
-            np.random.uniform(0.05, 0.15, n_per_type),   # avg_pkt_size: 正常偏小
+            np.random.uniform(0.02, 0.08, n_per_type),  # packets_rx: 稍高
+            np.random.uniform(0.01, 0.05, n_per_type),  # packets_tx: 正常偏高
+            np.random.uniform(0.01, 0.05, n_per_type),  # bytes_tx: 正常偏高
+            np.random.uniform(0.05, 0.15, n_per_type),  # syn_received: 稍高
+            np.random.uniform(0.0, 0.02, n_per_type),   # rst_received: 正常
+            np.random.uniform(0.03, 0.1, n_per_type),   # conn_established: 稍高
+            np.random.uniform(0.3, 0.7, n_per_type),    # tx_rx_ratio: 正常
+            np.random.uniform(0.05, 0.15, n_per_type),  # active_connections: 稍高
         ])
         anomalies.append(syn_mild)
 
-        # 2. RST 异常 - 正常数据 RST=0，任何 RST>0 都是异常
+        # 2. RST 异常 - 正常数据 RST≈0，任何 RST>0 都可疑
         rst_anomaly = np.column_stack([
-            np.random.uniform(0.0, 0.02, n_per_type),    # syn_rate: 正常
-            np.random.uniform(0.01, 0.1, n_per_type),    # rst_rate: >0 就是异常！
-            np.random.uniform(0.0, 0.02, n_per_type),    # new_conn_rate: 正常
-            np.random.uniform(0.0, 0.03, n_per_type),    # packet_rate: 正常
-            np.random.uniform(0.1, 0.5, n_per_type),     # avg_pkt_size: 正常
+            np.random.uniform(0.01, 0.04, n_per_type),  # packets_rx: 正常
+            np.random.uniform(0.01, 0.04, n_per_type),  # packets_tx: 正常
+            np.random.uniform(0.01, 0.04, n_per_type),  # bytes_tx: 正常
+            np.random.uniform(0.0, 0.03, n_per_type),   # syn_received: 正常
+            np.random.uniform(0.03, 0.15, n_per_type),  # rst_received: 异常!
+            np.random.uniform(0.0, 0.03, n_per_type),   # conn_established: 正常
+            np.random.uniform(0.3, 0.7, n_per_type),    # tx_rx_ratio: 正常
+            np.random.uniform(0.01, 0.05, n_per_type),  # active_connections: 正常
         ])
         anomalies.append(rst_anomaly)
 
-        # 3. 流量突增 - packet_rate 异常高
+        # 3. 流量突增
         traffic_spike = np.column_stack([
-            np.random.uniform(0.0, 0.01, n_per_type),    # syn_rate: 正常
-            np.random.uniform(0.0, 0.005, n_per_type),   # rst_rate: 接近 0
-            np.random.uniform(0.0, 0.01, n_per_type),    # new_conn_rate: 正常
-            np.random.uniform(0.08, 0.2, n_per_type),    # packet_rate: 超过正常 max(0.078)
-            np.random.uniform(0.1, 0.4, n_per_type),     # avg_pkt_size: 正常
+            np.random.uniform(0.1, 0.25, n_per_type),   # packets_rx: 异常高
+            np.random.uniform(0.08, 0.2, n_per_type),   # packets_tx: 异常高
+            np.random.uniform(0.1, 0.3, n_per_type),    # bytes_tx: 异常高
+            np.random.uniform(0.0, 0.03, n_per_type),   # syn_received: 正常
+            np.random.uniform(0.0, 0.02, n_per_type),   # rst_received: 正常
+            np.random.uniform(0.0, 0.03, n_per_type),   # conn_established: 正常
+            np.random.uniform(0.5, 0.9, n_per_type),    # tx_rx_ratio: 正常偏高
+            np.random.uniform(0.02, 0.08, n_per_type),  # active_connections: 正常
         ])
         anomalies.append(traffic_spike)
 
-        # 4. 连接数异常 - new_conn_rate 异常高
+        # 4. 连接数异常
         conn_anomaly = np.column_stack([
-            np.random.uniform(0.005, 0.03, n_per_type),  # syn_rate: 稍高
-            np.random.uniform(0.0, 0.005, n_per_type),   # rst_rate: 接近 0
-            np.random.uniform(0.05, 0.15, n_per_type),   # new_conn_rate: 异常高
-            np.random.uniform(0.01, 0.04, n_per_type),   # packet_rate: 正常
-            np.random.uniform(0.1, 0.3, n_per_type),     # avg_pkt_size: 正常
+            np.random.uniform(0.01, 0.04, n_per_type),  # packets_rx: 正常
+            np.random.uniform(0.01, 0.04, n_per_type),  # packets_tx: 正常
+            np.random.uniform(0.01, 0.04, n_per_type),  # bytes_tx: 正常
+            np.random.uniform(0.03, 0.1, n_per_type),   # syn_received: 稍高
+            np.random.uniform(0.0, 0.02, n_per_type),   # rst_received: 正常
+            np.random.uniform(0.05, 0.15, n_per_type),  # conn_established: 异常高
+            np.random.uniform(0.3, 0.7, n_per_type),    # tx_rx_ratio: 正常
+            np.random.uniform(0.1, 0.25, n_per_type),   # active_connections: 异常高
         ])
         anomalies.append(conn_anomaly)
 
-        # 5. 混合轻微异常 - 多个特征都稍微偏离
+        # 5. 混合轻微异常
         mixed_mild = np.column_stack([
-            np.random.uniform(0.005, 0.02, n_per_type),  # syn_rate: 稍高
-            np.random.uniform(0.005, 0.02, n_per_type),  # rst_rate: 稍高
-            np.random.uniform(0.005, 0.02, n_per_type),  # new_conn_rate: 稍高
-            np.random.uniform(0.03, 0.06, n_per_type),   # packet_rate: 稍高
-            np.random.uniform(0.05, 0.15, n_per_type),   # avg_pkt_size: 偏小
+            np.random.uniform(0.03, 0.08, n_per_type),  # packets_rx: 稍高
+            np.random.uniform(0.02, 0.06, n_per_type),  # packets_tx: 稍高
+            np.random.uniform(0.02, 0.06, n_per_type),  # bytes_tx: 稍高
+            np.random.uniform(0.02, 0.06, n_per_type),  # syn_received: 稍高
+            np.random.uniform(0.01, 0.04, n_per_type),  # rst_received: 稍高
+            np.random.uniform(0.02, 0.06, n_per_type),  # conn_established: 稍高
+            np.random.uniform(0.2, 0.5, n_per_type),    # tx_rx_ratio: 正常偏低
+            np.random.uniform(0.03, 0.1, n_per_type),   # active_connections: 稍高
         ])
         anomalies.append(mixed_mild)
 
@@ -306,7 +346,7 @@ def evaluate_with_synthetic_anomalies(
     # 按攻击类型分析
     n_per_type = n_anomalies // 5
     if difficulty == 'easy':
-        attack_types = ['SYN Flood', 'Port Scan', 'DDoS Flood', 'Slowloris', 'Large Packet']
+        attack_types = ['SYN Flood', 'Port Scan', 'DDoS Flood', 'Slowloris', 'Amplification']
     else:
         attack_types = ['Mild SYN', 'RST Anomaly', 'Traffic Spike', 'Conn Anomaly', 'Mixed Mild']
 

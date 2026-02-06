@@ -1,6 +1,6 @@
 model:
   type: "simple"  # "simple" 或 "lstm"
-  input_dim: 5
+  input_dim: 8
   hidden_dims: [32, 16]
   latent_dim: 8
 
