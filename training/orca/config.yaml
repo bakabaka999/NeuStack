@@ -1,38 +1,47 @@
 env:
-  type: "simple"  # "simple" 或 "multi_flow"
+  type: "calibrated"  # "calibrated" (推荐) / "simple" / "multi_flow"
+  episode_steps: 300
+  max_cwnd: 718           # 真实协议栈的最大 cwnd
+  step_interval_ms: 10    # 每步 10ms
+  bw_predictor_path: "../../models/bandwidth_predictor.onnx"
+  bw_history_len: 10
+
+  # 以下仅 simple/multi_flow 使用
   bandwidth_mbps: 100
   base_rtt_ms: 20
   buffer_size_packets: 100
-  episode_steps: 200
   bandwidth_variation: true
-  num_flows: 2  # 仅 multi_flow 使用
+  num_flows: 2
 
 agent:
-  state_dim: 6      # 真实数据有 6 个特征
+  algorithm: "sac"  # "sac" (推荐) 或 "ddpg"
+  device: "auto"    # "auto" (自动检测 CUDA/MPS/CPU) / "cuda" / "cpu"
+  state_dim: 7      # 6 个真实特征 + 1 个 est_bw
   action_dim: 1
   hidden_dims: [256, 256]
-  lr_actor: 0.0001
-  lr_critic: 0.001
-  gamma: 0.95       # 降低 discount factor，减少自举误差累积
+  lr_actor: 0.0003
+  lr_critic: 0.0003
+  gamma: 0.99
   tau: 0.005
-  buffer_size: 100000
+  buffer_size: 200000
   batch_size: 256
 
 training:
-  num_episodes: 1000
-  max_steps_per_episode: 200
+  num_episodes: 2000
+  max_steps_per_episode: 300
   warmup_steps: 1000
   eval_interval: 50
-  save_interval: 100
-  noise_decay: 0.995
-  min_noise: 0.1
+  save_interval: 200
+  # 离线数据预热 (可选: 加载 orca_dataset.npz 给 replay buffer 注入真实经验)
+  warmup_data: "../real_data/orca_dataset.npz"
+  pretrain_steps: 1000  # BC 预训练步数
 
 # 离线训练配置 (使用 --data 参数时生效)
 offline_training:
   num_updates: 10000
   log_interval: 100
   save_interval: 2000
-  bc_weight: 1.5  # 行为克隆正则化权重 (TD3+BC，防止 Q 值发散)
+  bc_weight: 1.5
 
 output:
   model_dir: "checkpoints"

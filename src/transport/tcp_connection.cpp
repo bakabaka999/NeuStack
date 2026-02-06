@@ -102,7 +102,7 @@ ssize_t TCPConnectionManager::send(TCB *tcb, const uint8_t *data, size_t len) {
     // 检查发送缓冲区是否有空间
     size_t buffer_space = tcb->send_buffer.available();
     if (buffer_space == 0) {
-        LOG_WARN(TCP, "Send buffer full, cannot accept more data");
+        LOG_DEBUG(TCP, "Send buffer full, cannot accept more data");
         return -1;  // 缓冲区已满，无法接受更多数据
     }
 
@@ -924,6 +924,20 @@ void TCPConnectionManager::handle_rst(TCB *tcb, const TCPSegment &seg) {
 
     LOG_INFO(TCP, "%s -> CLOSED: received RST", tcp_state_name(tcb->state));
 
+    // ─── AI 指标采集: RST 导致的连接重置 ───
+    global_metrics().conn_reset.fetch_add(1, std::memory_order_relaxed);
+
+    // 在设置 CLOSED 之前减少 active_connections（delete_tcb 不认识 CLOSED 状态）
+    if (tcb->state == TCPState::ESTABLISHED ||
+        tcb->state == TCPState::FIN_WAIT_1 ||
+        tcb->state == TCPState::FIN_WAIT_2 ||
+        tcb->state == TCPState::CLOSE_WAIT ||
+        tcb->state == TCPState::CLOSING ||
+        tcb->state == TCPState::LAST_ACK ||
+        tcb->state == TCPState::TIME_WAIT) {
+        global_metrics().active_connections.fetch_sub(1, std::memory_order_relaxed);
+    }
+
     // 先设置状态为 CLOSED，防止回调中再发送数据
     tcb->state = TCPState::CLOSED;
 
@@ -938,6 +952,13 @@ void TCPConnectionManager::handle_rst(TCB *tcb, const TCPSegment &seg) {
 void TCPConnectionManager::start_time_wait_timer(TCB *tcb) {
     auto expire_time = std::chrono::steady_clock::now() + TIME_WAIT_DURATION;
     _time_wait_list.emplace_back(expire_time, tcb->t_tuple);
+
+    // TIME_WAIT 只需要保留四元组用于过滤迟到的包，释放缓冲区节省内存
+    tcb->send_buffer = StreamBuffer(0);
+    tcb->recv_buffer = StreamBuffer(0);
+    tcb->retransmit_queue.clear();
+    tcb->ooo_queue.clear();
+    tcb->ooo_size = 0;
 
     LOG_DEBUG(TCP, "Started TIME_WAIT timer for %s:%u <-> %s:%u",
               ip_to_string(tcb->t_tuple.local_ip).c_str(), tcb->t_tuple.local_port,

@@ -200,6 +200,7 @@ void HttpServer::on_receive(IStreamConnection *conn, const uint8_t *data, size_t
 
 void HttpServer::on_close(IStreamConnection *conn) {
     _connections.erase(conn);
+    conn->close();  // 对方关闭后，我们也关闭，避免 TCB 卡在 CLOSE_WAIT
     LOG_DEBUG(HTTP, "connection closed");
 }
 

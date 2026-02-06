@@ -83,22 +83,22 @@ fi
 
 # 短连接：下载小文件后立即断开
 short_connection() {
-    curl -s -m 10 -o /dev/null "$BASE_URL/download/1k" 2>/dev/null || true
+    curl -s -m 3 -o /dev/null "$BASE_URL/download/1k" 2>/dev/null || true
 }
 
 # 中等连接
 medium_connection() {
-    curl -s -m 30 -o /dev/null "$BASE_URL/download/100k" 2>/dev/null || true
+    curl -s -m 15 -o /dev/null "$BASE_URL/download/100k" 2>/dev/null || true
 }
 
 # 长连接
 long_connection() {
-    curl -s -m 120 -o /dev/null "$BASE_URL/download/5m" 2>/dev/null || true
+    curl -s -m 60 -o /dev/null "$BASE_URL/download/5m" 2>/dev/null || true
 }
 
 # 中断连接（产生 RST）：启动下载后立即终止
 interrupted_connection() {
-    timeout 0.5 curl -s -o /dev/null "$BASE_URL/download/10m" 2>/dev/null || true
+    timeout 0.3 curl -s -o /dev/null "$BASE_URL/download/10m" 2>/dev/null || true
 }
 
 # 并发短连接
@@ -170,6 +170,8 @@ case "$MODE" in
                 sleep 1
             done
 
+            # 不等长连接结束，直接杀掉（避免阻塞整个 cycle）
+            kill $LONG_PID 2>/dev/null || true
             wait $LONG_PID 2>/dev/null || true
 
             # 阶段 4: 中断连接

@@ -5,9 +5,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
 
-from env import SimpleNetworkEnv, MultiFlowEnv
+import torch
+
+from env import SimpleNetworkEnv, MultiFlowEnv, CalibratedNetworkEnv
 from ddpg import DDPGAgent
+from sac import SACAgent
 from replay_buffer import ReplayBuffer
+
+
+def get_device(config: dict) -> str:
+    """自动检测设备: 优先使用配置，否则自动检测 CUDA"""
+    device = config.get('agent', {}).get('device', 'auto')
+    if device == 'auto':
+        if torch.cuda.is_available():
+            device = 'cuda'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = 'mps'
+        else:
+            device = 'cpu'
+    return device
 
 
 def load_config(path: str) -> dict:
@@ -18,7 +34,16 @@ def load_config(path: str) -> dict:
 def create_env(config: dict):
     env_type = config['env']['type']
 
-    if env_type == 'simple':
+    if env_type == 'calibrated':
+        bw_pred_path = config['env'].get('bw_predictor_path', None)
+        return CalibratedNetworkEnv(
+            max_cwnd=config['env'].get('max_cwnd', 718),
+            episode_steps=config['env']['episode_steps'],
+            step_interval_ms=config['env'].get('step_interval_ms', 10),
+            bw_predictor_path=bw_pred_path,
+            bw_history_len=config['env'].get('bw_history_len', 30),
+        )
+    elif env_type == 'simple':
         return SimpleNetworkEnv(
             bandwidth_mbps=config['env']['bandwidth_mbps'],
             base_rtt_ms=config['env']['base_rtt_ms'],
@@ -44,6 +69,7 @@ def evaluate(agent: DDPGAgent, env, num_episodes: int = 5) -> dict:
     total_throughputs = []
     total_rtts = []
     total_losses = []
+    total_utilizations = []  # throughput / bandwidth 利用率
 
     for _ in range(num_episodes):
         state = env.reset()
@@ -51,6 +77,8 @@ def evaluate(agent: DDPGAgent, env, num_episodes: int = 5) -> dict:
         throughputs = []
         rtts = []
         losses = []
+        utilizations = []
+        steps = 0
 
         done = False
         while not done:
@@ -61,19 +89,25 @@ def evaluate(agent: DDPGAgent, env, num_episodes: int = 5) -> dict:
             throughputs.append(info['throughput'])
             rtts.append(info['rtt'])
             losses.append(info['loss_rate'])
+            if 'bandwidth' in info and info['bandwidth'] > 0:
+                utilizations.append(info['throughput'] / info['bandwidth'])
+            steps += 1
 
             state = next_state
 
-        total_rewards.append(episode_reward)
+        total_rewards.append(episode_reward / max(steps, 1))  # 平均每步 reward
         total_throughputs.append(np.mean(throughputs))
         total_rtts.append(np.mean(rtts))
         total_losses.append(np.mean(losses))
+        if utilizations:
+            total_utilizations.append(np.mean(utilizations))
 
     return {
-        'reward': np.mean(total_rewards),
+        'reward': np.mean(total_rewards),           # 平均每步 reward
         'throughput': np.mean(total_throughputs),
-        'rtt': np.mean(total_rtts) * 1000,  # ms
+        'rtt': np.mean(total_rtts) * 1000,          # ms
         'loss_rate': np.mean(total_losses),
+        'utilization': np.mean(total_utilizations) if total_utilizations else 0,
     }
 
 
@@ -88,7 +122,6 @@ def plot_training(
     # Episode Rewards
     ax = axes[0, 0]
     ax.plot(rewards, alpha=0.3)
-    # 移动平均
     window = min(50, len(rewards) // 10 + 1)
     if len(rewards) >= window:
         ma = np.convolve(rewards, np.ones(window)/window, mode='valid')
@@ -177,6 +210,8 @@ def train_offline(config: dict, data_path: str, output_dir: str):
     print("  Offline Training Mode (TD3+BC)")
     print("=" * 50)
 
+    device = get_device(config)
+
     # 创建 agent
     agent = DDPGAgent(
         state_dim=config['agent']['state_dim'],
@@ -188,7 +223,9 @@ def train_offline(config: dict, data_path: str, output_dir: str):
         tau=config['agent']['tau'],
         buffer_size=config['agent']['buffer_size'],
         batch_size=config['agent']['batch_size'],
+        device=device,
     )
+    print(f"Device: {agent.device}")
 
     # 加载数据到 replay buffer
     print(f"Loading data from: {data_path}")
@@ -243,6 +280,200 @@ def train_offline(config: dict, data_path: str, output_dir: str):
     print(f"Model saved to: {output_dir}/final_model.pth")
 
 
+def create_agent(config: dict):
+    """根据配置创建 agent (SAC 或 DDPG)"""
+    algo = config['agent'].get('algorithm', 'sac')
+    device = get_device(config)
+
+    if algo == 'sac':
+        return SACAgent(
+            state_dim=config['agent']['state_dim'],
+            action_dim=config['agent']['action_dim'],
+            hidden_dims=config['agent']['hidden_dims'],
+            lr_actor=config['agent']['lr_actor'],
+            lr_critic=config['agent']['lr_critic'],
+            gamma=config['agent']['gamma'],
+            tau=config['agent']['tau'],
+            buffer_size=config['agent']['buffer_size'],
+            batch_size=config['agent']['batch_size'],
+            device=device,
+        )
+    else:
+        return DDPGAgent(
+            state_dim=config['agent']['state_dim'],
+            action_dim=config['agent']['action_dim'],
+            hidden_dims=config['agent']['hidden_dims'],
+            lr_actor=config['agent']['lr_actor'],
+            lr_critic=config['agent']['lr_critic'],
+            gamma=config['agent']['gamma'],
+            tau=config['agent']['tau'],
+            buffer_size=config['agent']['buffer_size'],
+            batch_size=config['agent']['batch_size'],
+            device=device,
+        )
+
+
+def train_online(config: dict):
+    """
+    在线训练模式：与模拟环境交互
+
+    支持从离线数据预热 replay buffer，让训练从数据经验开始，
+    然后通过在线交互逐步矫正 Q 值。
+    """
+    # 创建环境和 agent
+    env = create_env(config)
+    agent = create_agent(config)
+
+    print("=" * 50)
+    print("  Online Training Mode (Calibrated Env)")
+    print("=" * 50)
+    algo = config['agent'].get('algorithm', 'sac')
+    print(f"Algorithm: {algo.upper()}")
+    print(f"Device: {agent.device}")
+    print(f"Environment: {config['env']['type']}")
+    print(f"State dim: {env.state_dim}, Action dim: {env.action_dim}")
+    print(f"Training for {config['training']['num_episodes']} episodes")
+
+    # 离线数据预热 (可选)
+    warmup_data = config.get('training', {}).get('warmup_data', None)
+    if warmup_data and os.path.exists(warmup_data):
+        n = agent.replay_buffer.load_from_npz(warmup_data)
+        print(f"Loaded {n} offline transitions for warmup")
+
+        # 用离线数据预训练几轮 (纯 BC 模式，不用 Q)
+        pretrain_steps = config.get('training', {}).get('pretrain_steps', 1000)
+        if pretrain_steps > 0 and n >= agent.batch_size:
+            print(f"Pre-training actor with BC for {pretrain_steps} steps...")
+            for step in range(pretrain_steps):
+                agent.update(bc_weight=2.0)
+                if (step + 1) % 200 == 0:
+                    print(f"  Pretrain step {step + 1}/{pretrain_steps}")
+            print("  Pre-training done!")
+    print()
+
+    # 训练
+    episode_rewards = []
+    eval_metrics = []
+    best_reward = -float('inf')
+    is_sac = isinstance(agent, SACAgent)
+
+    for episode in range(config['training']['num_episodes']):
+        state = env.reset()
+        agent.noise.reset()
+        episode_reward = 0
+
+        for _ in range(config['training']['max_steps_per_episode']):
+            # 选择动作 (SAC 自带探索，DDPG 靠外部噪声)
+            action = agent.select_action(state, add_noise=True)
+            action = np.clip(action, -1, 1)
+
+            # 执行动作
+            next_state, reward, done, _ = env.step(action[0])
+
+            # 存储经验
+            agent.store_transition(state, action, reward, next_state, done)
+
+            # 更新网络
+            if len(agent.replay_buffer) >= config['training']['warmup_steps']:
+                agent.update(bc_weight=0.0)
+
+            state = next_state
+            episode_reward += reward
+
+            if done:
+                break
+
+        episode_rewards.append(episode_reward)
+
+        # 打印进度
+        if (episode + 1) % 10 == 0:
+            avg_reward = np.mean(episode_rewards[-10:])
+            extra = ""
+            if is_sac:
+                extra = f" | Alpha: {agent.alpha.item():.3f}"
+            print(f"Episode {episode + 1:4d} | Reward: {episode_reward:7.2f} | "
+                  f"Avg(10): {avg_reward:7.2f}{extra}")
+
+        # 评估
+        if (episode + 1) % config['training']['eval_interval'] == 0:
+            metrics = evaluate(agent, env)
+            metrics['episode'] = episode + 1
+            eval_metrics.append(metrics)
+            print(f"  [Eval] Reward/step: {metrics['reward']:.3f} | "
+                  f"Utilization: {metrics['utilization']*100:.1f}% | "
+                  f"RTT: {metrics['rtt']:.1f} ms | Loss: {metrics['loss_rate']*100:.3f}%")
+
+            # 保存最优模型
+            if metrics['reward'] > best_reward:
+                best_reward = metrics['reward']
+                agent.save(os.path.join(config['output']['model_dir'], 'best_model.pth'))
+                print(f"  [Best] New best reward: {best_reward:.2f}")
+
+        # 定期保存
+        if (episode + 1) % config['training']['save_interval'] == 0:
+            agent.save(os.path.join(config['output']['model_dir'], f'checkpoint_{episode+1}.pth'))
+
+    # 保存最终模型
+    agent.save(os.path.join(config['output']['model_dir'], 'final_model.pth'))
+
+    # 导出 ONNX
+    onnx_path = config['output'].get('onnx_path', None)
+    if onnx_path:
+        export_onnx(agent, config['agent']['state_dim'], onnx_path)
+
+    # 绘制训练曲线
+    plot_training(
+        episode_rewards,
+        eval_metrics,
+        os.path.join(config['output']['model_dir'], 'training_curves.png')
+    )
+
+    print()
+    print("=" * 50)
+    print("  Online Training Complete!")
+    print("=" * 50)
+    final_eval = evaluate(agent, env, num_episodes=10)
+    print(f"Final evaluation (10 episodes):")
+    print(f"  Reward/step:  {final_eval['reward']:.3f}")
+    print(f"  Utilization:  {final_eval['utilization']*100:.1f}%")
+    print(f"  Throughput:   {final_eval['throughput']/1e6:.2f} MB/s")
+    print(f"  RTT:          {final_eval['rtt']:.1f} ms")
+    print(f"  Loss Rate:    {final_eval['loss_rate']*100:.3f}%")
+    print(f"Best reward during training: {best_reward:.2f}")
+
+
+def export_onnx(agent, state_dim: int, onnx_path: str):
+    """导出 Actor 为 ONNX (兼容 SAC 和 DDPG)"""
+    import torch
+
+    # SAC actor 输出 (mean, log_std)，需要包装成只输出 tanh(mean)
+    if isinstance(agent, SACAgent):
+        class DeterministicWrapper(torch.nn.Module):
+            def __init__(self, actor):
+                super().__init__()
+                self.actor = actor
+            def forward(self, state):
+                return self.actor.get_deterministic_action(state)
+        export_model = DeterministicWrapper(agent.actor).cpu()
+    else:
+        export_model = agent.actor.cpu()
+
+    export_model.eval()
+    dummy_input = torch.randn(1, state_dim)
+
+    os.makedirs(os.path.dirname(onnx_path) or '.', exist_ok=True)
+    torch.onnx.export(
+        export_model,
+        dummy_input,
+        onnx_path,
+        input_names=['state'],
+        output_names=['alpha'],
+        dynamic_axes={'state': {0: 'batch'}, 'alpha': {0: 'batch'}},
+        opset_version=11,
+    )
+    print(f"Exported ONNX model to: {onnx_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Train Orca DDPG')
     parser.add_argument('--config', type=str, default='config.yaml')
@@ -263,98 +494,6 @@ def main():
     else:
         # 在线训练模式
         train_online(config)
-
-
-def train_online(config: dict):
-    """在线训练模式：与模拟环境交互"""
-    # 创建环境和 agent
-    env = create_env(config)
-    agent = DDPGAgent(
-        state_dim=config['agent']['state_dim'],
-        action_dim=config['agent']['action_dim'],
-        hidden_dims=config['agent']['hidden_dims'],
-        lr_actor=config['agent']['lr_actor'],
-        lr_critic=config['agent']['lr_critic'],
-        gamma=config['agent']['gamma'],
-        tau=config['agent']['tau'],
-        buffer_size=config['agent']['buffer_size'],
-        batch_size=config['agent']['batch_size'],
-    )
-
-    print(f"Environment: {config['env']['type']}")
-    print(f"State dim: {env.state_dim}, Action dim: {env.action_dim}")
-    print(f"Training for {config['training']['num_episodes']} episodes")
-
-    # 训练
-    episode_rewards = []
-    eval_metrics = []
-    noise_scale = 1.0
-
-    for episode in range(config['training']['num_episodes']):
-        state = env.reset()
-        agent.noise.reset()
-        episode_reward = 0
-
-        for _ in range(config['training']['max_steps_per_episode']):
-            # 选择动作
-            action = agent.select_action(state, add_noise=True)
-            action = action * noise_scale  # 噪声衰减
-            action = np.clip(action, -1, 1)
-
-            # 执行动作
-            next_state, reward, done, _ = env.step(action[0])
-
-            # 存储经验
-            agent.store_transition(state, action, reward, next_state, done)
-
-            # 更新网络
-            if len(agent.replay_buffer) >= config['training']['warmup_steps']:
-                agent.update()
-
-            state = next_state
-            episode_reward += reward
-
-            if done:
-                break
-
-        episode_rewards.append(episode_reward)
-
-        # 噪声衰减
-        noise_scale = max(
-            config['training']['min_noise'],
-            noise_scale * config['training']['noise_decay']
-        )
-
-        # 打印进度
-        if (episode + 1) % 10 == 0:
-            avg_reward = np.mean(episode_rewards[-10:])
-            print(f"Episode {episode + 1:4d} | Reward: {episode_reward:7.2f} | "
-                  f"Avg(10): {avg_reward:7.2f} | Noise: {noise_scale:.3f}")
-
-        # 评估
-        if (episode + 1) % config['training']['eval_interval'] == 0:
-            metrics = evaluate(agent, env)
-            metrics['episode'] = episode + 1
-            eval_metrics.append(metrics)
-            print(f"  [Eval] Throughput: {metrics['throughput']/1e6:.2f} MB/s | "
-                  f"RTT: {metrics['rtt']:.1f} ms | Loss: {metrics['loss_rate']*100:.2f}%")
-
-        # 保存
-        if (episode + 1) % config['training']['save_interval'] == 0:
-            agent.save(os.path.join(config['output']['model_dir'], f'checkpoint_{episode+1}.pth'))
-
-    # 保存最终模型
-    agent.save(os.path.join(config['output']['model_dir'], 'final_model.pth'))
-
-    # 绘制训练曲线
-    plot_training(
-        episode_rewards,
-        eval_metrics,
-        os.path.join(config['output']['model_dir'], 'training_curves.png')
-    )
-
-    print("\nTraining complete!")
-    print(f"Final evaluation: {evaluate(agent, env)}")
 
 
 if __name__ == '__main__':
