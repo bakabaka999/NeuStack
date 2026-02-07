@@ -1,5 +1,6 @@
 #include "neustack/ai/intelligence_plane.hpp"
 #include "neustack/common/log.hpp"
+#include <algorithm>
 
 using namespace neustack;
 
@@ -84,6 +85,11 @@ void IntelligencePlane::run_loop() {
             // 追加到历史（用于带宽预测）
             for (const auto& sample : samples) {
                 _sample_history.push_back(sample);
+
+                // 更新 est_bw (sliding window max delivery_rate)
+                if (sample.delivery_rate > _est_bw) {
+                    _est_bw = sample.delivery_rate;
+                }
             }
 
             // 限制历史长度
@@ -93,6 +99,13 @@ void IntelligencePlane::run_loop() {
                     _sample_history.begin(),
                     _sample_history.begin() + (_sample_history.size() - MAX_HISTORY)
                 );
+                // Recompute est_bw from remaining history
+                _est_bw = 0;
+                for (const auto& s : _sample_history) {
+                    if (s.delivery_rate > _est_bw) {
+                        _est_bw = s.delivery_rate;
+                    }
+                }
             }
 
             last_read_count = current_count;
@@ -116,7 +129,7 @@ void IntelligencePlane::run_loop() {
         // 异常检测（低频）
         if (_anomaly_model && _anomaly_model->is_loaded() &&
             now - _last_anomaly_time >= _config.anomaly_interval) {
-            process_anomaly(delta);
+            process_anomaly(delta, snapshot.active_connections);
             _last_anomaly_time = now;
         }
 
@@ -143,22 +156,18 @@ void IntelligencePlane::process_orca() {
     // 使用最新的样本
     const auto& sample = _sample_history.back();
 
-    // 构造 Orca 输入特征
-    // 需要归一化参数（这里使用简单的经验值）
-    constexpr float MAX_THROUGHPUT = 100e6f;  // 100 Mbps
-    constexpr float MAX_DELAY = 100000.0f;    // 100ms in us
-    constexpr float MAX_CWND = 1000.0f;       // 1000 MSS
+    // 使用 OrcaFeatures 构造正确归一化的输入
+    auto features = OrcaFeatures::from_sample(sample, _est_bw, _cached_predicted_bw);
+    auto feature_vec = features.to_vector();
 
     ICongestionModel::Input input{
-        .throughput_normalized = static_cast<float>(sample.delivery_rate) / MAX_THROUGHPUT,
-        .queuing_delay_normalized = static_cast<float>(sample.queuing_delay_us()) / MAX_DELAY,
-        .rtt_ratio = sample.rtt_ratio(),
-        .loss_rate = sample.loss_rate(),
-        .cwnd_normalized = static_cast<float>(sample.cwnd) / MAX_CWND,
-        .in_flight_ratio = (sample.cwnd > 0)
-            ? static_cast<float>(sample.bytes_in_flight) / (sample.cwnd * 1460)  // 假设 MSS=1460
-            : 0.0f,
-        .predicted_bw_normalized = _cached_predicted_bw
+        .throughput_normalized = feature_vec[0],
+        .queuing_delay_normalized = feature_vec[1],
+        .rtt_ratio = feature_vec[2],
+        .loss_rate = feature_vec[3],
+        .cwnd_normalized = feature_vec[4],
+        .in_flight_ratio = feature_vec[5],
+        .predicted_bw_normalized = feature_vec[6]
     };
 
     auto result = _orca_model->infer(input);
@@ -175,26 +184,23 @@ void IntelligencePlane::process_orca() {
 }
 
 // ─── 异常检测推理 ───
-void IntelligencePlane::process_anomaly(const GlobalMetrics::Snapshot::Delta& delta) {
+void IntelligencePlane::process_anomaly(
+    const GlobalMetrics::Snapshot::Delta& delta,
+    uint32_t active_connections
+) {
 #ifdef NEUSTACK_AI_ENABLED
-    // 计算速率（假设 1 秒间隔）
-    float interval_sec = static_cast<float>(_config.anomaly_interval.count()) / 1000.0f;
-    if (interval_sec <= 0) interval_sec = 1.0f;
-
-    // 归一化参数
-    constexpr float MAX_RATE = 10000.0f;  // 10k/s
-    constexpr float MAX_PACKET_SIZE = 1500.0f;
-
-    float avg_packet_size = (delta.packets_rx > 0)
-        ? static_cast<float>(delta.bytes_rx) / delta.packets_rx
-        : 0.0f;
+    // 使用 AnomalyFeatures 构造正确归一化的 8-dim 输入
+    auto features = AnomalyFeatures::from_delta(delta, active_connections);
 
     IAnomalyModel::Input input{
-        .syn_rate = static_cast<float>(delta.syn_received) / interval_sec / MAX_RATE,
-        .rst_rate = static_cast<float>(delta.rst_received) / interval_sec / MAX_RATE,
-        .new_conn_rate = static_cast<float>(delta.conn_established) / interval_sec / MAX_RATE,
-        .packet_rate = static_cast<float>(delta.packets_rx) / interval_sec / MAX_RATE,
-        .avg_packet_size = avg_packet_size / MAX_PACKET_SIZE
+        .packets_rx_norm = features.packets_rx_norm,
+        .packets_tx_norm = features.packets_tx_norm,
+        .bytes_tx_norm = features.bytes_tx_norm,
+        .syn_rate_norm = features.syn_rate_norm,
+        .rst_rate_norm = features.rst_rate_norm,
+        .conn_established_norm = features.conn_established_norm,
+        .tx_rx_ratio_norm = features.tx_rx_ratio_norm,
+        .active_conn_norm = features.active_conn_norm
     };
 
     auto result = _anomaly_model->infer(input);
@@ -209,6 +215,7 @@ void IntelligencePlane::process_anomaly(const GlobalMetrics::Snapshot::Delta& de
     }
 #else
     (void)delta;
+    (void)active_connections;
 #endif
 }
 
@@ -220,32 +227,34 @@ void IntelligencePlane::process_bandwidth() {
         return;  // 历史数据不足
     }
 
-    // 构造输入：提取最近 N 个样本的 throughput/rtt/loss
-    IBandwidthModel::Input input;
-    input.throughput_history.reserve(required);
-    input.rtt_history.reserve(required);
-    input.loss_history.reserve(required);
-
-    // 归一化参数
-    constexpr float MAX_THROUGHPUT = 100e6f;  // 100 Mbps
-    constexpr float MAX_RTT = 100000.0f;      // 100ms in us
-
+    // 提取最近 N 个样本
     size_t start = _sample_history.size() - required;
-    for (size_t i = 0; i < required; i++) {
-        const auto& sample = _sample_history[start + i];
-        input.throughput_history.push_back(
-            static_cast<float>(sample.delivery_rate) / MAX_THROUGHPUT
-        );
-        input.rtt_history.push_back(
-            static_cast<float>(sample.rtt_us) / MAX_RTT
-        );
-        input.loss_history.push_back(sample.loss_rate());
+    std::vector<TCPSample> recent_samples(
+        _sample_history.begin() + start,
+        _sample_history.end()
+    );
+
+    // 计算 min_rtt from recent samples
+    uint32_t min_rtt_us = UINT32_MAX;
+    for (const auto& s : recent_samples) {
+        if (s.min_rtt_us > 0 && s.min_rtt_us < min_rtt_us) {
+            min_rtt_us = s.min_rtt_us;
+        }
     }
+    if (min_rtt_us == UINT32_MAX) min_rtt_us = 0;
+
+    // 使用 BandwidthFeatures 构造正确归一化的输入
+    auto features = BandwidthFeatures::from_samples(recent_samples, min_rtt_us);
+
+    IBandwidthModel::Input input;
+    input.throughput_history = std::move(features.throughput_history);
+    input.rtt_history = std::move(features.rtt_history);
+    input.loss_history = std::move(features.loss_history);
 
     auto result = _bandwidth_model->infer(input);
     if (result) {
-        // 缓存预测结果 (归一化后供 Orca 使用)
-        _cached_predicted_bw = static_cast<float>(result->predicted_bandwidth) / MAX_THROUGHPUT;
+        // 缓存预测结果 (raw bytes/s, Orca 归一化时会除以 MAX_BW)
+        _cached_predicted_bw = static_cast<float>(result->predicted_bandwidth);
 
         AIAction action{};
         action.type = AIAction::Type::BW_PREDICTION;

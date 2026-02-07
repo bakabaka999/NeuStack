@@ -11,7 +11,10 @@
 
 #ifdef NEUSTACK_AI_ENABLED
 #include "neustack/transport/tcp_orca.hpp"
+#include "neustack/transport/tcp_cubic.hpp"
 #include "neustack/ai/intelligence_plane.hpp"
+#include "neustack/ai/ai_agent.hpp"
+#include "neustack/common/log.hpp"
 #endif
 
 #include <memory>
@@ -146,6 +149,11 @@ public:
      * @brief AI 是否已启用
      */
     bool ai_enabled() const { return _ai != nullptr && _ai->is_running(); }
+
+    /**
+     * @brief 获取 AI Agent（用于 API 查询）
+     */
+    const NetworkAgent& agent() const { return _agent; }
 #else
     bool ai_enabled() const { return false; }
 #endif
@@ -185,16 +193,26 @@ private:
     // ─── 智能面线程 (用 unique_ptr 延迟初始化) ───
     std::unique_ptr<IntelligencePlane> _ai;
 
+    // ─── AI Agent 处理 ───
+    NetworkAgent _agent;
+    AgentState _last_agent_state = AgentState::NORMAL;  // 追踪状态变化
+
     // 在事件循环中检查 AI 决策
     void process_ai_actions() {
         AIAction action;
         while (_action_queue.try_pop(action)) {
             switch (action.type) {
                 case AIAction::Type::CWND_ADJUST:
-                    apply_cwnd_action(action);
+                    _agent.on_cwnd_adjust(action.cwnd.alpha);
+                    apply_cwnd_adjust();
                     break;
                 case AIAction::Type::ANOMALY_ALERT:
-                    handle_anomaly(action);
+                    _agent.on_anomaly(action.anomaly.score);
+                    apply_state_change();
+                    break;
+                case AIAction::Type::BW_PREDICTION:
+                    _agent.on_bw_prediction(action.bandwidth.predicted_bw);
+                    apply_state_change();
                     break;
                 default:
                     break;
@@ -202,20 +220,53 @@ private:
         }
     }
 
-    // AI 动作处理
-    void apply_cwnd_action(const AIAction& action) {
-        // 遍历所有连接，找到使用 Orca 的连接并设置 α
+    // 将 agent 的 effective_alpha 应用到所有 Orca 连接
+    void apply_cwnd_adjust() {
+        float alpha = _agent.effective_alpha();
         for (auto& [tuple, tcb_ptr] : _tcp_mgr._connections) {
             auto* orca = dynamic_cast<TCPOrca*>(tcb_ptr->congestion_control.get());
             if (orca) {
-                orca->set_alpha(action.cwnd.alpha);
+                orca->set_alpha(alpha);
             }
         }
     }
 
-    void handle_anomaly(const AIAction& action) {
-        // TODO: 记录日志，触发告警
-        (void)action;
+    // Agent 状态变化时切换 CC 算法
+    void apply_state_change() {
+        AgentState current = _agent.state();
+        if (current == _last_agent_state) return;
+
+        AgentState prev = _last_agent_state;
+        _last_agent_state = current;
+
+        if (current == AgentState::UNDER_ATTACK) {
+            // 切回 Cubic：安全、不依赖 AI
+            switch_all_cc_to_cubic();
+            LOG_WARN(AI, "Agent: UNDER_ATTACK - switched all connections to CUBIC");
+        } else if (prev == AgentState::UNDER_ATTACK) {
+            // 从攻击恢复，切回 Orca
+            switch_all_cc_to_orca();
+            LOG_INFO(AI, "Agent: %s - switched all connections to Orca",
+                     agent_state_name(current));
+        }
+    }
+
+    // 切换所有连接到 Cubic
+    void switch_all_cc_to_cubic() {
+        for (auto& [tuple, tcb_ptr] : _tcp_mgr._connections) {
+            if (dynamic_cast<TCPOrca*>(tcb_ptr->congestion_control.get())) {
+                tcb_ptr->congestion_control = std::make_unique<TCPCubic>(tcb_ptr->options.mss);
+            }
+        }
+    }
+
+    // 切换所有连接到 Orca
+    void switch_all_cc_to_orca() {
+        for (auto& [tuple, tcb_ptr] : _tcp_mgr._connections) {
+            if (dynamic_cast<TCPCubic*>(tcb_ptr->congestion_control.get())) {
+                tcb_ptr->congestion_control = std::make_unique<TCPOrca>(tcb_ptr->options.mss);
+            }
+        }
     }
 #else
     void process_ai_actions() {} // no-op when AI disabled

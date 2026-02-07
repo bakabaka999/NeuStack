@@ -4,7 +4,7 @@ env:
   max_cwnd: 718           # 真实协议栈的最大 cwnd
   step_interval_ms: 10    # 每步 10ms
   bw_predictor_path: "../../models/bandwidth_predictor.onnx"
-  bw_history_len: 10
+  bw_history_len: 30
 
   # 以下仅 simple/multi_flow 使用
   bandwidth_mbps: 100

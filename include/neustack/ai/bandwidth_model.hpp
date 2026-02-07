@@ -22,8 +22,8 @@ public:
      */
     BandwidthPredictor(
         const std::string &model_path,
-        size_t history_length = 10,
-        uint32_t max_bandwidth = 100 * 1024 * 1024 // 100 MB/s
+        size_t history_length = 30,
+        uint32_t max_bandwidth = 10 * 1000 * 1000 // 10 MB/s = MAX_BW (matches Python training)
     );
 
     // AIModel 接口

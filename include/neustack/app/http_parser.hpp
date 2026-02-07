@@ -61,6 +61,8 @@ class HttpRequestParser : public HttpParser {
 public:
     HttpRequestParser() = default;
 
+    using HttpParser::feed;  // 引入基类的 feed(const std::string&) 重载
+
     // 喂入数据
     size_t feed(const uint8_t *data, size_t len) override;
 
@@ -83,6 +85,8 @@ private:
 class HttpResponseParser : public HttpParser {
 public:
     HttpResponseParser() = default;
+
+    using HttpParser::feed;  // 引入基类的 feed(const std::string&) 重载
 
     // 喂入数据
     size_t feed(const uint8_t *data, size_t len) override;

@@ -41,13 +41,16 @@ std::optional<IAnomalyModel::Output> AnomalyDetector::infer(const Input &input) 
         return std::nullopt;
     }
 
-    // 构造特征向量
+    // 构造特征向量 (8维)
     std::vector<float> features = {
-        input.syn_rate,
-        input.rst_rate,
-        input.new_conn_rate,
-        input.packet_rate,
-        input.avg_packet_size
+        input.packets_rx_norm,
+        input.packets_tx_norm,
+        input.bytes_tx_norm,
+        input.syn_rate_norm,
+        input.rst_rate_norm,
+        input.conn_established_norm,
+        input.tx_rx_ratio_norm,
+        input.active_conn_norm
     };
 
     try {

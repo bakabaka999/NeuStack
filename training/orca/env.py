@@ -67,7 +67,7 @@ class CalibratedNetworkEnv:
         episode_steps: int = 300,
         step_interval_ms: float = 10,  # 每步模拟 10ms
         bw_predictor_path: str = None, # bandwidth_predictor.onnx 路径
-        bw_history_len: int = 10,      # 带宽预测的历史窗口长度 (ONNX 模型期望 10)
+        bw_history_len: int = 30,      # 带宽预测的历史窗口长度 (ONNX 模型期望 30)
     ):
         self.mss = mss
         self.max_cwnd = max_cwnd
@@ -97,7 +97,7 @@ class CalibratedNetworkEnv:
                 print("  Warning: onnxruntime not installed, using analytical bandwidth estimation")
         elif path.endswith('.pth') and HAS_TORCH:
             # PyTorch checkpoint
-            from model import LSTMBandwidthPredictor
+            from model import LSTMBandwidthPredictor # type: ignore
             self.bw_predictor = LSTMBandwidthPredictor(input_dim=3, hidden_dim=64, num_layers=2)
             checkpoint = torch.load(path, map_location='cpu')
             if 'model_state_dict' in checkpoint:

@@ -367,10 +367,12 @@ TCB *TCPConnectionManager::create_tcb(const TCPTuple &t_tuple) {
     // 应用默认选项
     tcb->apply_options(_default_options);
 
-    // 创建拥塞控制器（使用 MSS 配置）
-    // 临时使用 CUBIC 用于数据采集（禁用 Orca AI）
+    // 创建拥塞控制器
+#ifdef NEUSTACK_AI_ENABLED
+    tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
+#else
     tcb->congestion_control = std::make_unique<TCPCubic>(tcb->options.mss);
-    // tcb->congestion_control = std::make_unique<TCPOrca>(tcb->options.mss);
+#endif
 
     TCB *ptr = tcb.get();
     _connections[t_tuple] = std::move(tcb);

@@ -423,6 +423,39 @@ int main(int argc, char *argv[]) {
     HttpServer http_server(tcp);
     setup_http_server(http_server, cfg.local_ip);
 
+#ifdef NEUSTACK_AI_ENABLED
+    // Agent API
+    http_server.get("/api/agent/status", [&tcp](const HttpRequest &req) {
+        const auto& agent = tcp.agent();
+        std::string json = "{";
+        json += "\"state\":\"" + std::string(agent_state_name(agent.state())) + "\",";
+        json += "\"anomaly_score\":" + std::to_string(agent.anomaly_score()) + ",";
+        json += "\"predicted_bw\":" + std::to_string(agent.predicted_bw()) + ",";
+        json += "\"alpha\":" + std::to_string(agent.current_alpha()) + ",";
+        json += "\"effective_alpha\":" + std::to_string(agent.effective_alpha()) + ",";
+        json += "\"accept_connections\":" + std::string(agent.should_accept_connection() ? "true" : "false") + ",";
+        json += "\"decisions_total\":" + std::to_string(agent.history().size());
+        json += "}";
+        return HttpResponse().content_type("application/json").set_body(json);
+    });
+
+    http_server.get("/api/agent/history", [&tcp](const HttpRequest &req) {
+        const auto& history = tcp.agent().history();
+        std::string json = "[";
+        bool first = true;
+        for (const auto& d : history) {
+            if (!first) json += ",";
+            first = false;
+            json += "{\"timestamp_us\":" + std::to_string(d.timestamp_us);
+            json += ",\"from\":\"" + std::string(agent_state_name(d.from_state)) + "\"";
+            json += ",\"to\":\"" + std::string(agent_state_name(d.to_state)) + "\"";
+            json += ",\"reason\":\"" + d.reason + "\"}";
+        }
+        json += "]";
+        return HttpResponse().content_type("application/json").set_body(json);
+    });
+#endif
+
     HttpClient http_client(tcp);
 
     DNSClient dns(udp, cfg.dns_server);

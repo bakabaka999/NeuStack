@@ -39,7 +39,7 @@ struct IntelligencePlaneConfig {
     float anomaly_threshold = 0.5f;
 
     // 带宽预测历史长度
-    size_t bandwidth_history_length = 10;
+    size_t bandwidth_history_length = 30;
 };
 
 /**
@@ -93,14 +93,17 @@ private:
     std::vector<TCPSample> _sample_history;
     GlobalMetrics::Snapshot _prev_snapshot;
 
-    // 带宽预测结果缓存 (供 Orca 使用)
+    // 带宽预测结果缓存 (raw bytes/s, 供 Orca 归一化使用)
     float _cached_predicted_bw = 0.0f;
+
+    // 估计带宽 (sliding window max delivery_rate, bytes/s)
+    uint32_t _est_bw = 0;
 
     // 内部方法
     void run_loop();
 
     void process_orca();
-    void process_anomaly(const GlobalMetrics::Snapshot::Delta& delta);
+    void process_anomaly(const GlobalMetrics::Snapshot::Delta& delta, uint32_t active_connections);
     void process_bandwidth();
 
     // 时间戳

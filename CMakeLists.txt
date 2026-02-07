@@ -127,6 +127,7 @@ if(NEUSTACK_ENABLE_AI)
             src/ai/anomaly_model.cpp
             src/ai/bandwidth_model.cpp
             src/ai/intelligence_plane.cpp
+            src/ai/ai_agent.cpp
         )
     else()
         message(WARNING "ONNX Runtime not found, AI features disabled")
