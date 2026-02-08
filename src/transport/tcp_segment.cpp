@@ -75,25 +75,20 @@ bool TCPParser::verify_checksum(const IPv4Packet &pkt) {
 
 uint16_t TCPParser::compute_tcp_checksum(uint32_t src_ip, uint32_t dst_ip,
                                          const uint8_t *tcp_data, size_t tcp_len) {
-    // TCP 段长度不能超过 65535（伪头部长度字段为 16 位）
     if (tcp_len > 65535) {
         LOG_ERROR(TCP, "TCP segment too large for checksum: %zu", tcp_len);
         return 0;
     }
 
-    // 构造伪头部 + TCP 数据
-    std::vector<uint8_t> buffer(sizeof(TCPPseudoHeader) + tcp_len);
+    TCPPseudoHeader pseudo;
+    pseudo.src_addr = htonl(src_ip);
+    pseudo.dst_addr = htonl(dst_ip);
+    pseudo.zero = 0;
+    pseudo.protocol = 6;
+    pseudo.tcp_length = htons(static_cast<uint16_t>(tcp_len));
 
-    // 填充伪头部
-    auto *pseudo = reinterpret_cast<TCPPseudoHeader *>(buffer.data());
-    pseudo->src_addr = htonl(src_ip);
-    pseudo->dst_addr = htonl(dst_ip);
-    pseudo->zero = 0;
-    pseudo->protocol = 6; // TCP
-    pseudo->tcp_length = htons(static_cast<uint16_t>(tcp_len));
-
-    // 复制 TCP 数据
-    std::memcpy(buffer.data() + sizeof(TCPPseudoHeader), tcp_data, tcp_len);
-
-    return compute_checksum(buffer.data(), buffer.size());
+    uint32_t sum = 0;
+    sum = checksum_accumulate(sum, &pseudo, sizeof(pseudo));
+    sum = checksum_accumulate(sum, tcp_data, tcp_len);
+    return checksum_finalize(sum);
 }

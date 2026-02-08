@@ -78,6 +78,13 @@ size_t HttpRequestParser::feed(const uint8_t *data, size_t len) {
 
     _buffer.append(reinterpret_cast<const char *>(data), len);
 
+    // 缓冲区上限检查，防止 slowloris / 超大请求耗尽内存
+    if (_buffer.size() > MAX_BUFFER_SIZE) {
+        _state = State::Error;
+        _error = "Request too large";
+        return len;
+    }
+
     while (_state != State::Complete && _state != State::Error) {
         switch (_state) {
             case State::FirstLine:
@@ -142,6 +149,13 @@ size_t HttpResponseParser::feed(const uint8_t *data, size_t len) {
     }
 
     _buffer.append(reinterpret_cast<const char *>(data), len);
+
+    // 缓冲区上限检查
+    if (_buffer.size() > MAX_BUFFER_SIZE) {
+        _state = State::Error;
+        _error = "Response too large";
+        return len;
+    }
 
     while (_state != State::Complete && _state != State::Error) {
         switch (_state) {

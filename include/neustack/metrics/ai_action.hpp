@@ -21,21 +21,20 @@ struct AIAction {
     Type type = Type::NONE;
     uint32_t conn_id = 0;   // 目标连接（0 = 全局）
 
+    struct Cwnd {
+        float alpha;          // cwnd_new = 2^alpha * cwnd_cubic
+    };
+    struct Anomaly {
+        float score;          // 异常分数 [0, 1]
+    };
+    struct Bw {
+        uint32_t predicted_bw; // 预测带宽 (bytes/s)
+    };
+
     union {
-        // CWND_ADJUST
-        struct {
-            float alpha;          // cwnd_new = 2^alpha * cwnd_cubic
-        } cwnd;
-
-        // ANOMALY_ALERT
-        struct {
-            float score;          // 异常分数 [0, 1]
-        } anomaly;
-
-        // BW_PREDICTION
-        struct {
-            uint32_t predicted_bw; // 预测带宽 (bytes/s)
-        } bandwidth;
+        Cwnd cwnd;
+        Anomaly anomaly;
+        Bw bandwidth;
     };
 };
 

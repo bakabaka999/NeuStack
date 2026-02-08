@@ -49,6 +49,9 @@ protected:
     std::string _error;
     size_t _content_length = 0;
 
+    // 缓冲区上限（防止 slowloris / 内存耗尽攻击）
+    static constexpr size_t MAX_BUFFER_SIZE = 1 * 1024 * 1024;  // 1 MB
+
     // 公共解析方法
     bool parse_headers(std::unordered_map<std::string, std::vector<std::string>> &headers);
     bool parse_body(std::string &body);

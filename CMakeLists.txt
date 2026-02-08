@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(NeuStack
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Cross-platform User-space TCP/IP Stack with AI-powered Congestion Control"
     LANGUAGES CXX
 )
@@ -90,6 +90,7 @@ set(APP_SOURCES
     src/app/http_server.cpp
     src/app/http_client.cpp
     src/app/dns_client.cpp
+    src/neustack.cpp
 )
 
 # Metrics sources (AI feature extraction, always compiled)
@@ -170,25 +171,6 @@ if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
 endif()
 
 # ============================================================================
-# Main Executable
-# ============================================================================
-add_executable(neustack src/main.cpp)
-target_link_libraries(neustack PRIVATE neustack_lib)
-
-# RPATH 设置 (确保运行时能找到 ONNX Runtime 动态库)
-if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
-    if(APPLE)
-        set_target_properties(neustack PROPERTIES
-            BUILD_RPATH "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/macos-arm64/lib;${CMAKE_SOURCE_DIR}/third_party/onnxruntime/macos-x64/lib"
-        )
-    elseif(UNIX)
-        set_target_properties(neustack PROPERTIES
-            BUILD_RPATH "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/linux-x64/lib"
-        )
-    endif()
-endif()
-
-# ============================================================================
 # Tests
 # ============================================================================
 if(NEUSTACK_BUILD_TESTS)
@@ -214,8 +196,7 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
-install(TARGETS neustack neustack_lib
-    RUNTIME DESTINATION bin
+install(TARGETS neustack_lib
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )

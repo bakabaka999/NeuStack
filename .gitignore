@@ -1,10 +1,12 @@
 # Build directories
 build/
+build-asan/
 cmake-build-*/
 out/
 
 # IDE
 .idea/
+.cache/
 *.swp
 *.swo
 *~
@@ -69,3 +71,6 @@ training/*/checkpoints/
 
 # Training visualization (optional, can be committed)
 training/*/*.png
+
+# doc file
+docs/_draft/*

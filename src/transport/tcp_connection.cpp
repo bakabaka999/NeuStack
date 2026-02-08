@@ -8,6 +8,8 @@
 using namespace neustack;
 
 constexpr auto TIME_WAIT_DURATION = std::chrono::seconds(32);
+constexpr size_t MAX_CONNECTIONS = 10000;
+constexpr size_t MAX_TIME_WAIT_ENTRIES = 4000;
 
 int TCPConnectionManager::listen(uint16_t port, TCPConnectCallback on_accept) {
     // 检查端口合法性 (0-1024 通常需要特权，虽然在我们的 stack 里可以随便用)
@@ -57,6 +59,12 @@ void TCPConnectionManager::unlisten(uint16_t port) {
 int TCPConnectionManager::connect(uint32_t remote_ip, uint16_t remote_port, uint16_t local_port, TCPConnectCallback on_connect) {
     // 构造四元组
     TCPTuple tuple{_local_ip, remote_ip, local_port, remote_port};
+
+    // 连接数上限检查
+    if (_connections.size() >= MAX_CONNECTIONS) {
+        LOG_WARN(TCP, "Connection limit reached (%zu), cannot connect", MAX_CONNECTIONS);
+        return -1;
+    }
 
     // 检查连接是否已存在
     if (find_tcb(tuple)) {
@@ -610,6 +618,13 @@ void TCPConnectionManager::handle_listen(TCB *listen_tcb, const TCPSegment &seg)
         return;
     }
 
+    // 连接数上限检查，防止资源耗尽
+    if (_connections.size() >= MAX_CONNECTIONS) {
+        LOG_WARN(TCP, "Connection limit reached (%zu), dropping SYN from %s:%u",
+                 MAX_CONNECTIONS, ip_to_string(seg.src_addr).c_str(), seg.src_port);
+        return;
+    }
+
     // 为新连接创建 TCB
     // 监听 TCB 保持不变，继续监听其他连接
     TCPTuple tuple(_local_ip, seg.src_addr, listen_tcb->t_tuple.local_port, seg.src_port);
@@ -952,6 +967,18 @@ void TCPConnectionManager::handle_rst(TCB *tcb, const TCPSegment &seg) {
 }
 
 void TCPConnectionManager::start_time_wait_timer(TCB *tcb) {
+    // TIME_WAIT 条目上限，防止高并发下 TIME_WAIT 积累耗尽内存
+    while (_time_wait_list.size() >= MAX_TIME_WAIT_ENTRIES) {
+        // 淘汰最旧的条目（列表头部）
+        auto &oldest = _time_wait_list.front();
+        TCB *old_tcb = find_tcb(oldest.second);
+        if (old_tcb && old_tcb->state == TCPState::TIME_WAIT) {
+            old_tcb->state = TCPState::CLOSED;
+            delete_tcb(old_tcb);
+        }
+        _time_wait_list.erase(_time_wait_list.begin());
+    }
+
     auto expire_time = std::chrono::steady_clock::now() + TIME_WAIT_DURATION;
     _time_wait_list.emplace_back(expire_time, tcb->t_tuple);
 

@@ -88,21 +88,17 @@ bool UDPLayer::verify_checksum(const IPv4Packet &pkt) {
 
 uint16_t UDPLayer::compute_udp_checksum(uint32_t src_ip, uint32_t dst_ip,
                                         const uint8_t *udp_packet, size_t udp_len) {
-    // 构造伪头部+UDP数据
-    std::vector<uint8_t> buffer(sizeof(UDPPseudoHeader) + udp_len);
+    UDPPseudoHeader pseudo;
+    pseudo.src_addr = htonl(src_ip);
+    pseudo.dst_addr = htonl(dst_ip);
+    pseudo.zero = 0;
+    pseudo.protocol = 17;
+    pseudo.udp_length = htons(static_cast<uint16_t>(udp_len));
 
-    // 填充伪头部
-    auto *pseudo = reinterpret_cast<UDPPseudoHeader *>(buffer.data());
-    pseudo->src_addr = htonl(src_ip);
-    pseudo->dst_addr = htonl(dst_ip);
-    pseudo->zero = 0;
-    pseudo->protocol = 17; // UDP
-    pseudo->udp_length = htons(static_cast<uint16_t>(udp_len));
-
-    // 复制 UDP 数据
-    std::memcpy(buffer.data() + sizeof(UDPPseudoHeader), udp_packet, udp_len);
-
-    return compute_checksum(buffer.data(), buffer.size());
+    uint32_t sum = 0;
+    sum = checksum_accumulate(sum, &pseudo, sizeof(pseudo));
+    sum = checksum_accumulate(sum, udp_packet, udp_len);
+    return checksum_finalize(sum);
 }
 
 ssize_t UDPLayer::sendto(uint32_t dst_ip, uint16_t dst_port, uint16_t src_port,

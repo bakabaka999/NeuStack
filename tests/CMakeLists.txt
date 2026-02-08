@@ -30,9 +30,40 @@ neustack_add_test(test_tcp_segment unit/test_tcp_segment.cpp)
 neustack_add_test(test_ring_buffer unit/test_ring_buffer.cpp)
 neustack_add_test(test_spsc_queue  unit/test_spsc_queue.cpp)
 
+# --- 运输层协议测试 ---
+neustack_add_test(test_tcp_seq     unit/test_tcp_seq.cpp)
+neustack_add_test(test_tcp_cubic   unit/test_tcp_cubic.cpp)
+neustack_add_test(test_tcp_reno    unit/test_tcp_reno.cpp)
+neustack_add_test(test_tcp_orca    unit/test_tcp_orca.cpp)
+neustack_add_test(test_tcp_builder unit/test_tcp_builder.cpp)
+neustack_add_test(test_tcp_sample  unit/test_tcp_sample.cpp)
+neustack_add_test(test_global_metrics unit/test_global_metrics.cpp)
+
 # --- 应用层协议测试 ---
 neustack_add_test(test_http_types  unit/test_http_types.cpp)
 neustack_add_test(test_http_parser unit/test_http_parser.cpp)
+
+# --- 集成测试（不需要 ONNX）---
+add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)
+target_link_libraries(test_tcp_handshake PRIVATE neustack_lib)
+add_test(NAME "Integration: TCP handshake and echo" COMMAND test_tcp_handshake)
+
+add_executable(test_http_roundtrip integration/test_http_roundtrip.cpp)
+target_link_libraries(test_http_roundtrip PRIVATE neustack_lib)
+add_test(NAME "Integration: HTTP request/response roundtrip" COMMAND test_http_roundtrip)
+
+# --- 性能测试---
+add_executable(bench_checksum benchmark/bench_checksum.cpp)
+target_link_libraries(bench_checksum PRIVATE neustack_lib)
+add_test(NAME "Benchmark: Checksum calculate" COMMAND bench_checksum)
+
+add_executable(bench_spsc_queue benchmark/bench_spsc_queue.cpp)
+target_link_libraries(bench_spsc_queue PRIVATE neustack_lib)
+add_test(NAME "Benchmark: Spsc_queue test" COMMAND bench_spsc_queue)
+
+add_executable(bench_tcp_throughput benchmark/bench_tcp_throughput.cpp)
+target_link_libraries(bench_tcp_throughput PRIVATE neustack_lib)
+add_test(NAME "Benchmark: TCP throughput test" COMMAND bench_tcp_throughput)
 
 # --- AI 智能平面相关测试 ---
 # 仅在 NEUSTACK_ENABLE_AI 选项开启时编译
@@ -49,4 +80,27 @@ if(NEUSTACK_ENABLE_AI)
     # 这样代码中可以使用 #ifdef NEUSTACK_AI_ENABLED
     target_compile_definitions(test_ai_features PRIVATE NEUSTACK_AI_ENABLED)
     target_compile_definitions(test_ai_agent    PRIVATE NEUSTACK_AI_ENABLED)
+
+    # --- 集成测试（需要 ONNX Runtime 和模型文件）---
+    if(ONNXRUNTIME_FOUND)
+        # ONNX Runtime 基础验证
+        add_executable(test_onnx_runtime integration/test_onnx_runtime.cpp)
+        target_include_directories(test_onnx_runtime PRIVATE ${ONNXRUNTIME_INCLUDE_DIRS})
+        target_link_libraries(test_onnx_runtime PRIVATE neustack_lib ${ONNXRUNTIME_LIBRARIES})
+
+        # AI 模型完整管线测试
+        add_executable(test_ai_models integration/test_ai_models.cpp)
+        target_link_libraries(test_ai_models PRIVATE neustack_lib)
+
+        # RPATH
+        if(APPLE)
+            set_target_properties(test_onnx_runtime test_ai_models PROPERTIES
+                BUILD_RPATH "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/macos-arm64/lib;${CMAKE_SOURCE_DIR}/third_party/onnxruntime/macos-x64/lib"
+            )
+        elseif(UNIX)
+            set_target_properties(test_onnx_runtime test_ai_models PROPERTIES
+                BUILD_RPATH "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/linux-x64/lib"
+            )
+        endif()
+    endif()
 endif()
