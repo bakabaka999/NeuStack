@@ -38,13 +38,16 @@ neustack_add_test(test_tcp_reno    unit/transport/test_tcp_reno.cpp)
 neustack_add_test(test_tcp_orca    unit/transport/test_tcp_orca.cpp)
 neustack_add_test(test_tcp_builder unit/transport/test_tcp_builder.cpp)
 neustack_add_test(test_tcp_sample  unit/transport/test_tcp_sample.cpp)
+neustack_add_test(test_tcp_edge    unit/transport/test_tcp_edge.cpp)
+neustack_add_test(test_udp_edge    unit/transport/test_udp_edge.cpp)
 
 # --- 网络层测试 (net/) ---
-# (边界测试后续添加)
+neustack_add_test(test_ip_edge     unit/net/test_ip_edge.cpp)
 
 # --- 应用层测试 (app/) ---
 neustack_add_test(test_http_types  unit/app/test_http_types.cpp)
 neustack_add_test(test_http_parser unit/app/test_http_parser.cpp)
+neustack_add_test(test_http_edge   unit/app/test_http_edge.cpp)
 
 # --- 指标测试 (metrics/) ---
 neustack_add_test(test_global_metrics unit/metrics/test_global_metrics.cpp)
