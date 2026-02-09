@@ -72,11 +72,23 @@ add_test(NAME "Benchmark: Checksum calculate" COMMAND bench_checksum)
 
 add_executable(bench_spsc_queue benchmark/bench_spsc_queue.cpp)
 target_link_libraries(bench_spsc_queue PRIVATE neustack_lib)
-add_test(NAME "Benchmark: Spsc_queue test" COMMAND bench_spsc_queue)
+add_test(NAME "Benchmark: Spsc queue test" COMMAND bench_spsc_queue)
 
 add_executable(bench_tcp_throughput benchmark/bench_tcp_throughput.cpp)
 target_link_libraries(bench_tcp_throughput PRIVATE neustack_lib)
 add_test(NAME "Benchmark: TCP throughput test" COMMAND bench_tcp_throughput)
+
+add_executable(bench_tcp_conn benchmark/bench_tcp_conn.cpp)
+target_link_libraries(bench_tcp_conn PRIVATE neustack_lib)
+add_test(NAME "Benchmark: TCP connection test" COMMAND bench_tcp_conn)
+
+add_executable(bench_http benchmark/bench_http.cpp)
+target_link_libraries(bench_http PRIVATE neustack_lib)
+add_test(NAME "Benchmark: HTTP test" COMMAND bench_http)
+
+add_executable(bench_memory_pool benchmark/bench_memory_pool.cpp)
+target_link_libraries(bench_memory_pool PRIVATE neustack_lib)
+add_test(NAME "Benchmark: Memory pool test" COMMAND bench_memory_pool)
 
 # --- AI 智能平面相关测试 ---
 # 仅在 NEUSTACK_ENABLE_AI 选项开启时编译
