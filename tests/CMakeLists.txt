@@ -29,6 +29,7 @@ neustack_add_test(test_ip_addr     unit/test_ip_addr.cpp)
 neustack_add_test(test_tcp_segment unit/test_tcp_segment.cpp)
 neustack_add_test(test_ring_buffer unit/test_ring_buffer.cpp)
 neustack_add_test(test_spsc_queue  unit/test_spsc_queue.cpp)
+neustack_add_test(test_memory_pool unit/test_memory_pool.cpp)
 
 # --- 运输层协议测试 ---
 neustack_add_test(test_tcp_seq     unit/test_tcp_seq.cpp)
