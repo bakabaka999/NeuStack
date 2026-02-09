@@ -61,6 +61,10 @@ add_executable(test_http_roundtrip integration/test_http_roundtrip.cpp)
 target_link_libraries(test_http_roundtrip PRIVATE neustack_lib)
 add_test(NAME "Integration: HTTP request/response roundtrip" COMMAND test_http_roundtrip)
 
+add_executable(test_tcp_stress integration/test_tcp_stress.cpp)
+target_link_libraries(test_tcp_stress PRIVATE neustack_lib)
+add_test(NAME "Integration: TCP connection stress limits" COMMAND test_tcp_stress)
+
 # --- 性能测试---
 add_executable(bench_checksum benchmark/bench_checksum.cpp)
 target_link_libraries(bench_checksum PRIVATE neustack_lib)
