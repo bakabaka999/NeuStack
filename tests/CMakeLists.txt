@@ -8,14 +8,14 @@ include(Catch)
 # 参数 source: 源文件路径（相对于当前目录）
 macro(neustack_add_test name source)
     add_executable(${name} ${source})
-    
+
     # 链接 NeuStack 核心库和 Catch2 运行时
-    target_link_libraries(${name} 
-        PRIVATE 
-            neustack_lib 
+    target_link_libraries(${name}
+        PRIVATE
+            neustack_lib
             Catch2::Catch2WithMain
     )
-    
+
     # 启用 C++20 标准（继承自 neustack_lib 或在此显式指定）
     target_compile_features(${name} PRIVATE cxx_std_20)
 
@@ -23,26 +23,31 @@ macro(neustack_add_test name source)
     catch_discover_tests(${name})
 endmacro()
 
-# --- 基础通用组件测试 ---
-neustack_add_test(test_checksum    unit/test_checksum.cpp)
-neustack_add_test(test_ip_addr     unit/test_ip_addr.cpp)
-neustack_add_test(test_tcp_segment unit/test_tcp_segment.cpp)
-neustack_add_test(test_ring_buffer unit/test_ring_buffer.cpp)
-neustack_add_test(test_spsc_queue  unit/test_spsc_queue.cpp)
-neustack_add_test(test_memory_pool unit/test_memory_pool.cpp)
+# --- 基础通用组件测试 (common/) ---
+neustack_add_test(test_checksum    unit/common/test_checksum.cpp)
+neustack_add_test(test_ip_addr     unit/common/test_ip_addr.cpp)
+neustack_add_test(test_ring_buffer unit/common/test_ring_buffer.cpp)
+neustack_add_test(test_spsc_queue  unit/common/test_spsc_queue.cpp)
+neustack_add_test(test_memory_pool unit/common/test_memory_pool.cpp)
 
-# --- 运输层协议测试 ---
-neustack_add_test(test_tcp_seq     unit/test_tcp_seq.cpp)
-neustack_add_test(test_tcp_cubic   unit/test_tcp_cubic.cpp)
-neustack_add_test(test_tcp_reno    unit/test_tcp_reno.cpp)
-neustack_add_test(test_tcp_orca    unit/test_tcp_orca.cpp)
-neustack_add_test(test_tcp_builder unit/test_tcp_builder.cpp)
-neustack_add_test(test_tcp_sample  unit/test_tcp_sample.cpp)
-neustack_add_test(test_global_metrics unit/test_global_metrics.cpp)
+# --- 传输层测试 (transport/) ---
+neustack_add_test(test_tcp_segment unit/transport/test_tcp_segment.cpp)
+neustack_add_test(test_tcp_seq     unit/transport/test_tcp_seq.cpp)
+neustack_add_test(test_tcp_cubic   unit/transport/test_tcp_cubic.cpp)
+neustack_add_test(test_tcp_reno    unit/transport/test_tcp_reno.cpp)
+neustack_add_test(test_tcp_orca    unit/transport/test_tcp_orca.cpp)
+neustack_add_test(test_tcp_builder unit/transport/test_tcp_builder.cpp)
+neustack_add_test(test_tcp_sample  unit/transport/test_tcp_sample.cpp)
 
-# --- 应用层协议测试 ---
-neustack_add_test(test_http_types  unit/test_http_types.cpp)
-neustack_add_test(test_http_parser unit/test_http_parser.cpp)
+# --- 网络层测试 (net/) ---
+# (边界测试后续添加)
+
+# --- 应用层测试 (app/) ---
+neustack_add_test(test_http_types  unit/app/test_http_types.cpp)
+neustack_add_test(test_http_parser unit/app/test_http_parser.cpp)
+
+# --- 指标测试 (metrics/) ---
+neustack_add_test(test_global_metrics unit/metrics/test_global_metrics.cpp)
 
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)
@@ -72,11 +77,11 @@ if(NEUSTACK_ENABLE_AI)
     message(STATUS "NeuStack: AI features enabled for unit testing.")
 
     # 特征提取模块测试
-    neustack_add_test(test_ai_features unit/test_ai_features.cpp)
-    
+    neustack_add_test(test_ai_features unit/ai/test_ai_features.cpp)
+
     # 智能 Agent 状态机测试
-    neustack_add_test(test_ai_agent unit/test_ai_agent.cpp)
-    
+    neustack_add_test(test_ai_agent unit/ai/test_ai_agent.cpp)
+
     # 为 AI 相关测试添加宏定义 NEUSTACK_AI_ENABLED
     # 这样代码中可以使用 #ifdef NEUSTACK_AI_ENABLED
     target_compile_definitions(test_ai_features PRIVATE NEUSTACK_AI_ENABLED)
