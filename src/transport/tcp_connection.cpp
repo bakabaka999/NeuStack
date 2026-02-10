@@ -509,7 +509,8 @@ void TCPConnectionManager::send_segment(TCB *tcb, uint8_t flags, const uint8_t *
         entry.seq_end = tcb->snd_nxt;
 
         if (data && len > 0) {
-            entry.data.assign(data, data + len);
+            std::memcpy(entry.data.data(), data, len);
+            entry.data_len = len;
         }
 
         entry.send_time = std::chrono::steady_clock::now();
@@ -1065,10 +1066,11 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
             // 部分确认：截断条目
             uint32_t confirmed = ack_num - entry.seq_start;
             if (confirmed <= entry.data.size()) {
-                entry.data.erase(entry.data.begin(), entry.data.begin() + confirmed);
+                std::memmove(entry.data.data(), entry.data.data() + confirmed, entry.data_len - confirmed);
+                entry.data_len -= confirmed;
             } else {
                 // SYN/FIN 可能占序列号但没有数据
-                entry.data.clear();
+                entry.data_len = 0;
             }
             entry.seq_start = ack_num;
             break;
@@ -1236,8 +1238,8 @@ void TCPConnectionManager::check_retransmit(TCB *tcb, std::chrono::steady_clock:
     // 重传数据
     // 注意：重传不能使用 send_segment（会更新 snd_nxt 和重传队列）
     // 使用 raw_send 直接发送，只发送最多一个 MSS
-    if (!entry.data.empty()) { // 数据重传
-        size_t retransmit_len = std::min(entry.data.size(),
+    if (entry.data_len > 0) { // 数据重传
+        size_t retransmit_len = std::min(entry.data_len,
                                           static_cast<size_t>(tcb->options.mss));
         raw_send(tcb, TCPFlags::ACK | TCPFlags::PSH,
                  entry.seq_start, entry.data.data(), retransmit_len);
@@ -1291,8 +1293,8 @@ void TCPConnectionManager::check_dup_ack(TCB *tcb, uint32_t ack_num) {
             // 重传第一个未确认的段（使用 raw_send 避免更新状态）
             // 注意：只重传最多一个 MSS 的数据
             auto &entry = tcb->retransmit_queue.front();
-            if (!entry.data.empty()) {
-                size_t retransmit_len = std::min(entry.data.size(),
+            if (entry.data_len > 0) {
+                size_t retransmit_len = std::min(entry.data_len,
                                                   static_cast<size_t>(tcb->options.mss));
                 raw_send(tcb, TCPFlags::ACK, entry.seq_start,
                          entry.data.data(), retransmit_len);
@@ -1386,7 +1388,8 @@ void TCPConnectionManager::add_to_ooo_queue(TCB *tcb, uint32_t seq,
     OutOfOrderSegment ooo_seg;
     ooo_seg.seq_start = seq;
     ooo_seg.seq_end = seq + len;
-    ooo_seg.data.assign(data, data + len);
+    std::memcpy(ooo_seg.data.data(), data, len);
+    ooo_seg.data_len = len;
 
     // 按序列号顺序插入
     auto it = tcb->ooo_queue.begin();
@@ -1415,7 +1418,7 @@ void TCPConnectionManager::deliver_ooo_data(TCB *tcb) {
             // 完全是重复数据，丢弃
             LOG_DEBUG(TCP, "OOO: discarding duplicate seq=%u-%u",
                       front.seq_start, front.seq_end);
-            tcb->ooo_size -= front.data.size();
+            tcb->ooo_size -= front.data_len;
             tcb->ooo_queue.pop_front();
             continue;
         }
@@ -1427,12 +1430,12 @@ void TCPConnectionManager::deliver_ooo_data(TCB *tcb) {
         }
 
         // 交付数据
-        deliver_data(tcb, front.data.data() + skip, front.data.size() - skip);
+        deliver_data(tcb, front.data.data() + skip, front.data_len - skip);
         tcb->rcv_nxt = front.seq_end;
 
         LOG_DEBUG(TCP, "OOO: delivered seq=%u-%u", front.seq_start, front.seq_end);
 
-        tcb->ooo_size -= front.data.size();
+        tcb->ooo_size -= front.data_len;
         tcb->ooo_queue.pop_front();
     }
 }

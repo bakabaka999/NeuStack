@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <vector>
+#include <array>
 #include <memory>
 #include <algorithm>
 #include <chrono>
@@ -14,6 +15,9 @@
 #include "neustack/common/ring_buffer.hpp"
 
 namespace neustack {
+
+// TCP 最大段大小（用于固定缓冲区）
+constexpr size_t TCP_MSS_MAX = 1460;
 
 // ========================================================================
 // 连接四元组
@@ -94,7 +98,8 @@ public:
 struct RetransmitEntry {
     uint32_t seq_start;
     uint32_t seq_end;
-    std::vector<uint8_t> data;
+    std::array<uint8_t, TCP_MSS_MAX> data;
+    size_t data_len = 0;
     std::chrono::steady_clock::time_point send_time;
     std::chrono::steady_clock::time_point timeout;
     int retransmit_count = 0;
@@ -109,7 +114,8 @@ struct RetransmitEntry {
 struct OutOfOrderSegment {
     uint32_t seq_start;
     uint32_t seq_end;
-    std::vector<uint8_t> data;
+    std::array<uint8_t, TCP_MSS_MAX> data;
+    size_t data_len = 0;
 
     uint32_t length() const { return seq_end - seq_start; }
 };
