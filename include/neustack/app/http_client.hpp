@@ -67,7 +67,7 @@ public:
 private:
     IStreamClient &_transport;
     std::string _default_host;
-    std::string _user_agent = "NeuStack/1.0";
+    std::string _user_agent = "NeuStack/1.1";
 
     // 请求上下文
     struct RequestContext {

@@ -1,7 +1,7 @@
 # NeuStack 项目白皮书
 
-> **Version:** 1.0
-> **Last Updated:** 2026-02-08
+> **Version:** 1.1
+> **Last Updated:** 2026-02-10
 > **Status:** Final
 
 ---

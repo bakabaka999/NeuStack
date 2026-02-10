@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        build_type: [Release, Debug]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Install Catch2 v3
+        run: |
+          git clone --depth 1 --branch v3.5.2 https://github.com/catchorg/Catch2.git /tmp/catch2
+          cmake -B /tmp/catch2/build -S /tmp/catch2 -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/catch2/build
+          sudo cmake --install /tmp/catch2/build
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: cd build && ctest --output-on-failure --timeout 60
+
+  asan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Install Catch2 v3
+        run: |
+          git clone --depth 1 --branch v3.5.2 https://github.com/catchorg/Catch2.git /tmp/catch2
+          cmake -B /tmp/catch2/build -S /tmp/catch2 -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/catch2/build
+          sudo cmake --install /tmp/catch2/build
+
+      - name: Configure with ASan
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNEUSTACK_ENABLE_ASAN=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test under ASan
+        run: cd build && ctest --output-on-failure --timeout 120
