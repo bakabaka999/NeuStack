@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  playground:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: neustack-playground
+    # NET_ADMIN capability is required to configure network interfaces (IP address, UP state)
+    cap_add:
+      - NET_ADMIN
+    # Access to /dev/net/tun is required for creating TUN devices
+    devices:
+      - /dev/net/tun
+    environment:
+      - STACK_IP=192.168.100.2
+      - HOST_IP=192.168.100.1
+      - LOG_LEVEL=info
+    # Keep container running and interactive
+    stdin_open: true
+    tty: true
