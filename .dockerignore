@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+build-asan/
+.cache/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Temporary files
+tmp/
+*.swp
+.DS_Store
+
+# Data
+collected_data/
+training/real_data/
+models/*.onnx
+
+
