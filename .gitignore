@@ -74,3 +74,12 @@ training/*/*.png
 
 # doc file
 docs/_draft/*
+# OpenClaw workspace files (personal AI assistant config)
+AGENTS.md
+SOUL.md
+USER.md
+IDENTITY.md
+TOOLS.md
+HEARTBEAT.md
+MEMORY.md
+memory/
