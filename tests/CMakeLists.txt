@@ -55,6 +55,7 @@ neustack_add_test(test_global_metrics unit/metrics/test_global_metrics.cpp)
 # --- 防火墙测试 (firewall/) ---
 neustack_add_test(test_rule_engine  unit/firewall/test_rule_engine.cpp)
 neustack_add_test(test_rate_limiter unit/firewall/test_rate_limiter.cpp)
+neustack_add_test(test_firewall_ai  unit/firewall/test_firewall_ai.cpp)
 
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)
