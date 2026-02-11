@@ -64,7 +64,6 @@ TEST_CASE("RuleEngine: Whitelist IP", "[firewall][rule_engine]") {
     RuleEngine engine;
     
     uint32_t good_ip = IP(192,168,1,1);
-    uint32_t bad_ip = IP(1,2,3,4);
     
     // 白名单优先级高于黑名单
     engine.add_whitelist_ip(good_ip);

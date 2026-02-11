@@ -201,8 +201,9 @@ static void test_ai_with_model() {
     auto& ai_stats = fw.ai()->stats();
     check(ai_stats.inferences_total >= 1, "At least one inference ran");
     
-    std::printf("  INFO: AI score = %.4f, anomalies = %lu\n",
-                ai_stats.last_anomaly_score, ai_stats.anomalies_detected);
+    std::printf("  INFO: AI score = %.4f, anomalies = %llu\n",
+                ai_stats.last_anomaly_score, 
+                static_cast<unsigned long long>(ai_stats.anomalies_detected));
 }
 
 static void test_shadow_mode_alert() {
