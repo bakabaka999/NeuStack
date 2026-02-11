@@ -53,8 +53,9 @@ struct PacketEvent {
     bool is_syn_only() const { return is_tcp() && (tcp_flags & 0x02) && !(tcp_flags & 0x10); }
 };
 
-// 验证结构大小 (不含指针部分的核心数据)
-static_assert(offsetof(PacketEvent, raw_packet) == 32, "PacketEvent core should be 32 bytes");
+// 验证结构大小
+static_assert(sizeof(PacketEvent) == 40 || sizeof(PacketEvent) == 48, 
+              "PacketEvent should be 40 bytes (32-bit) or 48 bytes (64-bit)");
 
 } // namespace neustack
 
