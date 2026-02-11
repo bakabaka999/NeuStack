@@ -15,6 +15,7 @@ struct NeuStack::Impl {
 
     // 核心协议层
     std::unique_ptr<NetDevice> device;
+    std::unique_ptr<FirewallEngine> firewall;  // 防火墙（HAL 和 IPv4 之间）
     std::unique_ptr<IPv4Layer> ip;
     std::unique_ptr<ICMPHandler> icmp;
     std::unique_ptr<UDPLayer> udp;
@@ -40,7 +41,15 @@ struct NeuStack::Impl {
         }
         LOG_INFO(HAL, "Device: %s", device->get_name().c_str());
 
-        // 2. 网络层
+        // 2. 防火墙（HAL 和 IPv4 之间）
+        if (config.enable_firewall) {
+            FirewallConfig fw_cfg;
+            fw_cfg.enabled = true;
+            fw_cfg.shadow_mode = config.firewall_shadow_mode;
+            firewall = std::make_unique<FirewallEngine>(fw_cfg);
+        }
+
+        // 3. 网络层
         uint32_t local_ip = ip_from_string(config.local_ip.c_str());
         ip = std::make_unique<IPv4Layer>(*device);
         ip->set_local_ip(local_ip);
@@ -124,6 +133,10 @@ std::unique_ptr<NeuStack> NeuStack::create(const StackConfig &config) {
 
 NetDevice &NeuStack::device() { return *_impl->device; }
 
+// ─── 防火墙 ───
+
+FirewallEngine *NeuStack::firewall() { return _impl->firewall.get(); }
+
 // ─── 网络层 ───
 
 IPv4Layer   &NeuStack::ip()   { return *_impl->ip; }
@@ -164,13 +177,22 @@ void NeuStack::run() {
         // 1. 收包
         ssize_t n = _impl->device->recv(buf, sizeof(buf), 10);
         if (n > 0) {
-            _impl->ip->on_receive(buf, n);
+            // 2. 防火墙检查
+            bool pass = true;
+            if (_impl->firewall) {
+                pass = _impl->firewall->inspect(buf, static_cast<size_t>(n));
+            }
+
+            // 3. 放行则交给 IPv4 层处理
+            if (pass) {
+                _impl->ip->on_receive(buf, n);
+            }
         }
 
-        // 2. 应用层轮询
+        // 4. 应用层轮询
         _impl->http_server->poll();
 
-        // 3. 定时器 (100ms)
+        // 5. 定时器 (100ms)
         auto now = std::chrono::steady_clock::now();
         if (now - last_timer >= TIMER_INTERVAL) {
             _impl->tcp->on_timer();

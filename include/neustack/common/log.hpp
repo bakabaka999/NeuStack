@@ -39,6 +39,7 @@ enum class LogModule : uint8_t {
     DNS  = 7,
     APP  = 8,
     AI   = 9,
+    FW   = 10,  // Firewall
     MAX_MODULES
 };
 
@@ -235,7 +236,7 @@ private:
             case LogModule::IPv4: return "\033[34m";  // Blue
             case LogModule::ICMP: return "\033[96m";  // Bright Cyan (与IPv4区分)
 
-            // 传输层 (鲜艳的对比色)：这是你最常调试的“修罗场”
+            // 传输层 (鲜艳的对比色)：这是你最常调试的"修罗场"
             case LogModule::UDP:  return "\033[32m";  // Green (UDP通常简单、快速)
             case LogModule::TCP:  return "\033[31m";  // Red (TCP逻辑最重，红色醒目)
 
@@ -245,7 +246,8 @@ private:
 
             // 顶层应用 (纯白或加粗)：你写的业务逻辑
             case LogModule::APP:  return "\033[1;37m"; // Bold White (最显眼)
-            case LogModule::AI:   return "\033[1;36m"; // Bold Cyan (AI 模块通常代表“高科技”，青色很合适)
+            case LogModule::AI:   return "\033[1;36m"; // Bold Cyan (AI 模块通常代表"高科技"，青色很合适)
+            case LogModule::FW:   return "\033[1;33m"; // Bold Yellow (防火墙，安全相关)
 
             default: return RESET;
         }
@@ -263,6 +265,7 @@ private:
             case LogModule::DNS:  return "DNS ";
             case LogModule::APP:  return "APP ";
             case LogModule::AI:   return "AI  ";
+            case LogModule::FW:   return "FW  ";
             default: return "????";
         }
     }

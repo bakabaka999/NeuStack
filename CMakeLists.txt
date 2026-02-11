@@ -98,6 +98,10 @@ set(METRICS_SOURCES
     src/metrics/ai_features.cpp
 )
 
+set(FIREWALL_SOURCES
+    src/firewall/firewall_engine.cpp
+)
+
 # Platform-specific HAL sources
 if(NEUSTACK_PLATFORM_MACOS)
     set(HAL_SOURCES
@@ -146,6 +150,7 @@ add_library(neustack_lib STATIC
     ${TRANSPORT_SOURCES}
     ${APP_SOURCES}
     ${METRICS_SOURCES}
+    ${FIREWALL_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
 )
