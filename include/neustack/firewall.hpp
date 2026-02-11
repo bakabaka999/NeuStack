@@ -9,6 +9,9 @@
 
 #include "neustack/firewall/packet_event.hpp"
 #include "neustack/firewall/firewall_decision.hpp"
+#include "neustack/firewall/rule.hpp"
+#include "neustack/firewall/rate_limiter.hpp"
+#include "neustack/firewall/rule_engine.hpp"
 #include "neustack/firewall/firewall_engine.hpp"
 
 #endif // NEUSTACK_FIREWALL_HPP
