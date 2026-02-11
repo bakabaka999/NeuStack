@@ -190,12 +190,8 @@ void FirewallEngine::fill_event_from_ipv4(const IPv4Packet& pkt, PacketEvent* ev
 // ============================================================================
 
 FirewallDecision FirewallEngine::evaluate(const PacketEvent& evt) {
-    (void)evt;  // Phase 1: 暂不使用
-
-    // Phase 1: 默认全部放行
-    // Phase 2 会在这里加入规则检查
-    // Phase 3 会在这里加入 AI 检测
-    return FirewallDecision::pass();
+    // Phase 2: 调用规则引擎
+    return _rule_engine.evaluate(evt, now_us());
 }
 
 // ============================================================================

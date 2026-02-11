@@ -3,6 +3,7 @@
 
 #include "neustack/firewall/packet_event.hpp"
 #include "neustack/firewall/firewall_decision.hpp"
+#include "neustack/firewall/rule_engine.hpp"
 #include "neustack/common/memory_pool.hpp"
 
 #include <cstdint>
@@ -101,6 +102,11 @@ public:
     void set_shadow_mode(bool shadow) { _config.shadow_mode = shadow; }
     bool shadow_mode() const { return _config.shadow_mode; }
 
+    // ─── 规则引擎 API ───
+
+    RuleEngine& rule_engine() { return _rule_engine; }
+    const RuleEngine& rule_engine() const { return _rule_engine; }
+
     // ─── 回调注册 ───
 
     void set_decision_callback(DecisionCallback cb) { _on_decision = std::move(cb); }
@@ -136,6 +142,9 @@ private:
 private:
     // ─── 配置 ───
     FirewallConfig _config;
+
+    // ─── 规则引擎 ───
+    RuleEngine _rule_engine;
 
     // ─── 内存池 ───
     FixedPool<PacketEvent, EVENT_POOL_SIZE> _event_pool;
