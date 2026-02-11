@@ -13,6 +13,9 @@
 #include "neustack/app/http_client.hpp"
 #include "neustack/app/dns_client.hpp"
 
+// ─── 防火墙 ───
+#include "neustack/firewall/firewall_engine.hpp"
+
 // ─── 指标与采集 ───
 #include "neustack/metrics/global_metrics.hpp"
 #include "neustack/metrics/sample_exporter.hpp"
@@ -26,6 +29,10 @@ struct StackConfig {
     LogLevel log_level = LogLevel::INFO;
     bool enable_icmp = true;
     bool enable_udp = true;
+
+    // 防火墙配置
+    bool enable_firewall = true;          // 启用防火墙
+    bool firewall_shadow_mode = true;     // Shadow Mode: AI 只告警不阻断
 
     // AI 智能面配置（留空路径 = 不启用该模型）
     std::string orca_model_path;
@@ -43,6 +50,9 @@ public:
 
     // ─── HAL 层 ───
     NetDevice &device();
+
+    // ─── 防火墙 ───
+    FirewallEngine *firewall();    // 未启用时返回 nullptr
 
     // ─── 网络层 ───
     IPv4Layer    &ip();
