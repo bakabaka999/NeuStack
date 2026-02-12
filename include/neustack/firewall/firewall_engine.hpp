@@ -4,10 +4,12 @@
 #include "neustack/firewall/packet_event.hpp"
 #include "neustack/firewall/firewall_decision.hpp"
 #include "neustack/firewall/rule_engine.hpp"
+#include "neustack/firewall/firewall_ai.hpp"
 #include "neustack/common/memory_pool.hpp"
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 namespace neustack {
 
@@ -22,6 +24,11 @@ struct FirewallConfig {
 
     size_t event_pool_size = 4096;    // PacketEvent 池大小
     size_t decision_pool_size = 4096; // FirewallDecision 池大小
+    
+    // AI 配置
+    bool ai_enabled = false;          // 是否启用 AI 检测
+    std::string ai_model_path;        // AI 模型路径
+    float ai_threshold = 0.5f;        // AI 异常阈值
 };
 
 /**
@@ -107,6 +114,40 @@ public:
     RuleEngine& rule_engine() { return _rule_engine; }
     const RuleEngine& rule_engine() const { return _rule_engine; }
 
+    // ─── AI API ───
+
+    /**
+     * @brief 获取 AI 模块
+     * @return FirewallAI 指针，如果 AI 未启用则返回 nullptr
+     */
+    FirewallAI* ai() { return _ai.get(); }
+    const FirewallAI* ai() const { return _ai.get(); }
+
+    /**
+     * @brief 启用 AI 检测
+     * @param model_path ONNX 模型路径
+     * @param threshold 异常阈值
+     * @return true 如果加载成功
+     */
+    bool enable_ai(const std::string& model_path, float threshold = 0.5f);
+
+    /**
+     * @brief 禁用 AI 检测
+     */
+    void disable_ai();
+
+    /**
+     * @brief AI 是否已启用
+     */
+    bool ai_enabled() const { return _ai && _ai->is_loaded(); }
+
+    /**
+     * @brief 定时器回调 - 更新 AI 指标和推理
+     * 
+     * 应该每秒调用一次。
+     */
+    void on_timer();
+
     // ─── 回调注册 ───
 
     void set_decision_callback(DecisionCallback cb) { _on_decision = std::move(cb); }
@@ -145,6 +186,10 @@ private:
 
     // ─── 规则引擎 ───
     RuleEngine _rule_engine;
+
+    // ─── AI 模块 ───
+    std::unique_ptr<FirewallAI> _ai;
+    uint32_t _tick_count = 0;  // 用于控制 AI 推理频率
 
     // ─── 内存池 ───
     FixedPool<PacketEvent, EVENT_POOL_SIZE> _event_pool;

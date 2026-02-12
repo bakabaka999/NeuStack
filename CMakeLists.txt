@@ -100,6 +100,7 @@ set(METRICS_SOURCES
 
 set(FIREWALL_SOURCES
     src/firewall/firewall_engine.cpp
+    src/firewall/firewall_ai.cpp
 )
 
 # Platform-specific HAL sources

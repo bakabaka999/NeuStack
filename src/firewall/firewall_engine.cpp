@@ -16,6 +16,11 @@ FirewallEngine::FirewallEngine(const FirewallConfig& config)
 {
     LOG_INFO(FW, "Firewall engine initialized (shadow_mode=%s)", 
              _config.shadow_mode ? "ON" : "OFF");
+    
+    // 如果配置了 AI，初始化 AI 模块
+    if (_config.ai_enabled && !_config.ai_model_path.empty()) {
+        enable_ai(_config.ai_model_path, _config.ai_threshold);
+    }
 }
 
 // ============================================================================
@@ -190,8 +195,71 @@ void FirewallEngine::fill_event_from_ipv4(const IPv4Packet& pkt, PacketEvent* ev
 // ============================================================================
 
 FirewallDecision FirewallEngine::evaluate(const PacketEvent& evt) {
-    // Phase 2: 调用规则引擎
-    return _rule_engine.evaluate(evt, now_us());
+    // 1. 规则引擎检查
+    auto decision = _rule_engine.evaluate(evt, now_us());
+    
+    // 如果规则引擎已经决定 DROP，直接返回
+    if (decision.should_drop()) {
+        return decision;
+    }
+    
+    // 2. AI 检测（如果启用）
+    if (_ai && _ai->is_loaded()) {
+        // 记录包到 AI 指标
+        _ai->record_packet(evt);
+        
+        // 获取 AI 决策（使用缓存的推理结果）
+        auto ai_decision = _ai->evaluate();
+        
+        // 如果 AI 检测到异常
+        if (ai_decision.is_alert() || ai_decision.should_drop()) {
+            return ai_decision;
+        }
+    }
+    
+    // 3. 默认使用规则引擎的决策
+    return decision;
+}
+
+// ============================================================================
+// AI API
+// ============================================================================
+
+bool FirewallEngine::enable_ai(const std::string& model_path, float threshold) {
+    FirewallAIConfig ai_config;
+    ai_config.model_path = model_path;
+    ai_config.anomaly_threshold = threshold;
+    ai_config.shadow_mode = _config.shadow_mode;
+    
+    _ai = std::make_unique<FirewallAI>(ai_config);
+    
+    if (_ai->is_loaded()) {
+        LOG_INFO(FW, "AI enabled: model=%s threshold=%.3f", 
+                 model_path.c_str(), threshold);
+        return true;
+    } else {
+        LOG_WARN(FW, "Failed to enable AI: model=%s", model_path.c_str());
+        _ai.reset();
+        return false;
+    }
+}
+
+void FirewallEngine::disable_ai() {
+    if (_ai) {
+        LOG_INFO(FW, "AI disabled");
+        _ai.reset();
+    }
+}
+
+void FirewallEngine::on_timer() {
+    if (!_ai) return;
+    
+    // 每秒更新 AI 指标窗口
+    _ai->tick();
+    _tick_count++;
+    
+    // 每秒执行一次 AI 推理
+    _ai->run_inference();
 }
 
 // ============================================================================

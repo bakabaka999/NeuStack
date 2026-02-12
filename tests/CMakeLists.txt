@@ -55,6 +55,7 @@ neustack_add_test(test_global_metrics unit/metrics/test_global_metrics.cpp)
 # --- 防火墙测试 (firewall/) ---
 neustack_add_test(test_rule_engine  unit/firewall/test_rule_engine.cpp)
 neustack_add_test(test_rate_limiter unit/firewall/test_rate_limiter.cpp)
+neustack_add_test(test_firewall_ai  unit/firewall/test_firewall_ai.cpp)
 
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)
@@ -72,6 +73,10 @@ add_test(NAME "Integration: TCP connection stress limits" COMMAND test_tcp_stres
 add_executable(test_firewall_integration integration/test_firewall_integration.cpp)
 target_link_libraries(test_firewall_integration PRIVATE neustack_lib)
 add_test(NAME "Integration: Firewall packet filtering" COMMAND test_firewall_integration)
+
+add_executable(test_firewall_ai_shadow integration/test_firewall_ai_shadow.cpp)
+target_link_libraries(test_firewall_ai_shadow PRIVATE neustack_lib)
+add_test(NAME "Integration: Firewall AI Shadow Mode" COMMAND test_firewall_ai_shadow)
 
 # --- 性能测试---
 add_executable(bench_checksum benchmark/bench_checksum.cpp)
