@@ -46,7 +46,7 @@ NeuStack 是一个**完全从零实现**的用户态 TCP/IP 协议栈，具备 A
 | **拥塞控制** | Reno · CUBIC · **Orca (SAC 强化学习)** |
 | **AI 智能面** | 带宽预测 (LSTM) · 异常检测 (Autoencoder) · 智能拥塞控制 (SAC) · 安全异常检测 (Autoencoder) |
 | **防火墙** | 黑白名单 · 端口封禁 · 令牌桶限速 · AI Shadow Mode · 安全数据导出 |
-| **NetworkAgent** | 4 状态决策层，协调 3 个模型，策略性 clamp / 回退 / 连接控制 |
+| **NetworkAgent** | 4 状态决策层，协调 4 个模型，策略性 clamp / 回退 / 连接控制 |
 | **跨平台** | macOS (utun) · Linux (TUN/TAP) · Windows (Wintun) |
 | **零分配设计** | FixedPool 内存池，热路径无 new/delete |
 
