@@ -72,6 +72,57 @@ TEST_CASE("SecurityFeatures to SecurityModel input mapping", "[ai][security]") {
 }
 
 // ============================================================================
+// SecurityFeatureExtractor::extract_security() 测试
+// ============================================================================
+
+TEST_CASE("extract_security: direct ISecurityModel::Input output", "[ai][security]") {
+    SecurityFeatureExtractor extractor;
+    SecurityMetrics metrics;
+
+    constexpr uint8_t TCP_SYN = 0x02;
+    constexpr uint8_t TCP_SYN_ACK = 0x12;
+    constexpr uint8_t TCP_RST = 0x04;
+
+    // 模拟混合流量
+    for (int i = 0; i < 200; ++i) {
+        metrics.record_packet(800, 0);     // 普通包
+    }
+    for (int i = 0; i < 50; ++i) {
+        metrics.record_packet(60, TCP_SYN);
+    }
+    for (int i = 0; i < 10; ++i) {
+        metrics.record_packet(60, TCP_SYN_ACK);
+    }
+    for (int i = 0; i < 15; ++i) {
+        metrics.record_packet(40, TCP_RST);
+    }
+    metrics.tick();
+
+    auto snap = metrics.snapshot();
+    auto input = extractor.extract_security(snap);
+
+    // 所有字段都在 [0, 1] 范围内
+    auto arr = input.to_array();
+    for (size_t i = 0; i < arr.size(); ++i) {
+        CHECK(arr[i] >= 0.0f);
+        CHECK(arr[i] <= 1.0f);
+    }
+
+    // pps > 0（有流量）
+    CHECK(input.pps_norm > 0.0f);
+    // syn_rate > 0（有 SYN 包）
+    CHECK(input.syn_rate_norm > 0.0f);
+    // rst_rate > 0（有 RST 包）
+    CHECK(input.rst_rate_norm > 0.0f);
+    // syn_ratio > 0.5（SYN/SYN-ACK = 50/10 = 5.0，超过 warning 阈值 5.0，sigmoid ≈ 0.5）
+    CHECK(input.syn_ratio_norm >= 0.45f);
+    // avg_pkt_size > 0
+    CHECK(input.avg_pkt_size_norm > 0.0f);
+    // rst_ratio > 0
+    CHECK(input.rst_ratio_norm > 0.0f);
+}
+
+// ============================================================================
 // SecurityExporter 测试
 // ============================================================================
 

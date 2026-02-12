@@ -1,10 +1,10 @@
 #ifndef NEUSTACK_AI_AI_MODEL_HPP
 #define NEUSTACK_AI_AI_MODEL_HPP
 
-#include "neustack/ai/onnx_inference.hpp"
 #include <array>
 #include <optional>
 #include <memory>
+#include <vector>
 
 namespace neustack {
     

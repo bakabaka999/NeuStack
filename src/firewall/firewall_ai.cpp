@@ -128,24 +128,11 @@ float FirewallAI::run_inference() {
     // 获取当前指标快照
     auto snapshot = _metrics.snapshot();
 
-    // 提取旧格式特征（复用现有归一化逻辑）
-    auto features = _extractor.extract(snapshot, 0);
+    // 更新推理时间戳
+    _last_inference_time = std::chrono::steady_clock::now();
 
-    // 衍生指标
-    double avg_pkt_size = (snapshot.pps > 0) ? (snapshot.bps / snapshot.pps) : 0.0;
-    double rst_ratio = (snapshot.pps > 0) ? (snapshot.rst_rate / snapshot.pps) : 0.0;
-
-    // 转换为 ISecurityModel::Input
-    ISecurityModel::Input model_input{
-        .pps_norm           = features.packets_rx_norm,
-        .bps_norm           = features.bytes_tx_norm,
-        .syn_rate_norm      = features.syn_rate_norm,
-        .rst_rate_norm      = features.rst_rate_norm,
-        .syn_ratio_norm     = features.tx_rx_ratio_norm,
-        .new_conn_rate_norm = features.conn_established_norm,
-        .avg_pkt_size_norm  = static_cast<float>(std::clamp(avg_pkt_size / 1500.0, 0.0, 1.0)),
-        .rst_ratio_norm     = static_cast<float>(std::clamp(rst_ratio, 0.0, 1.0)),
-    };
+    // 直接提取 ISecurityModel::Input（无中间转换）
+    auto model_input = _extractor.extract_security(snapshot);
 
     // 执行推理
     auto result = _model->infer(model_input);

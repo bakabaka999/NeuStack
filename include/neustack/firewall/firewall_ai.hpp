@@ -150,6 +150,9 @@ public:
     void set_shadow_mode(bool shadow) { _config.shadow_mode = shadow; }
     bool shadow_mode() const { return _config.shadow_mode; }
 
+    uint32_t inference_interval_ms() const { return _config.inference_interval_ms; }
+    void set_inference_interval_ms(uint32_t ms) { _config.inference_interval_ms = ms; }
+
     void set_alert_callback(Config::AlertCallback cb) { _alert_callback = std::move(cb); }
 
     // ─── 统计 API ───
