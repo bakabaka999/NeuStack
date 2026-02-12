@@ -7,7 +7,7 @@
 #include "neustack/firewall/packet_event.hpp"
 
 #ifdef NEUSTACK_AI_ENABLED
-#include "neustack/ai/anomaly_model.hpp"
+#include "neustack/ai/security_model.hpp"
 #endif
 
 #include <memory>
@@ -173,7 +173,7 @@ private:
 
     // ─── AI 模型 ───
 #ifdef NEUSTACK_AI_ENABLED
-    std::unique_ptr<AnomalyDetector> _model;
+    std::unique_ptr<SecurityAnomalyModel> _model;
 #endif
 
     // ─── 安全指标 ───

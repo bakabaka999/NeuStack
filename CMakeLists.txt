@@ -132,6 +132,7 @@ if(NEUSTACK_ENABLE_AI)
             src/ai/orca_model.cpp
             src/ai/anomaly_model.cpp
             src/ai/bandwidth_model.cpp
+            src/ai/security_model.cpp
             src/ai/intelligence_plane.cpp
             src/ai/ai_agent.cpp
         )

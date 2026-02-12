@@ -2,10 +2,11 @@
 #include "neustack/common/log.hpp"
 
 #ifdef NEUSTACK_AI_ENABLED
-#include "neustack/ai/anomaly_model.hpp"
+#include "neustack/ai/security_model.hpp"
 #endif
 
 #include <chrono>
+#include <algorithm>
 
 namespace neustack {
 
@@ -30,7 +31,7 @@ FirewallAI::FirewallAI(const Config& config)
 bool FirewallAI::load_model(const std::string& model_path) {
 #ifdef NEUSTACK_AI_ENABLED
     try {
-        _model = std::make_unique<AnomalyDetector>(model_path, _config.anomaly_threshold);
+        _model = std::make_unique<SecurityAnomalyModel>(model_path, _config.anomaly_threshold);
         
         if (_model->is_loaded()) {
             LOG_INFO(FW, "AI model loaded: %s (threshold=%.3f)", 
@@ -127,19 +128,23 @@ float FirewallAI::run_inference() {
     // 获取当前指标快照
     auto snapshot = _metrics.snapshot();
 
-    // 提取特征 (AnomalyInput)
+    // 提取旧格式特征（复用现有归一化逻辑）
     auto features = _extractor.extract(snapshot, 0);
-    
-    // 转换为 IAnomalyModel::Input
-    IAnomalyModel::Input model_input{
-        .packets_rx_norm = features.packets_rx_norm,
-        .packets_tx_norm = features.packets_tx_norm,
-        .bytes_tx_norm = features.bytes_tx_norm,
-        .syn_rate_norm = features.syn_rate_norm,
-        .rst_rate_norm = features.rst_rate_norm,
-        .conn_established_norm = features.conn_established_norm,
-        .tx_rx_ratio_norm = features.tx_rx_ratio_norm,
-        .active_conn_norm = features.active_conn_norm,
+
+    // 衍生指标
+    double avg_pkt_size = (snapshot.pps > 0) ? (snapshot.bps / snapshot.pps) : 0.0;
+    double rst_ratio = (snapshot.pps > 0) ? (snapshot.rst_rate / snapshot.pps) : 0.0;
+
+    // 转换为 ISecurityModel::Input
+    ISecurityModel::Input model_input{
+        .pps_norm           = features.packets_rx_norm,
+        .bps_norm           = features.bytes_tx_norm,
+        .syn_rate_norm      = features.syn_rate_norm,
+        .rst_rate_norm      = features.rst_rate_norm,
+        .syn_ratio_norm     = features.tx_rx_ratio_norm,
+        .new_conn_rate_norm = features.conn_established_norm,
+        .avg_pkt_size_norm  = static_cast<float>(std::clamp(avg_pkt_size / 1500.0, 0.0, 1.0)),
+        .rst_ratio_norm     = static_cast<float>(std::clamp(rst_ratio, 0.0, 1.0)),
     };
 
     // 执行推理

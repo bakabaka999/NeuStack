@@ -15,13 +15,14 @@
 
 ## 概述
 
-NeuStack 包含三个 AI 模型：
+NeuStack 包含四个 AI 模型：
 
 | 模型 | 算法 | 输入维度 | 输出 | 用途 |
 |------|------|----------|------|------|
 | **Orca** | SAC | 7 维状态 | α ∈ [-1, 1] | 拥塞窗口调节 |
 | **带宽预测** | LSTM | 30×3 时序 | bytes/s | 前瞻性估计 |
-| **异常检测** | Autoencoder | 5 维特征 | 重构误差 | 攻击检测 |
+| **异常检测** | Autoencoder | 5 维特征 | 重构误差 | TCP 异常检测 |
+| **安全异常检测** | Autoencoder | 8 维特征 | 重构误差 + 置信度 | 防火墙威胁检测 |
 
 ### Orca 输入特征 (7 维)
 
@@ -51,6 +52,21 @@ NeuStack 包含三个 AI 模型：
  new_conn_rate,  # 新连接速率
  packet_rate,    # 总包速率
  avg_pkt_size]   # 平均包大小
+```
+
+### 安全异常检测输入 (8 维)
+
+防火墙专用，由 `SecurityExporter` 采集原始数据，训练时归一化。
+
+```
+[pps_norm,             # 包速率
+ bps_norm,             # 字节速率
+ syn_rate_norm,        # SYN 速率（SYN Flood 指标）
+ rst_rate_norm,        # RST 速率（端口扫描指标）
+ syn_ratio_norm,       # SYN/SYN-ACK 比率
+ new_conn_rate_norm,   # 新连接速率
+ avg_pkt_size_norm,    # 平均包大小（小包攻击指标）
+ rst_ratio_norm]       # RST/总包 比率
 ```
 
 ---
@@ -110,6 +126,27 @@ sudo ./scripts/linux/collect.sh --duration 3600 --output collected_data/
 timestamp_ms,syn_received,rst_received,conn_established,conn_reset,packets_rx,bytes_rx
 1234567890,2,0,1,0,15,1024
 1234567990,0,0,0,0,3,256
+```
+
+### 安全数据采集 (SecurityExporter)
+
+防火墙安全模型使用独立的 `SecurityExporter` 采集数据：
+
+```cpp
+#include "neustack/metrics/security_exporter.hpp"
+
+SecurityExporter exporter("security_data.csv", firewall_ai.metrics());
+
+// 定时器中每秒调用
+exporter.flush(0);  // label=0 正常流量
+exporter.flush(1);  // label=1 异常流量（手动标注/攻击注入时）
+```
+
+输出 CSV 格式（15 列）：
+
+```csv
+timestamp_ms,packets_total,bytes_total,syn_packets,syn_ack_packets,rst_packets,pps,bps,syn_rate,rst_rate,syn_ratio,new_conn_rate,avg_pkt_size,rst_ratio,label
+1707700000,5000,750000,100,95,10,500,75000,10,1,1.05,10,150,0.002,0
 ```
 
 ### 数据预处理
@@ -202,6 +239,31 @@ training:
   learning_rate: 0.001
 ```
 
+### 安全异常检测 (Autoencoder)
+
+```bash
+cd training/security
+
+python train.py --config config.yaml --data ../../security_data.csv
+```
+
+#### config.yaml
+
+```yaml
+model:
+  input_dim: 8
+  hidden_dims: [32, 16]
+  latent_dim: 4
+
+training:
+  epochs: 200
+  batch_size: 64
+  learning_rate: 0.001
+  threshold_percentile: 99  # 正常数据的 99 分位数作为阈值
+```
+
+> **注意**：训练数据由 `SecurityExporter` 采集。CSV 中原始值需在训练端归一化到 [0, 1]。
+
 ---
 
 ## ONNX 导出
@@ -220,12 +282,17 @@ python export_onnx.py --checkpoint checkpoints/best_model.pth
 # 异常检测
 cd training/anomaly
 python export_onnx.py --checkpoint checkpoints/best_model.pth
+
+# 安全异常检测
+cd training/security
+python export_onnx.py --checkpoint checkpoints/best_model.pth
 ```
 
 导出文件：
 - `models/orca_actor.onnx`
 - `models/bandwidth_predictor.onnx`
 - `models/anomaly_detector.onnx`
+- `models/security_anomaly.onnx`
 
 ### 验证 ONNX
 

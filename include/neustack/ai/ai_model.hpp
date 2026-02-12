@@ -2,6 +2,7 @@
 #define NEUSTACK_AI_AI_MODEL_HPP
 
 #include "neustack/ai/onnx_inference.hpp"
+#include <array>
 #include <optional>
 #include <memory>
 
@@ -99,6 +100,45 @@ public:
 
     /** 获取所需的历史长度 */
     virtual size_t required_history_length() const = 0;
+};
+
+/**
+ * 安全异常检测模型 (Autoencoder)
+ *
+ * 专用于防火墙场景，输入为安全特征 (8 维)
+ * 与 IAnomalyModel 的区别：特征面向网络安全（SYN ratio、RST ratio 等）
+ * 输出增加 confidence 字段
+ */
+class ISecurityModel : public AIModel {
+public:
+    static constexpr size_t INPUT_DIM = 8;
+
+    struct Input {
+        float pps_norm;             // 包速率
+        float bps_norm;             // 字节速率
+        float syn_rate_norm;        // SYN 速率
+        float rst_rate_norm;        // RST 速率
+        float syn_ratio_norm;       // SYN/SYN-ACK 比率
+        float new_conn_rate_norm;   // 新连接速率
+        float avg_pkt_size_norm;    // 平均包大小
+        float rst_ratio_norm;       // RST/总包 比率
+
+        /** 转换为 float 数组 */
+        std::array<float, INPUT_DIM> to_array() const {
+            return {pps_norm, bps_norm, syn_rate_norm, rst_rate_norm,
+                    syn_ratio_norm, new_conn_rate_norm, avg_pkt_size_norm, rst_ratio_norm};
+        }
+    };
+
+    struct Output {
+        float reconstruction_error; // 重构误差 (MSE)
+        bool is_anomaly;            // 是否异常
+        float confidence;           // 置信度 [0, 1]
+    };
+
+    virtual std::optional<Output> infer(const Input& input) = 0;
+    virtual void set_threshold(float threshold) = 0;
+    virtual float get_threshold() const = 0;
 };
 
 } // namespace neustack

@@ -44,8 +44,8 @@ NeuStack 是一个**完全从零实现**的用户态 TCP/IP 协议栈，具备 A
 |------|------|
 | **协议栈** | IPv4 / ICMP / UDP / TCP / HTTP 1.1 / DNS |
 | **拥塞控制** | Reno · CUBIC · **Orca (SAC 强化学习)** |
-| **AI 智能面** | 带宽预测 (LSTM) · 异常检测 (Autoencoder) · 智能拥塞控制 (SAC) |
-| **防火墙** | 黑白名单 · 端口封禁 · 令牌桶限速 · AI Shadow Mode |
+| **AI 智能面** | 带宽预测 (LSTM) · 异常检测 (Autoencoder) · 智能拥塞控制 (SAC) · 安全异常检测 (Autoencoder) |
+| **防火墙** | 黑白名单 · 端口封禁 · 令牌桶限速 · AI Shadow Mode · 安全数据导出 |
 | **NetworkAgent** | 4 状态决策层，协调 3 个模型，策略性 clamp / 回退 / 连接控制 |
 | **跨平台** | macOS (utun) · Linux (TUN/TAP) · Windows (Wintun) |
 | **零分配设计** | FixedPool 内存池，热路径无 new/delete |
@@ -213,8 +213,8 @@ ctest -R "Benchmark"    # 基准测试
 
 | 类别 | 覆盖 |
 |------|------|
-| **单元测试** | 校验和、TCP/IP 解析、拥塞控制、HTTP 解析、防火墙规则引擎、限速器 |
-| **集成测试** | TCP 握手、HTTP 往返、防火墙数据包过滤 |
+| **单元测试** | 校验和、TCP/IP 解析、拥塞控制、HTTP 解析、防火墙规则引擎、限速器、安全模型 |
+| **集成测试** | TCP 握手、HTTP 往返、防火墙数据包过滤、AI Shadow Mode |
 | **基准测试** | 校验和吞吐、队列性能、TCP 吞吐、内存池性能 |
 
 ## 项目结构

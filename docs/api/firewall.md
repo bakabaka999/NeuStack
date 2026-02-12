@@ -343,6 +343,161 @@ fw.set_decision_callback([](const PacketEvent& evt, const FirewallDecision& dec)
 
 ---
 
+## FirewallAI
+
+防火墙 AI 层，集成 `SecurityAnomalyModel` 进行流量异常检测。
+
+### 头文件
+
+```cpp
+#include "neustack/firewall/firewall_ai.hpp"
+```
+
+### 构造与配置
+
+```cpp
+FirewallAIConfig config;
+config.model_path = "models/security_anomaly.onnx";
+config.anomaly_threshold = 0.5f;
+config.shadow_mode = true;          // 只告警不阻断
+config.inference_interval_ms = 1000; // 每秒推理一次
+
+FirewallAI ai(config);
+```
+
+### 使用模式
+
+```cpp
+// 1. 数据面：每个包调用
+ai.record_packet(evt);
+
+// 2. 定时器：每秒调用
+ai.tick();
+
+// 3. 定时器：每 N 秒执行 AI 推理
+float score = ai.run_inference();
+
+// 4. 数据面：获取缓存的 AI 决策
+FirewallDecision dec = ai.evaluate();
+```
+
+### 告警回调
+
+```cpp
+ai.set_alert_callback([](float score, const SecurityMetrics::Snapshot& snap) {
+    printf("[AI ALERT] score=%.4f pps=%.1f syn_rate=%.1f\n",
+           score, snap.pps, snap.syn_rate);
+});
+```
+
+### 统计
+
+```cpp
+auto& stats = ai.stats();
+printf("Inferences: %lu, Anomalies: %lu, Alerts: %lu\n",
+       stats.inferences_total,
+       stats.anomalies_detected,
+       stats.alerts_triggered);
+```
+
+---
+
+## SecurityAnomalyModel
+
+专用于防火墙的 Autoencoder 异常检测模型（第 4 个 AI 模型）。
+
+### 头文件
+
+```cpp
+#include "neustack/ai/security_model.hpp"
+```
+
+### 与其他模型的对比
+
+| 模型 | 接口 | 输入 | 输出 | 用途 |
+|------|------|------|------|------|
+| Orca | `ICongestionModel` | 7 维 TCP 特征 | α | 拥塞控制 |
+| 带宽预测 | `IBandwidthModel` | 时序历史 | bytes/s | 带宽预测 |
+| AnomalyDetector | `IAnomalyModel` | 8 维通用流量 | 误差+异常 | TCP 异常检测 |
+| **SecurityAnomalyModel** | **`ISecurityModel`** | **8 维安全特征** | **误差+异常+置信度** | **防火墙威胁检测** |
+
+### ISecurityModel::Input (8 维)
+
+```cpp
+struct Input {
+    float pps_norm;             // 包速率
+    float bps_norm;             // 字节速率
+    float syn_rate_norm;        // SYN 速率
+    float rst_rate_norm;        // RST 速率
+    float syn_ratio_norm;       // SYN/SYN-ACK 比率
+    float new_conn_rate_norm;   // 新连接速率
+    float avg_pkt_size_norm;    // 平均包大小
+    float rst_ratio_norm;       // RST/总包 比率
+};
+```
+
+### ISecurityModel::Output
+
+```cpp
+struct Output {
+    float reconstruction_error; // MSE 重构误差
+    bool is_anomaly;            // error > threshold
+    float confidence;           // [0, 1] 置信度 (sigmoid 映射)
+};
+```
+
+### 置信度计算
+
+置信度基于误差与阈值的距离，使用 sigmoid 映射：
+
+```
+confidence = 1 / (1 + exp(-6 * (error/threshold - 1)))
+```
+
+- `error << threshold` → confidence ≈ 0（确信正常）
+- `error == threshold` → confidence ≈ 0.5
+- `error >> threshold` → confidence ≈ 1.0（确信异常）
+
+---
+
+## SecurityExporter
+
+CSV 数据导出器，为安全模型训练采集数据。
+
+### 头文件
+
+```cpp
+#include "neustack/metrics/security_exporter.hpp"
+```
+
+### 使用
+
+```cpp
+SecurityExporter exporter("security_data.csv", metrics);
+
+// 定时器中每秒调用
+exporter.flush(0);  // label=0 正常
+exporter.flush(1);  // label=1 异常 (手动标注)
+
+// 强制刷盘
+exporter.sync();
+```
+
+### CSV 列
+
+```
+timestamp_ms, packets_total, bytes_total,
+syn_packets, syn_ack_packets, rst_packets,
+pps, bps, syn_rate, rst_rate,
+syn_ratio, new_conn_rate, avg_pkt_size, rst_ratio,
+label
+```
+
+- 记录原始值 + 衍生速率，归一化由 Python 训练端负责
+- `label`: `0`=正常, `1`=异常
+
+---
+
 ## 注意事项
 
 1. **IP 字节序**：`add_blacklist_ip()` 等方法接受**网络字节序**的 IP 地址
@@ -352,7 +507,119 @@ fw.set_decision_callback([](const PacketEvent& evt, const FirewallDecision& dec)
 
 ---
 
+## FirewallAI
+
+AI 驱动的异常检测层，以 Shadow Mode 或主动拦截模式运行。
+
+### 头文件
+
+```cpp
+#include "neustack/firewall/firewall_ai.hpp"
+```
+
+### 配置
+
+```cpp
+FirewallAIConfig config;
+config.model_path = "models/security_anomaly.onnx";
+config.anomaly_threshold = 0.5f;    // 重构误差阈值
+config.shadow_mode = true;          // 只告警不阻断
+config.inference_interval_ms = 1000; // 推理频率
+
+FirewallAI ai(config);
+```
+
+### 使用模式
+
+```cpp
+// 1. 数据面：每个包调用
+ai.record_packet(evt);
+
+// 2. 定时器：每秒调用
+ai.tick();
+
+// 3. 定时器：每 N 秒执行推理
+float score = ai.run_inference();
+
+// 4. 数据面：获取缓存的 AI 决策
+auto decision = ai.evaluate();
+```
+
+### 告警回调
+
+```cpp
+ai.set_alert_callback([](float score, const SecurityMetrics::Snapshot& snap) {
+    printf("[AI ALERT] score=%.4f pps=%.1f syn_rate=%.1f\n",
+           score, snap.pps, snap.syn_rate);
+});
+```
+
+### SecurityAnomalyModel
+
+专用于防火墙的 Autoencoder 异常检测模型（区别于 TCP 侧的通用 `AnomalyDetector`）。
+
+```cpp
+#include "neustack/ai/security_model.hpp"
+
+// 8 维安全特征输入
+ISecurityModel::Input input{
+    .pps_norm           = 0.3f,
+    .bps_norm           = 0.2f,
+    .syn_rate_norm      = 0.8f,   // 高 SYN → 可能是 SYN Flood
+    .rst_rate_norm      = 0.1f,
+    .syn_ratio_norm     = 0.9f,
+    .new_conn_rate_norm = 0.7f,
+    .avg_pkt_size_norm  = 0.04f,  // 小包 → 可能是攻击
+    .rst_ratio_norm     = 0.05f,
+};
+
+SecurityAnomalyModel model("models/security_anomaly.onnx");
+auto result = model.infer(input);
+// result->reconstruction_error  重构误差
+// result->is_anomaly            是否异常
+// result->confidence            置信度 [0, 1]
+```
+
+---
+
+## SecurityExporter
+
+安全指标 CSV 导出器，为 AI 模型训练采集数据。
+
+### 头文件
+
+```cpp
+#include "neustack/metrics/security_exporter.hpp"
+```
+
+### 使用
+
+```cpp
+SecurityMetrics metrics;
+SecurityExporter exporter("security_data.csv", metrics);
+
+// 每秒采样一次
+exporter.flush(0);   // label=0 正常
+exporter.flush(1);   // label=1 异常（手动标注）
+exporter.sync();     // 强制刷盘
+```
+
+### CSV 列
+
+```
+timestamp_ms, packets_total, bytes_total,
+syn_packets, syn_ack_packets, rst_packets,
+pps, bps, syn_rate, rst_rate,
+syn_ratio, new_conn_rate, avg_pkt_size, rst_ratio,
+label
+```
+
+原始值 + 衍生速率一并导出，归一化由 Python 训练端负责。
+
+---
+
 ## 版本历史
 
 - **v1.2.0**: 初始版本，支持黑白名单、端口封禁、令牌桶限速
-- **v1.3.0** (计划): AI Shadow Mode 集成
+- **v1.2.1**: AI Shadow Mode 集成，RateLimiter O(1) LRU 升级
+- **v1.2.2**: 专用 SecurityAnomalyModel + SecurityExporter 数据采集
