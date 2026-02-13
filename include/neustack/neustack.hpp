@@ -20,6 +20,7 @@
 #include "neustack/metrics/global_metrics.hpp"
 #include "neustack/metrics/sample_exporter.hpp"
 #include "neustack/metrics/metric_exporter.hpp"
+#include "neustack/metrics/security_exporter.hpp"
 
 namespace neustack {
 
@@ -38,6 +39,10 @@ struct StackConfig {
     std::string orca_model_path;
     std::string anomaly_model_path;
     std::string bandwidth_model_path;
+    std::string security_model_path;      // 防火墙安全异常检测模型
+
+    // 防火墙 AI 配置
+    float security_threshold = 0.5f;      // 安全模型异常阈值
 
     // 数据采集输出目录（空 = 不采集）
     std::string data_output_dir;
@@ -51,8 +56,26 @@ public:
     // ─── HAL 层 ───
     NetDevice &device();
 
-    // ─── 防火墙 ───
-    FirewallEngine *firewall();    // 未启用时返回 nullptr
+    // ─── 防火墙（通过门面访问）───
+    bool firewall_enabled() const;
+    bool firewall_ai_enabled() const;
+    void firewall_set_shadow_mode(bool shadow);
+    bool firewall_shadow_mode() const;
+    void firewall_set_threshold(float threshold);
+
+    /// 防火墙包检查（用于手动事件循环）
+    /// @return true = 放行, false = 丢弃
+    bool firewall_inspect(const uint8_t* data, size_t len);
+
+    /// 防火墙定时器（手动事件循环时每秒调用一次）
+    void firewall_on_timer();
+
+    /// 防火墙规则引擎（高级用户直接操作规则）
+    RuleEngine* firewall_rules();
+
+    /// 防火墙统计
+    FirewallStats firewall_stats() const;
+    FirewallAIStats firewall_ai_stats() const;
 
     // ─── 网络层 ───
     IPv4Layer    &ip();
@@ -69,8 +92,9 @@ public:
 
     // ─── 指标与采集 ───
     GlobalMetrics   &metrics();
-    SampleExporter  *sample_exporter();   // 未配置采集时返回 nullptr
-    MetricsExporter *metrics_exporter();  // 未配置采集时返回 nullptr
+    SampleExporter  *sample_exporter();    // 未配置采集时返回 nullptr
+    MetricsExporter *metrics_exporter();   // 未配置采集时返回 nullptr
+    SecurityExporter *security_exporter(); // 未配置采集时返回 nullptr
 
     // ─── AI 智能面 ───
     bool ai_enabled() const;

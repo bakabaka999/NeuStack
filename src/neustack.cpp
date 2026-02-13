@@ -29,6 +29,7 @@ struct NeuStack::Impl {
     // 数据采集
     std::unique_ptr<SampleExporter> sample_exporter;
     std::unique_ptr<MetricsExporter> metrics_exporter;
+    std::unique_ptr<SecurityExporter> security_exporter;
 
     Impl(const StackConfig &cfg) : config(cfg) {}
 
@@ -47,6 +48,18 @@ struct NeuStack::Impl {
             fw_cfg.enabled = true;
             fw_cfg.shadow_mode = config.firewall_shadow_mode;
             firewall = std::make_unique<FirewallEngine>(fw_cfg);
+
+            // 加载安全异常检测模型
+            if (!config.security_model_path.empty()) {
+                if (firewall->enable_ai(config.security_model_path, 
+                                         config.security_threshold)) {
+                    LOG_INFO(FW, "Security AI model loaded: %s", 
+                             config.security_model_path.c_str());
+                } else {
+                    LOG_WARN(FW, "Failed to load security AI model: %s", 
+                             config.security_model_path.c_str());
+                }
+            }
         }
 
         // 3. 网络层
@@ -101,6 +114,14 @@ struct NeuStack::Impl {
             sample_exporter = std::make_unique<SampleExporter>(
                 samples_path, tcp->metrics_buffer());
             metrics_exporter = std::make_unique<MetricsExporter>(metrics_path);
+
+            // 安全指标采集（需要防火墙启用）
+            if (firewall && firewall->ai()) {
+                std::string security_path = config.data_output_dir + "/security_metrics.csv";
+                security_exporter = std::make_unique<SecurityExporter>(
+                    security_path, firewall->ai()->metrics());
+            }
+
             LOG_INFO(APP, "Data collection: %s", config.data_output_dir.c_str());
         }
 
@@ -117,6 +138,7 @@ NeuStack::~NeuStack() {
         _impl->running = false;
         if (_impl->sample_exporter) _impl->sample_exporter->flush();
         if (_impl->metrics_exporter) _impl->metrics_exporter->flush();
+        if (_impl->security_exporter) _impl->security_exporter->sync();
         if (_impl->device) _impl->device->close();
     }
 }
@@ -133,9 +155,55 @@ std::unique_ptr<NeuStack> NeuStack::create(const StackConfig &config) {
 
 NetDevice &NeuStack::device() { return *_impl->device; }
 
-// ─── 防火墙 ───
+// ─── 防火墙（门面封装）───
 
-FirewallEngine *NeuStack::firewall() { return _impl->firewall.get(); }
+bool NeuStack::firewall_enabled() const {
+    return _impl->firewall && _impl->firewall->enabled();
+}
+
+bool NeuStack::firewall_ai_enabled() const {
+    return _impl->firewall && _impl->firewall->ai_enabled();
+}
+
+void NeuStack::firewall_set_shadow_mode(bool shadow) {
+    if (_impl->firewall) _impl->firewall->set_shadow_mode(shadow);
+}
+
+bool NeuStack::firewall_shadow_mode() const {
+    return _impl->firewall ? _impl->firewall->shadow_mode() : true;
+}
+
+void NeuStack::firewall_set_threshold(float threshold) {
+    if (_impl->firewall && _impl->firewall->ai()) {
+        _impl->firewall->ai()->set_threshold(threshold);
+    }
+}
+
+bool NeuStack::firewall_inspect(const uint8_t* data, size_t len) {
+    if (!_impl->firewall) return true;
+    return _impl->firewall->inspect(data, len);
+}
+
+void NeuStack::firewall_on_timer() {
+    if (!_impl->firewall) return;
+    _impl->firewall->on_timer();
+    if (_impl->security_exporter) {
+        _impl->security_exporter->flush();
+    }
+}
+
+RuleEngine* NeuStack::firewall_rules() {
+    return _impl->firewall ? &_impl->firewall->rule_engine() : nullptr;
+}
+
+FirewallStats NeuStack::firewall_stats() const {
+    return _impl->firewall ? _impl->firewall->stats() : FirewallStats{};
+}
+
+FirewallAIStats NeuStack::firewall_ai_stats() const {
+    return (_impl->firewall && _impl->firewall->ai()) 
+        ? _impl->firewall->ai()->stats() : FirewallAIStats{};
+}
 
 // ─── 网络层 ───
 
@@ -158,6 +226,7 @@ DNSClient  *NeuStack::dns()         { return _impl->dns_client.get(); }
 GlobalMetrics   &NeuStack::metrics()          { return global_metrics(); }
 SampleExporter  *NeuStack::sample_exporter()  { return _impl->sample_exporter.get(); }
 MetricsExporter *NeuStack::metrics_exporter() { return _impl->metrics_exporter.get(); }
+SecurityExporter *NeuStack::security_exporter() { return _impl->security_exporter.get(); }
 
 // ─── AI 智能面 ───
 
@@ -169,7 +238,9 @@ void NeuStack::run() {
     _impl->running = true;
     uint8_t buf[2048];
     auto last_timer = std::chrono::steady_clock::now();
+    auto last_fw_timer = std::chrono::steady_clock::now();
     constexpr auto TIMER_INTERVAL = std::chrono::milliseconds(100);
+    constexpr auto FW_TIMER_INTERVAL = std::chrono::seconds(1);
 
     LOG_INFO(APP, "NeuStack running on %s", _impl->config.local_ip.c_str());
 
@@ -203,6 +274,17 @@ void NeuStack::run() {
             if (_impl->metrics_exporter) _impl->metrics_exporter->export_delta(100);
 
             last_timer = now;
+        }
+
+        // 6. 防火墙定时器 (1s) — tick + AI 推理 + 安全数据采集
+        if (_impl->firewall && now - last_fw_timer >= FW_TIMER_INTERVAL) {
+            _impl->firewall->on_timer();
+
+            if (_impl->security_exporter) {
+                _impl->security_exporter->flush();
+            }
+
+            last_fw_timer = now;
         }
     }
 
