@@ -15,11 +15,12 @@
 #   sudo bash scripts/linux/collect_bwvar.sh [options]
 #
 # 选项:
-#   --iface IFACE    网卡名 (默认: 自动检测)
-#   --rounds N       循环轮数 (默认: 5, 每轮约2分钟)
-#   --output-dir DIR 数据输出目录 (默认: collected_data/)
-#   --ip IP          NeuStack IP (默认: 10.0.1.2)
-#   --http-port N    HTTP 转发端口 (默认: 8080)
+#   --iface IFACE       网卡名 (默认: 自动检测)
+#   --rounds N          循环轮数 (默认: 5, 每轮约2分钟)
+#   --phase-duration N  每个网络条件持续秒数 (默认: 30)
+#   --output-dir DIR    数据输出目录 (默认: collected_data/)
+#   --ip IP             NeuStack IP (默认: 10.0.1.2)
+#   --http-port N       HTTP 转发端口 (默认: 8080)
 
 set -e
 
@@ -37,12 +38,13 @@ HTTP_PORT=8080
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --iface)      IFACE="$2"; shift 2;;
-        --rounds)     ROUNDS="$2"; shift 2;;
-        --output-dir) OUTPUT_DIR="$2"; shift 2;;
-        --ip)         NEUSTACK_IP="$2"; shift 2;;
-        --http-port)  HTTP_PORT="$2"; shift 2;;
-        *)            echo "Unknown: $1"; exit 1;;
+        --iface)          IFACE="$2"; shift 2;;
+        --rounds)         ROUNDS="$2"; shift 2;;
+        --phase-duration) PHASE_DURATION="$2"; shift 2;;
+        --output-dir)     OUTPUT_DIR="$2"; shift 2;;
+        --ip)             NEUSTACK_IP="$2"; shift 2;;
+        --http-port)      HTTP_PORT="$2"; shift 2;;
+        *)                echo "Unknown: $1"; exit 1;;
     esac
 done
 
