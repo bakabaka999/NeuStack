@@ -23,13 +23,15 @@ HOURS=0
 OUTPUT_DIR="$PROJECT_ROOT/collected_data"
 NEUSTACK_IP="192.168.100.2"
 HOST_IP="192.168.100.1"
+SECURITY_LABEL=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --hours)      HOURS="$2"; shift 2;;
-        --output-dir) OUTPUT_DIR="$2"; shift 2;;
-        --ip)         NEUSTACK_IP="$2"; shift 2;;
-        *)            echo "Unknown: $1"; exit 1;;
+        --hours)           HOURS="$2"; shift 2;;
+        --output-dir)      OUTPUT_DIR="$2"; shift 2;;
+        --ip)              NEUSTACK_IP="$2"; shift 2;;
+        --security-label)  SECURITY_LABEL="$2"; shift 2;;
+        *)                 echo "Unknown: $1"; exit 1;;
     esac
 done
 
@@ -41,9 +43,9 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-if [ ! -f "$PROJECT_ROOT/build/neustack" ]; then
-    echo "ERROR: neustack binary not found"
-    echo "  Run: bash scripts/mac/setup.sh"
+if [ ! -f "$PROJECT_ROOT/build/examples/neustack_demo" ]; then
+    echo "ERROR: neustack_demo binary not found"
+    echo "  Run: cmake -B build && cmake --build build"
     exit 1
 fi
 
@@ -73,8 +75,8 @@ cleanup() {
     [ -n "$NEUSTACK_PID" ] && kill $NEUSTACK_PID 2>/dev/null || true
     sleep 1
 
-    # 重命名带时间戳
-    for f in tcp_samples.csv global_metrics.csv; do
+    # 重命名带时间戳（三个 CSV 全处理）
+    for f in tcp_samples.csv global_metrics.csv security_data.csv; do
         SRC="$OUTPUT_DIR/$f"
         if [ -f "$SRC" ]; then
             BASE="${f%.csv}"
@@ -91,8 +93,10 @@ trap cleanup EXIT
 
 # ─── 1. 启动 NeuStack ───
 echo "[1/2] Starting NeuStack..."
-cd "$PROJECT_ROOT/build"
-./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" &
+cd "$PROJECT_ROOT/build/examples"
+./neustack_demo --ip "$NEUSTACK_IP" \
+    --collect --output-dir "$OUTPUT_DIR" \
+    --security-collect --security-label "$SECURITY_LABEL" &
 NEUSTACK_PID=$!
 sleep 2
 

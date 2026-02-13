@@ -137,6 +137,11 @@ public:
     void disable_ai();
 
     /**
+     * @brief 直接设置 AI 模块（用于采集模式下不加载模型但需要 metrics）
+     */
+    void set_ai(std::unique_ptr<FirewallAI> ai) { _ai = std::move(ai); }
+
+    /**
      * @brief AI 是否已启用
      */
     bool ai_enabled() const { return _ai && _ai->is_loaded(); }

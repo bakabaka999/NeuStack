@@ -30,6 +30,7 @@ struct NeuStack::Impl {
     std::unique_ptr<SampleExporter> sample_exporter;
     std::unique_ptr<MetricsExporter> metrics_exporter;
     std::unique_ptr<SecurityExporter> security_exporter;
+    uint32_t security_tick_count = 0;  // SecurityExporter 每秒 flush 一次
 
     Impl(const StackConfig &cfg) : config(cfg) {}
 
@@ -123,6 +124,21 @@ struct NeuStack::Impl {
             }
 
             LOG_INFO(APP, "Data collection: %s", config.data_output_dir.c_str());
+        }
+
+        // 8. 安全数据采集 (有采集目录 + 防火墙启用 → 自动创建)
+        if (!config.data_output_dir.empty() && firewall) {
+            // 采集模式下需要 FirewallAI 的 metrics，如果 AI 尚未初始化则创建一个（不加载模型）
+            if (!firewall->ai()) {
+                FirewallAIConfig ai_cfg;
+                ai_cfg.shadow_mode = config.firewall_shadow_mode;
+                firewall->set_ai(std::make_unique<FirewallAI>(ai_cfg));
+            }
+            std::string sec_path = config.data_output_dir + "/security_data.csv";
+            security_exporter = std::make_unique<SecurityExporter>(
+                sec_path, firewall->ai()->metrics());
+            LOG_INFO(APP, "Security collection: %s (label=%d)",
+                     sec_path.c_str(), config.security_label);
         }
 
         return true;
@@ -268,10 +284,20 @@ void NeuStack::run() {
         if (now - last_timer >= TIMER_INTERVAL) {
             _impl->tcp->on_timer();
             if (_impl->dns_client) _impl->dns_client->on_timer();
+            if (_impl->firewall) _impl->firewall->on_timer();
 
             // 数据采集导出
             if (_impl->sample_exporter) _impl->sample_exporter->export_new_samples();
             if (_impl->metrics_exporter) _impl->metrics_exporter->export_delta(100);
+
+            // 安全数据导出 (每秒 flush 一次 = 每 10 个 100ms tick)
+            if (_impl->security_exporter) {
+                _impl->security_tick_count++;
+                if (_impl->security_tick_count >= 10) {
+                    _impl->security_tick_count = 0;
+                    _impl->security_exporter->flush(_impl->config.security_label);
+                }
+            }
 
             last_timer = now;
         }

@@ -255,16 +255,20 @@ void FirewallEngine::disable_ai() {
 
 void FirewallEngine::on_timer() {
     if (!_ai) return;
-    
-    // 每秒更新 AI 指标窗口
-    _ai->tick();
+
     _tick_count++;
-    
+
+    // on_timer() 被上层每 100ms 调用一次
+    // _ai->tick() 需要每秒调用一次（滑动窗口 TICK_INTERVAL_MS = 1000）
+    // 所以每 10 个 tick 调用一次
+    if (_tick_count % 10 == 0) {
+        _ai->tick();
+    }
+
     // 按配置间隔执行 AI 推理
-    // on_timer() 每秒调用，inference_interval_ms / 1000 = 每几个 tick 推理一次
     if (_ai->is_loaded()) {
         uint32_t ticks_per_inference = std::max(
-            1u, _ai->inference_interval_ms() / 1000u);
+            1u, _ai->inference_interval_ms() / 100u);
         if (_tick_count % ticks_per_inference == 0) {
             _ai->run_inference();
         }

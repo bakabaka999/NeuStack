@@ -44,9 +44,9 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-if [ ! -f "$PROJECT_ROOT/build/neustack" ]; then
-    echo "ERROR: neustack binary not found"
-    echo "  Run: bash scripts/mac/setup.sh"
+if [ ! -f "$PROJECT_ROOT/build/examples/neustack_demo" ]; then
+    echo "ERROR: neustack_demo binary not found"
+    echo "  Run: cmake -B build && cmake --build build"
     exit 1
 fi
 
@@ -85,8 +85,8 @@ cleanup() {
     [ -n "$NEUSTACK_PID" ] && kill $NEUSTACK_PID 2>/dev/null || true
     sleep 1
 
-    # 重命名带时间戳
-    for f in tcp_samples.csv global_metrics.csv; do
+    # 重命名带时间戳（三个 CSV 全处理）
+    for f in tcp_samples.csv global_metrics.csv security_data.csv; do
         SRC="$OUTPUT_DIR/$f"
         if [ -f "$SRC" ]; then
             BASE="${f%.csv}"
@@ -103,8 +103,10 @@ trap cleanup EXIT INT TERM
 
 # ─── 1. 启动 NeuStack ───
 echo "[1/3] Starting NeuStack..."
-cd "$PROJECT_ROOT/build"
-./neustack --ip "$NEUSTACK_IP" --collect --output-dir "$OUTPUT_DIR" &
+cd "$PROJECT_ROOT/build/examples"
+./neustack_demo --ip "$NEUSTACK_IP" \
+    --collect --output-dir "$OUTPUT_DIR" \
+    --security-collect --security-label 0 &
 NEUSTACK_PID=$!
 sleep 2
 

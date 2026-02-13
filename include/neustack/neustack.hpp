@@ -54,6 +54,9 @@ struct StackConfig {
 
     // 数据采集输出目录（空 = 不采集）
     std::string data_output_dir;
+
+    // 安全数据标注 (仅采集时生效)
+    int security_label = 0;           // 0=正常, 1=异常
 };
 
 class NeuStack {

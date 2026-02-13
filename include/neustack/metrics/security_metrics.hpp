@@ -168,30 +168,53 @@ public:
 
     /**
      * 获取快照（包含滑动窗口统计）
+     *
+     * 累积字段（packets_total 等）使用最近一个已完成窗口的值，
+     * 而非 _current（_current 可能刚被 tick() 重置，或只积累了部分数据）。
+     * 速率字段使用整个滑动窗口 + _current 计算。
      */
     Snapshot snapshot() const {
         Snapshot snap{};
-        
-        // 当前秒的计数
-        snap.packets_total = _current.packets_total.load(std::memory_order_relaxed);
-        snap.bytes_total = _current.bytes_total.load(std::memory_order_relaxed);
-        snap.syn_packets = _current.syn_packets.load(std::memory_order_relaxed);
-        snap.syn_ack_packets = _current.syn_ack_packets.load(std::memory_order_relaxed);
-        snap.rst_packets = _current.rst_packets.load(std::memory_order_relaxed);
-        snap.fin_packets = _current.fin_packets.load(std::memory_order_relaxed);
-        snap.new_connections = _current.new_connections.load(std::memory_order_relaxed);
-        snap.half_open = _current.half_open.load(std::memory_order_relaxed);
-        snap.dropped_packets = _current.dropped_packets.load(std::memory_order_relaxed);
-        snap.alerted_packets = _current.alerted_packets.load(std::memory_order_relaxed);
-        
-        // 计算滑动窗口内的总和
-        uint64_t total_packets = snap.packets_total;
-        uint64_t total_bytes = snap.bytes_total;
-        uint64_t total_syn = snap.syn_packets;
-        uint64_t total_syn_ack = snap.syn_ack_packets;
-        uint64_t total_rst = snap.rst_packets;
-        uint64_t total_new_conn = snap.new_connections;
-        
+
+        // 累积字段：使用最近一个已完成窗口 slot 的值
+        // 这是最近一次 tick() 保存的完整 1 秒数据
+        if (_window_count > 0) {
+            // _window_index 指向下一个要写入的位置，
+            // 所以最近写入的是 (_window_index - 1 + WINDOW_SIZE) % WINDOW_SIZE
+            size_t last = (_window_index + WINDOW_SIZE - 1) % WINDOW_SIZE;
+            const auto& latest = _window[last];
+            snap.packets_total = latest.packets_total;
+            snap.bytes_total = latest.bytes_total;
+            snap.syn_packets = latest.syn_packets;
+            snap.syn_ack_packets = latest.syn_ack_packets;
+            snap.rst_packets = latest.rst_packets;
+            snap.fin_packets = latest.fin_packets;
+            snap.new_connections = latest.new_connections;
+            snap.half_open = latest.half_open;
+            snap.dropped_packets = latest.dropped_packets;
+            snap.alerted_packets = latest.alerted_packets;
+        } else {
+            // 窗口还没数据，使用 _current
+            snap.packets_total = _current.packets_total.load(std::memory_order_relaxed);
+            snap.bytes_total = _current.bytes_total.load(std::memory_order_relaxed);
+            snap.syn_packets = _current.syn_packets.load(std::memory_order_relaxed);
+            snap.syn_ack_packets = _current.syn_ack_packets.load(std::memory_order_relaxed);
+            snap.rst_packets = _current.rst_packets.load(std::memory_order_relaxed);
+            snap.fin_packets = _current.fin_packets.load(std::memory_order_relaxed);
+            snap.new_connections = _current.new_connections.load(std::memory_order_relaxed);
+            snap.half_open = _current.half_open.load(std::memory_order_relaxed);
+            snap.dropped_packets = _current.dropped_packets.load(std::memory_order_relaxed);
+            snap.alerted_packets = _current.alerted_packets.load(std::memory_order_relaxed);
+        }
+
+        // 计算滑动窗口内的总和（用于速率计算）
+        uint64_t total_packets = _current.packets_total.load(std::memory_order_relaxed);
+        uint64_t total_bytes = _current.bytes_total.load(std::memory_order_relaxed);
+        uint64_t total_syn = _current.syn_packets.load(std::memory_order_relaxed);
+        uint64_t total_syn_ack = _current.syn_ack_packets.load(std::memory_order_relaxed);
+        uint64_t total_rst = _current.rst_packets.load(std::memory_order_relaxed);
+        uint64_t total_new_conn = _current.new_connections.load(std::memory_order_relaxed);
+
         for (size_t i = 0; i < _window_count; ++i) {
             const auto& slot = _window[i];
             total_packets += slot.packets_total;
@@ -201,7 +224,7 @@ public:
             total_rst += slot.rst_packets;
             total_new_conn += slot.new_connections;
         }
-        
+
         // 计算速率（除以窗口秒数）
         double window_seconds = static_cast<double>(_window_count + 1);
         snap.pps = static_cast<double>(total_packets) / window_seconds;
@@ -209,20 +232,20 @@ public:
         snap.syn_rate = static_cast<double>(total_syn) / window_seconds;
         snap.rst_rate = static_cast<double>(total_rst) / window_seconds;
         snap.new_conn_rate = static_cast<double>(total_new_conn) / window_seconds;
-        
+
         // 计算比率指标
-        snap.syn_to_synack_ratio = (total_syn_ack > 0) 
+        snap.syn_to_synack_ratio = (total_syn_ack > 0)
             ? static_cast<double>(total_syn) / static_cast<double>(total_syn_ack)
             : static_cast<double>(total_syn);
-        
+
         snap.rst_ratio = (total_packets > 0)
             ? static_cast<double>(total_rst) / static_cast<double>(total_packets)
             : 0.0;
-        
+
         snap.avg_packet_size = (total_packets > 0)
             ? static_cast<double>(total_bytes) / static_cast<double>(total_packets)
             : 0.0;
-        
+
         return snap;
     }
 
