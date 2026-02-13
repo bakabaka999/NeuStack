@@ -2,6 +2,7 @@
 #define NEUSTACK_METRICS_SECURITY_FEATURES_HPP
 
 #include "neustack/metrics/security_metrics.hpp"
+#include "neustack/ai/ai_model.hpp"
 
 #include <cstdint>
 #include <cmath>
@@ -124,6 +125,32 @@ public:
             static_cast<double>(active_connections), _params.max_active_conn);
         
         return features;
+    }
+
+    /**
+     * 从 SecurityMetrics 快照直接提取 ISecurityModel::Input
+     *
+     * 消除中间转换，字段语义精确匹配安全模型的 8 维输入。
+     * 用于 FirewallAI::run_inference()。
+     *
+     * @param snapshot 安全指标快照
+     * @return ISecurityModel::Input 格式的特征向量
+     */
+    ISecurityModel::Input extract_security(const SecurityMetrics::Snapshot& snapshot) const {
+        // 衍生指标
+        double avg_pkt_size = (snapshot.pps > 0) ? (snapshot.bps / snapshot.pps) : 0.0;
+        double rst_ratio = (snapshot.pps > 0) ? (snapshot.rst_rate / snapshot.pps) : 0.0;
+
+        return ISecurityModel::Input{
+            .pps_norm           = normalize_linear(snapshot.pps, _params.max_pps),
+            .bps_norm           = normalize_log(snapshot.bps, _params.max_bps),
+            .syn_rate_norm      = normalize_linear(snapshot.syn_rate, _params.max_syn_rate),
+            .rst_rate_norm      = normalize_linear(snapshot.rst_rate, _params.max_rst_rate),
+            .syn_ratio_norm     = normalize_sigmoid(snapshot.syn_to_synack_ratio, _params.syn_ratio_warning),
+            .new_conn_rate_norm = normalize_linear(snapshot.new_conn_rate, _params.max_conn_rate),
+            .avg_pkt_size_norm  = normalize_linear(avg_pkt_size, 1500.0),
+            .rst_ratio_norm     = static_cast<float>(std::clamp(rst_ratio, 0.0, 1.0)),
+        };
     }
 
     /**

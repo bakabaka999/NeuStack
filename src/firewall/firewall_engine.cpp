@@ -204,10 +204,12 @@ FirewallDecision FirewallEngine::evaluate(const PacketEvent& evt) {
     }
     
     // 2. AI 检测（如果启用）
-    if (_ai && _ai->is_loaded()) {
-        // 记录包到 AI 指标
+    // 无论模型是否加载，都持续采集指标，避免窗口空洞
+    if (_ai) {
         _ai->record_packet(evt);
-        
+    }
+
+    if (_ai && _ai->is_loaded()) {
         // 获取 AI 决策（使用缓存的推理结果）
         auto ai_decision = _ai->evaluate();
         
@@ -258,8 +260,15 @@ void FirewallEngine::on_timer() {
     _ai->tick();
     _tick_count++;
     
-    // 每秒执行一次 AI 推理
-    _ai->run_inference();
+    // 按配置间隔执行 AI 推理
+    // on_timer() 每秒调用，inference_interval_ms / 1000 = 每几个 tick 推理一次
+    if (_ai->is_loaded()) {
+        uint32_t ticks_per_inference = std::max(
+            1u, _ai->inference_interval_ms() / 1000u);
+        if (_tick_count % ticks_per_inference == 0) {
+            _ai->run_inference();
+        }
+    }
 }
 
 // ============================================================================

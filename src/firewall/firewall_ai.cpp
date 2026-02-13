@@ -2,10 +2,11 @@
 #include "neustack/common/log.hpp"
 
 #ifdef NEUSTACK_AI_ENABLED
-#include "neustack/ai/anomaly_model.hpp"
+#include "neustack/ai/security_model.hpp"
 #endif
 
 #include <chrono>
+#include <algorithm>
 
 namespace neustack {
 
@@ -30,7 +31,7 @@ FirewallAI::FirewallAI(const Config& config)
 bool FirewallAI::load_model(const std::string& model_path) {
 #ifdef NEUSTACK_AI_ENABLED
     try {
-        _model = std::make_unique<AnomalyDetector>(model_path, _config.anomaly_threshold);
+        _model = std::make_unique<SecurityAnomalyModel>(model_path, _config.anomaly_threshold);
         
         if (_model->is_loaded()) {
             LOG_INFO(FW, "AI model loaded: %s (threshold=%.3f)", 
@@ -127,20 +128,11 @@ float FirewallAI::run_inference() {
     // 获取当前指标快照
     auto snapshot = _metrics.snapshot();
 
-    // 提取特征 (AnomalyInput)
-    auto features = _extractor.extract(snapshot, 0);
-    
-    // 转换为 IAnomalyModel::Input
-    IAnomalyModel::Input model_input{
-        .packets_rx_norm = features.packets_rx_norm,
-        .packets_tx_norm = features.packets_tx_norm,
-        .bytes_tx_norm = features.bytes_tx_norm,
-        .syn_rate_norm = features.syn_rate_norm,
-        .rst_rate_norm = features.rst_rate_norm,
-        .conn_established_norm = features.conn_established_norm,
-        .tx_rx_ratio_norm = features.tx_rx_ratio_norm,
-        .active_conn_norm = features.active_conn_norm,
-    };
+    // 更新推理时间戳
+    _last_inference_time = std::chrono::steady_clock::now();
+
+    // 直接提取 ISecurityModel::Input（无中间转换）
+    auto model_input = _extractor.extract_security(snapshot);
 
     // 执行推理
     auto result = _model->infer(model_input);
