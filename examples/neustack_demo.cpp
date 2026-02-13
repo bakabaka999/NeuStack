@@ -143,6 +143,7 @@ static void setup_http_server(NeuStack &stack) {
                 "<ul>\n"
                 "  <li><a href=\"/api/status\">/api/status</a></li>\n"
                 "  <li><a href=\"/api/info\">/api/info</a></li>\n"
+                "  <li><a href=\"/api/firewall/status\">/api/firewall/status</a></li>\n"
                 "  <li>POST /api/echo</li>\n"
                 "</ul>\n"
                 "<h2>Download</h2>\n"
@@ -168,6 +169,30 @@ static void setup_http_server(NeuStack &stack) {
     server.get("/api/info", [local_ip](const HttpRequest &) {
         std::string json = R"({"local_ip":")" + ip_to_string(local_ip) + R"(",)";
         json += R"("services":["icmp","udp-echo:7","tcp-echo:7","http:80","dns-client"]})";
+        return HttpResponse().content_type("application/json").set_body(json);
+    });
+
+    // Firewall Status API
+    server.get("/api/firewall/status", [&stack](const HttpRequest &) {
+        auto fw = stack.firewall_stats();
+        std::string json = "{";
+        json += "\"enabled\":" + std::string(stack.firewall_enabled() ? "true" : "false") + ",";
+        json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
+        json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false") + ",";
+        json += "\"packets_inspected\":" + std::to_string(fw.packets_inspected) + ",";
+        json += "\"packets_passed\":" + std::to_string(fw.packets_passed) + ",";
+        json += "\"packets_dropped\":" + std::to_string(fw.packets_dropped) + ",";
+        json += "\"packets_alerted\":" + std::to_string(fw.packets_alerted);
+        if (stack.firewall_ai_enabled()) {
+            auto ai = stack.firewall_ai_stats();
+            json += ",\"ai\":{";
+            json += "\"inferences\":" + std::to_string(ai.inferences_total) + ",";
+            json += "\"anomalies\":" + std::to_string(ai.anomalies_detected) + ",";
+            json += "\"last_score\":" + std::to_string(ai.last_anomaly_score) + ",";
+            json += "\"max_score\":" + std::to_string(ai.max_anomaly_score);
+            json += "}";
+        }
+        json += "}";
         return HttpResponse().content_type("application/json").set_body(json);
     });
 
@@ -236,6 +261,7 @@ static void print_help() {
     std::printf("  d <hostname>  - DNS lookup\n");
     std::printf("  g <ip> <path> - HTTP GET\n");
     std::printf("  m             - Show metrics\n");
+    std::printf("  f             - Show firewall stats\n");
     std::printf("  h             - Help\n");
     std::printf("  q             - Quit\n\n");
 }
@@ -296,6 +322,24 @@ static void handle_command(const std::string &line, NeuStack &stack) {
         std::printf("  conn_established: %" PRIu64 "\n", snap.conn_established);
         std::printf("  active_conns:     %" PRIu32 "\n", snap.active_connections);
         std::printf("======================\n\n");
+    } else if (line[0] == 'f') {
+        auto fw = stack.firewall_stats();
+        std::printf("\n=== Firewall Stats ===\n");
+        std::printf("  enabled:     %s\n", stack.firewall_enabled() ? "yes" : "no");
+        std::printf("  shadow_mode: %s\n", stack.firewall_shadow_mode() ? "ON" : "OFF");
+        std::printf("  inspected:   %" PRIu64 "\n", fw.packets_inspected);
+        std::printf("  passed:      %" PRIu64 "\n", fw.packets_passed);
+        std::printf("  dropped:     %" PRIu64 "\n", fw.packets_dropped);
+        std::printf("  alerted:     %" PRIu64 "\n", fw.packets_alerted);
+        if (stack.firewall_ai_enabled()) {
+            auto ai = stack.firewall_ai_stats();
+            std::printf("  --- AI ---\n");
+            std::printf("  inferences:  %" PRIu64 "\n", ai.inferences_total);
+            std::printf("  anomalies:   %" PRIu64 "\n", ai.anomalies_detected);
+            std::printf("  last_score:  %.4f\n", ai.last_anomaly_score);
+            std::printf("  max_score:   %.4f\n", ai.max_anomaly_score);
+        }
+        std::printf("======================\n\n");
     } else if (line[0] == 'h') {
         print_help();
     } else if (line[0] == 'q') {
@@ -337,6 +381,7 @@ int main(int argc, char *argv[]) {
         stack_cfg.orca_model_path = cfg.model_dir + "/orca_actor.onnx";
         stack_cfg.anomaly_model_path = cfg.model_dir + "/anomaly_detector.onnx";
         stack_cfg.bandwidth_model_path = cfg.model_dir + "/bandwidth_predictor.onnx";
+        stack_cfg.security_model_path = cfg.model_dir + "/security_anomaly.onnx";
     }
 
     if (cfg.collect_data) {
@@ -370,11 +415,16 @@ int main(int argc, char *argv[]) {
     std::string cmd_buf;
     uint8_t buf[2048];
     auto last_timer = std::chrono::steady_clock::now();
+    auto last_fw_timer = std::chrono::steady_clock::now();
 
     while (g_running) {
         ssize_t n = stack->device().recv(buf, sizeof(buf), 10);
         if (n > 0) {
-            stack->ip().on_receive(buf, n);
+            // 防火墙检查
+            bool pass = stack->firewall_inspect(buf, static_cast<size_t>(n));
+            if (pass) {
+                stack->ip().on_receive(buf, n);
+            }
         }
         stack->http_server().poll();
 
@@ -382,7 +432,18 @@ int main(int argc, char *argv[]) {
         if (now - last_timer >= std::chrono::milliseconds(100)) {
             stack->tcp().on_timer();
             if (stack->dns()) stack->dns()->on_timer();
+
+            // 数据采集
+            if (stack->sample_exporter()) stack->sample_exporter()->export_new_samples();
+            if (stack->metrics_exporter()) stack->metrics_exporter()->export_delta(100);
+
             last_timer = now;
+        }
+
+        // 防火墙定时器 (1s)
+        if (now - last_fw_timer >= std::chrono::seconds(1)) {
+            stack->firewall_on_timer();
+            last_fw_timer = now;
         }
 
         struct pollfd pfd = {STDIN_FILENO, POLLIN, 0};
