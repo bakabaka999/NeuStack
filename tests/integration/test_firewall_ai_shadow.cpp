@@ -7,7 +7,7 @@
  * 3. Shadow Mode 告警逻辑
  */
 
-#include "neustack/firewall.hpp"
+#include "neustack/neustack.hpp"
 #include "neustack/common/log.hpp"
 
 #include <cstdio>

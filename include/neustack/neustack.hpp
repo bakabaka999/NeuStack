@@ -14,7 +14,15 @@
 #include "neustack/app/dns_client.hpp"
 
 // ─── 防火墙 ───
+#include "neustack/firewall/packet_event.hpp"
+#include "neustack/firewall/firewall_decision.hpp"
+#include "neustack/firewall/rule.hpp"
+#include "neustack/firewall/rate_limiter.hpp"
+#include "neustack/firewall/rule_engine.hpp"
+#include "neustack/firewall/firewall_ai.hpp"
 #include "neustack/firewall/firewall_engine.hpp"
+#include "neustack/metrics/security_metrics.hpp"
+#include "neustack/metrics/security_features.hpp"
 
 // ─── 指标与采集 ───
 #include "neustack/metrics/global_metrics.hpp"
