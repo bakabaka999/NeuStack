@@ -185,27 +185,35 @@ float FirewallAI::run_inference() {
         }
     }
 
-    // Shadow Mode 自动升级/降级
+    // Shadow Mode 自动升级/降级（带冷静期防震荡）
     if (_config.auto_escalate) {
+        const uint64_t current_ms = now_ms();
+        const bool in_cooldown = (_last_escalation_time_ms > 0) &&
+            (current_ms - _last_escalation_time_ms < _config.escalate_cooldown_ms);
+
         if (is_anomaly) {
             _consecutive_anomaly++;
             _consecutive_normal = 0;
-            if (_config.shadow_mode && _consecutive_anomaly >= _config.escalate_consecutive) {
+            if (_config.shadow_mode && !in_cooldown &&
+                _consecutive_anomaly >= _config.escalate_consecutive) {
                 _config.shadow_mode = false;
                 _consecutive_anomaly = 0;
+                _last_escalation_time_ms = current_ms;
                 _stats.escalations++;
-                LOG_WARN(FW, "[AI ESCALATE] Shadow Mode OFF after %u consecutive anomalies",
-                         _config.escalate_consecutive);
+                LOG_WARN(FW, "[AI ESCALATE] Shadow Mode OFF after %u consecutive anomalies (cooldown %lums)",
+                         _config.escalate_consecutive, _config.escalate_cooldown_ms);
             }
         } else {
             _consecutive_normal++;
             _consecutive_anomaly = 0;
-            if (!_config.shadow_mode && _consecutive_normal >= _config.deescalate_normal_count) {
+            if (!_config.shadow_mode && !in_cooldown &&
+                _consecutive_normal >= _config.deescalate_normal_count) {
                 _config.shadow_mode = true;
                 _consecutive_normal = 0;
+                _last_escalation_time_ms = current_ms;
                 _stats.deescalations++;
-                LOG_INFO(FW, "[AI DE-ESCALATE] Shadow Mode ON after %u consecutive normal",
-                         _config.deescalate_normal_count);
+                LOG_INFO(FW, "[AI DE-ESCALATE] Shadow Mode ON after %u consecutive normal (cooldown %lums)",
+                         _config.deescalate_normal_count, _config.escalate_cooldown_ms);
             }
         }
     }

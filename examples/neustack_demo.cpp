@@ -259,19 +259,17 @@ static void setup_http_server(NeuStack &stack) {
     // Firewall status API
     server.get("/api/firewall/status", [&stack](const HttpRequest &) {
         std::string json = "{";
-        auto *fw = stack.firewall();
-        if (fw) {
-            const auto &s = fw->stats();
+        if (stack.firewall_enabled()) {
+            const auto s = stack.firewall_stats();
             json += "\"enabled\":true,";
-            json += "\"shadow_mode\":" + std::string(fw->shadow_mode() ? "true" : "false") + ",";
+            json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
             json += "\"packets_inspected\":" + std::to_string(s.packets_inspected) + ",";
             json += "\"packets_passed\":" + std::to_string(s.packets_passed) + ",";
             json += "\"packets_dropped\":" + std::to_string(s.packets_dropped) + ",";
             json += "\"packets_alerted\":" + std::to_string(s.packets_alerted) + ",";
-            json += "\"rules\":" + std::to_string(fw->rule_engine().rule_count()) + ",";
-            json += "\"ai_enabled\":" + std::string(fw->ai_enabled() ? "true" : "false");
-            if (fw->ai()) {
-                const auto &ai_s = fw->ai()->stats();
+            json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false");
+            if (stack.firewall_ai_enabled()) {
+                const auto ai_s = stack.firewall_ai_stats();
                 json += ",\"ai\":{";
                 json += "\"inferences\":" + std::to_string(ai_s.inferences_total) + ",";
                 json += "\"anomalies\":" + std::to_string(ai_s.anomalies_detected) + ",";

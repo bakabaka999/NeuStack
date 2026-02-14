@@ -32,6 +32,7 @@ struct FirewallAIConfig {
     bool auto_escalate = false;              // 是否启用自动升级
     uint32_t escalate_consecutive = 5;       // 连续 N 次异常后自动关闭 Shadow Mode
     uint32_t deescalate_normal_count = 30;   // 连续 N 次正常后自动恢复 Shadow Mode
+    uint64_t escalate_cooldown_ms = 60000;   // 升级/降级后的冷静期（毫秒），防止震荡
     
     // ─── 推理间隔配置 ───
     // AI 推理相对较慢，不应每个包都调用
@@ -214,6 +215,7 @@ private:
     // ─── Shadow Mode 自动升级状态 ───
     uint32_t _consecutive_anomaly = 0;
     uint32_t _consecutive_normal = 0;
+    uint64_t _last_escalation_time_ms = 0;   // 上次升级/降级的时间戳
 };
 
 } // namespace neustack
