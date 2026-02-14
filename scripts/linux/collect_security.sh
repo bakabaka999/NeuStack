@@ -1,24 +1,18 @@
 #!/bin/bash
-# scripts/linux/collect.sh
+# scripts/linux/collect_security.sh
 #
-# Linux 服务器数据采集
+# 场景 7-8: Linux 服务器安全数据采集
 #
-# 启动 NeuStack + TUN 配置 + HTTP 端口转发
-# Mac 客户端通过 HTTP 下载触发 NeuStack 发送数据，产生拥塞控制训练样本
+# 在服务器上运行 NeuStack + 防火墙 + SecurityExporter
+# Mac 客户端通过 traffic_security.sh 生成正常/攻击流量
 #
-# 核心原理：
-# - NeuStack 作为 HTTP 服务器，提供 /download/1m, /download/10m 等端点
-# - Mac 用 curl 下载，NeuStack 发送数据，触发拥塞控制算法
-# - 拥塞控制的 cwnd/ssthresh/delivery_rate 等指标被采集到 CSV
+# 两阶段采集:
+#   阶段 1: --phase normal  → label=0, Mac 端跑 traffic_security.sh --mode normal
+#   阶段 2: --phase attack  → label=1, Mac 端跑 traffic_security.sh --mode attack
 #
 # 用法:
-#   sudo bash scripts/linux/collect.sh [options]
-#
-# 选项:
-#   --hours N        采集时长 (默认: 不限, Ctrl+C 停止)
-#   --http-port N    HTTP 转发端口 (默认: 8080)
-#   --output-dir DIR 数据输出目录 (默认: collected_data/)
-#   --ip IP          NeuStack IP (默认: 10.0.1.2)
+#   sudo bash scripts/linux/collect_security.sh --phase normal --duration 10
+#   sudo bash scripts/linux/collect_security.sh --phase attack --duration 10
 
 set -e
 
@@ -26,7 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ─── 参数解析 ───
-HOURS=0
+PHASE="normal"
+DURATION=10
 HTTP_PORT=8080
 OUTPUT_DIR="$PROJECT_ROOT/collected_data"
 NEUSTACK_IP="10.0.1.2"
@@ -34,7 +29,8 @@ HOST_IP="10.0.1.1"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --hours)      HOURS="$2"; shift 2;;
+        --phase)      PHASE="$2"; shift 2;;
+        --duration)   DURATION="$2"; shift 2;;
         --http-port)  HTTP_PORT="$2"; shift 2;;
         --output-dir) OUTPUT_DIR="$2"; shift 2;;
         --ip)         NEUSTACK_IP="$2"; shift 2;;
@@ -42,7 +38,6 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# 从 NeuStack IP 推导 Host IP (同子网 .1)
 HOST_IP=$(echo "$NEUSTACK_IP" | sed 's/\.[0-9]*$/.1/')
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -56,22 +51,26 @@ if [ ! -f "$PROJECT_ROOT/build/examples/neustack_demo" ]; then
     exit 1
 fi
 
+# 确定 label
+if [ "$PHASE" = "attack" ]; then
+    SECURITY_LABEL=1
+else
+    SECURITY_LABEL=0
+fi
+
 mkdir -p "$OUTPUT_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SERVER_IP=$(hostname -I | awk '{print $1}')
 
 echo "=============================================="
-echo "  NeuStack Linux Data Collection"
+echo "  NeuStack Linux Security Data Collection"
 echo "=============================================="
-echo "  Server IP:     $SERVER_IP"
-echo "  NeuStack IP:   $NEUSTACK_IP"
-echo "  HTTP forward:  :$HTTP_PORT -> $NEUSTACK_IP:80"
-echo "  Output:        $OUTPUT_DIR"
-if [ $HOURS -gt 0 ]; then
-    echo "  Duration:      ${HOURS}h"
-else
-    echo "  Duration:      unlimited (Ctrl+C to stop)"
-fi
+echo "  Phase:       $PHASE (label=$SECURITY_LABEL)"
+echo "  Server IP:   $SERVER_IP"
+echo "  NeuStack IP: $NEUSTACK_IP"
+echo "  HTTP fwd:    :$HTTP_PORT -> $NEUSTACK_IP:80"
+echo "  Duration:    ${DURATION}m"
+echo "  Output:      $OUTPUT_DIR"
 echo "=============================================="
 echo ""
 
@@ -84,23 +83,26 @@ cleanup() {
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
-
-    # 等待 NeuStack 退出 (flush CSV)
     sleep 1
 
-    # 重命名带时间戳（三个 CSV 全处理）
-    for f in tcp_samples.csv global_metrics.csv security_data.csv; do
-        SRC="$OUTPUT_DIR/$f"
-        if [ -f "$SRC" ]; then
+    # 重命名带时间戳
+    SRC="$OUTPUT_DIR/security_data.csv"
+    if [ -f "$SRC" ]; then
+        DST="$OUTPUT_DIR/security_data_${PHASE}_${TIMESTAMP}.csv"
+        mv "$SRC" "$DST"
+        LINES=$(wc -l < "$DST")
+        echo "  $DST ($LINES lines)"
+    fi
+
+    for f in tcp_samples.csv global_metrics.csv; do
+        S="$OUTPUT_DIR/$f"
+        if [ -f "$S" ]; then
             BASE="${f%.csv}"
-            DST="$OUTPUT_DIR/${BASE}_${TIMESTAMP}.csv"
-            mv "$SRC" "$DST"
-            LINES=$(wc -l < "$DST")
-            echo "  $DST ($LINES lines)"
+            D="$OUTPUT_DIR/${BASE}_security_${PHASE}_${TIMESTAMP}.csv"
+            mv "$S" "$D"
         fi
     done
 
-    # 清理 TUN 设备
     ip link set tun0 down 2>/dev/null || true
     echo ""
     echo "Done! Data saved to: $OUTPUT_DIR"
@@ -108,56 +110,49 @@ cleanup() {
 trap cleanup EXIT
 
 # ─── 1. 启动 NeuStack ───
-echo "[1/3] Starting NeuStack..."
+echo "[1/3] Starting NeuStack (label=$SECURITY_LABEL)..."
 cd "$PROJECT_ROOT/build/examples"
 ./neustack_demo --ip "$NEUSTACK_IP" \
     --collect --output-dir "$OUTPUT_DIR" \
-    --security-collect --security-label 0 &
+    --security-collect --security-label "$SECURITY_LABEL" &
 PIDS+=($!)
 sleep 2
 
 # ─── 2. 配置 TUN ───
 echo "[2/3] Configuring TUN device..."
-
-# 找到 NeuStack 创建的 TUN 设备
 TUN_DEV=$(ip -o link show type tun 2>/dev/null | awk -F': ' '{print $2}' | head -1)
 if [ -z "$TUN_DEV" ]; then
     TUN_DEV="tun0"
 fi
-
 ip addr add "$HOST_IP/24" dev "$TUN_DEV" 2>/dev/null || true
 ip link set "$TUN_DEV" up
 echo "  $TUN_DEV: $HOST_IP <-> $NEUSTACK_IP"
 
-# ─── 3. 启动端口转发 ───
+# ─── 3. 端口转发 ───
 echo "[3/3] Starting port forwarding..."
-
 socat TCP-LISTEN:$HTTP_PORT,fork,reuseaddr TCP:$NEUSTACK_IP:80 &
 PIDS+=($!)
-echo "  :$HTTP_PORT -> $NEUSTACK_IP:80 (HTTP)"
+echo "  :$HTTP_PORT -> $NEUSTACK_IP:80"
 
 # ─── 就绪 ───
 echo ""
 echo "=============================================="
 echo "  Ready! From your Mac run:"
 echo ""
-echo "  # Quick test"
-echo "  curl http://$SERVER_IP:$HTTP_PORT/api/status"
-echo ""
-echo "  # Auto traffic generation (recommended)"
-echo "  bash scripts/mac/traffic.sh $SERVER_IP --http-port $HTTP_PORT"
-echo ""
-echo "  # Manual download test"
-echo "  curl -o /dev/null http://$SERVER_IP:$HTTP_PORT/download/10m"
+if [ "$PHASE" = "attack" ]; then
+    echo "  bash scripts/mac/traffic_security.sh $SERVER_IP \\"
+    echo "    --http-port $HTTP_PORT --duration $DURATION --mode attack"
+else
+    echo "  bash scripts/mac/traffic_security.sh $SERVER_IP \\"
+    echo "    --http-port $HTTP_PORT --duration $DURATION --mode normal"
+fi
 echo ""
 echo "  Press Ctrl+C to stop collection"
 echo "=============================================="
 echo ""
 
-# 等待
-if [ $HOURS -gt 0 ]; then
-    sleep $((HOURS * 3600))
+if [ $DURATION -gt 0 ]; then
+    sleep $((DURATION * 60))
 else
-    # 无限等待
     while true; do sleep 86400; done
 fi

@@ -90,6 +90,21 @@ python3 "$SCRIPT_DIR/csv_to_dataset.py" \
     $GLOBAL_ARGS \
     --output-dir "$OUTPUT_DIR"
 
+# ─── 查找 Security 数据 (可选) ───
+SECURITY_FILES=()
+for f in "$DATA_DIR"/security_data*.csv; do
+    [ -f "$f" ] && SECURITY_FILES+=("$f")
+done
+
+if [ ${#SECURITY_FILES[@]} -gt 0 ]; then
+    echo ""
+    echo "Found ${#SECURITY_FILES[@]} security data file(s), generating security dataset..."
+    python3 "$SCRIPT_DIR/csv_to_dataset.py" \
+        --data-dir "$DATA_DIR" \
+        --model security \
+        --output-dir "$OUTPUT_DIR"
+fi
+
 echo ""
 echo "=============================================="
 echo "  Done!"

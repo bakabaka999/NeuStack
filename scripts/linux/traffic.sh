@@ -1,5 +1,5 @@
 #!/bin/bash
-# scripts/mac/traffic.sh
+# scripts/linux/traffic.sh
 #
 # 向 NeuStack 请求 HTTP 下载，让 NeuStack 发送数据
 # 用于生成拥塞控制训练数据
@@ -10,17 +10,17 @@
 # - HTTP 下载：NeuStack 发送，客户端接收，不会死锁
 #
 # 用法:
-#   bash scripts/mac/traffic.sh SERVER_IP [options]
+#   bash scripts/linux/traffic.sh SERVER_IP [options]
 #
 # 选项:
 #   --duration N    持续时间 (分钟, 默认: 10)
-#   --http-port N   HTTP 端口 (默认: 本地192.168.x.x用80, 其他用8080)
+#   --http-port N   HTTP 端口 (默认: 本地10.0.x.x用80, 其他用8080)
 #   --mode MODE     模式: quick, normal, heavy (默认: normal)
 #
 # 示例:
-#   bash scripts/mac/traffic.sh 192.168.100.2              # 本地 TUN (端口 80)
-#   bash scripts/mac/traffic.sh 1.2.3.4                    # 远程服务器 (端口 8080)
-#   bash scripts/mac/traffic.sh 1.2.3.4 --duration 30 --mode heavy
+#   bash scripts/linux/traffic.sh 10.0.1.2                   # 本地 TUN (端口 80)
+#   bash scripts/linux/traffic.sh 1.2.3.4                    # 远程服务器 (端口 8080)
+#   bash scripts/linux/traffic.sh 1.2.3.4 --duration 30 --mode heavy
 
 set -e
 
@@ -50,9 +50,9 @@ if [ -z "$SERVER_IP" ]; then
     exit 1
 fi
 
-# 自动检测端口：本地 TUN (192.168.x.x) 用 80，远程用 8080
+# 自动检测端口：本地 TUN (10.0.x.x / 192.168.x.x) 用 80，远程用 8080
 if [ -z "$HTTP_PORT" ]; then
-    if [[ "$SERVER_IP" == 192.168.* ]]; then
+    if [[ "$SERVER_IP" == 10.0.* ]] || [[ "$SERVER_IP" == 192.168.* ]]; then
         HTTP_PORT=80
     else
         HTTP_PORT=8080
@@ -104,7 +104,7 @@ else
     exit 1
 fi
 
-# 测试下载端点（只检查响应头，不下载完整文件）
+# 测试下载端点
 HTTP_CODE=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "http://$SERVER_IP:$HTTP_PORT/download/1m" 2>/dev/null || echo "000")
 if [ "$HTTP_CODE" = "200" ]; then
     echo "  ✓ Download endpoint OK"
@@ -123,7 +123,6 @@ echo "  Testing different file sizes to vary transfer duration"
 
 TOTAL_MB=0
 for i in $(seq 1 $DOWNLOAD_ROUNDS); do
-    # 随机选择下载大小
     SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
 
     START=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
@@ -137,8 +136,8 @@ for i in $(seq 1 $DOWNLOAD_ROUNDS); do
     esac
 
     if [ $((i % 5)) -eq 0 ]; then
-        DURATION=$(python3 -c "print(f'{$END - $START:.2f}')" 2>/dev/null || echo "?")
-        echo "    [$i/$DOWNLOAD_ROUNDS] ${SIZE} in ${DURATION}s"
+        DUR=$(python3 -c "print(f'{$END - $START:.2f}')" 2>/dev/null || echo "?")
+        echo "    [$i/$DOWNLOAD_ROUNDS] ${SIZE} in ${DUR}s"
     fi
 done
 echo "  ✓ Downloaded ${TOTAL_MB}MB total"
@@ -151,7 +150,6 @@ for conns in "${PARALLEL_CONNS[@]}"; do
     echo "  $conns parallel connections..."
     for round in $(seq 1 3); do
         for j in $(seq 1 $conns); do
-            # 随机选择大小，制造不同完成时间
             SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
             curl -s -m 30 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
         done
@@ -167,7 +165,6 @@ echo "[4/5] Burst traffic (random intervals)..."
 echo "  Simulating real-world bursty traffic patterns"
 
 for i in $(seq 1 $BURST_ROUNDS); do
-    # 突发：快速连续发起多个请求
     BURST_SIZE=$((RANDOM % 5 + 2))  # 2-6 个并发
     echo "    Burst $i: $BURST_SIZE requests"
 
@@ -177,7 +174,6 @@ for i in $(seq 1 $BURST_ROUNDS); do
     done
     wait
 
-    # 随机间隔 0.5-3 秒
     SLEEP_TIME=$(python3 -c "import random; print(f'{random.uniform(0.5, 3):.1f}')" 2>/dev/null || echo "1")
     sleep "$SLEEP_TIME"
 done
@@ -186,13 +182,11 @@ echo "  ✓ Done"
 # ─── 5. 持续压力测试 ───
 echo "[5/5] Sustained load (continuous downloads)..."
 
-# 确保 DURATION 是整数，并计算剩余时间
 DURATION_INT=$(printf "%.0f" "$DURATION" 2>/dev/null || echo "$DURATION")
 TOTAL_SECONDS=$((DURATION_INT * 60))
 ELAPSED=$SECONDS
 REMAINING=$((TOTAL_SECONDS - ELAPSED))
 
-# 至少运行 60 秒，或者剩余时间
 if [ $REMAINING -lt 60 ]; then
     SUSTAINED_DURATION=60
 else
@@ -203,7 +197,6 @@ echo "  Running for ${SUSTAINED_DURATION}s with varying parallelism..."
 
 END_TIME=$((SECONDS + SUSTAINED_DURATION))
 while [ $SECONDS -lt $END_TIME ]; do
-    # 随机并发数 1-6
     CONNS=$((RANDOM % 6 + 1))
     for j in $(seq 1 $CONNS); do
         SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
@@ -222,5 +215,5 @@ echo "  Traffic Generation Complete!"
 echo "=============================================="
 echo ""
 echo "  Check server data:"
-echo "    ssh your-server 'wc -l collected_data/*.csv'"
+echo "    wc -l collected_data/*.csv"
 echo ""

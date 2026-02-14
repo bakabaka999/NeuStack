@@ -47,6 +47,8 @@ struct Config {
     bool collect_data = false;
     std::string output_dir = ".";
     std::string model_dir;     // AI 模型目录，空 = 不启用
+    bool security_collect = false;
+    int  security_label = 0;
 };
 
 static void print_usage(const char *prog) {
@@ -58,6 +60,8 @@ static void print_usage(const char *prog) {
     std::printf("  --models <dir>      AI model directory (enables AI)\n");
     std::printf("  --collect           Enable data collection (CSV)\n");
     std::printf("  --output-dir <dir>  Output directory (default: .)\n");
+    std::printf("  --security-collect  Enable security data collection\n");
+    std::printf("  --security-label N  Security label: 0=normal, 1=anomaly\n");
     std::printf("  -v / -vv / -q      Verbose / Trace / Quiet\n");
     std::printf("  --no-color          Disable colored output\n");
     std::printf("  --no-time           Disable timestamps\n");
@@ -86,6 +90,10 @@ static bool parse_args(int argc, char *argv[], Config &cfg) {
             cfg.collect_data = true;
         } else if (std::strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
             cfg.output_dir = argv[++i];
+        } else if (std::strcmp(argv[i], "--security-collect") == 0) {
+            cfg.security_collect = true;
+        } else if (std::strcmp(argv[i], "--security-label") == 0 && i + 1 < argc) {
+            cfg.security_label = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return false;
@@ -248,6 +256,36 @@ static void setup_http_server(NeuStack &stack) {
     });
 #endif
 
+    // Firewall status API
+    server.get("/api/firewall/status", [&stack](const HttpRequest &) {
+        std::string json = "{";
+        if (stack.firewall_enabled()) {
+            const auto s = stack.firewall_stats();
+            json += "\"enabled\":true,";
+            json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
+            json += "\"packets_inspected\":" + std::to_string(s.packets_inspected) + ",";
+            json += "\"packets_passed\":" + std::to_string(s.packets_passed) + ",";
+            json += "\"packets_dropped\":" + std::to_string(s.packets_dropped) + ",";
+            json += "\"packets_alerted\":" + std::to_string(s.packets_alerted) + ",";
+            json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false");
+            if (stack.firewall_ai_enabled()) {
+                const auto ai_s = stack.firewall_ai_stats();
+                json += ",\"ai\":{";
+                json += "\"inferences\":" + std::to_string(ai_s.inferences_total) + ",";
+                json += "\"anomalies\":" + std::to_string(ai_s.anomalies_detected) + ",";
+                json += "\"last_score\":" + std::to_string(ai_s.last_anomaly_score) + ",";
+                json += "\"max_score\":" + std::to_string(ai_s.max_anomaly_score) + ",";
+                json += "\"escalations\":" + std::to_string(ai_s.escalations) + ",";
+                json += "\"deescalations\":" + std::to_string(ai_s.deescalations);
+                json += "}";
+            }
+        } else {
+            json += "\"enabled\":false";
+        }
+        json += "}";
+        return HttpResponse().content_type("application/json").set_body(json);
+    });
+
     server.listen(80);
     LOG_INFO(HTTP, "server on port 80");
 }
@@ -388,6 +426,12 @@ int main(int argc, char *argv[]) {
         stack_cfg.data_output_dir = cfg.output_dir;
     }
 
+    stack_cfg.security_label = cfg.security_label;
+
+    if (cfg.security_collect && stack_cfg.data_output_dir.empty()) {
+        stack_cfg.data_output_dir = cfg.output_dir;
+    }
+
     // 创建协议栈
     auto stack = NeuStack::create(stack_cfg);
     if (!stack) {
@@ -416,6 +460,7 @@ int main(int argc, char *argv[]) {
     uint8_t buf[2048];
     auto last_timer = std::chrono::steady_clock::now();
     auto last_fw_timer = std::chrono::steady_clock::now();
+    uint32_t security_tick_count = 0;
 
     while (g_running) {
         ssize_t n = stack->device().recv(buf, sizeof(buf), 10);
@@ -436,6 +481,15 @@ int main(int argc, char *argv[]) {
             // 数据采集
             if (stack->sample_exporter()) stack->sample_exporter()->export_new_samples();
             if (stack->metrics_exporter()) stack->metrics_exporter()->export_delta(100);
+
+            // 安全数据导出 (每秒 flush 一次)
+            if (stack->security_exporter()) {
+                security_tick_count++;
+                if (security_tick_count >= 10) {
+                    security_tick_count = 0;
+                    stack->security_exporter()->flush(cfg.security_label);
+                }
+            }
 
             last_timer = now;
         }

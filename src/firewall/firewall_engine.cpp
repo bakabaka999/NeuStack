@@ -13,6 +13,8 @@ namespace neustack {
 
 FirewallEngine::FirewallEngine(const FirewallConfig& config)
     : _config(config)
+    , _last_tick_time(std::chrono::steady_clock::now())
+    , _last_inference_time(std::chrono::steady_clock::now())
 {
     LOG_INFO(FW, "Firewall engine initialized (shadow_mode=%s)", 
              _config.shadow_mode ? "ON" : "OFF");
@@ -28,8 +30,14 @@ FirewallEngine::FirewallEngine(const FirewallConfig& config)
 // ============================================================================
 
 bool FirewallEngine::inspect(const uint8_t* data, size_t len) {
-    // 防火墙关闭时直接放行
+    // 即使防火墙关闭，也尝试采集 AI 指标（用于监控）
     if (!_config.enabled) {
+        if (_ai) {
+            auto evt_ptr = _event_pool.acquire_ptr();
+            if (evt_ptr && parse_packet(data, len, evt_ptr.get())) {
+                _ai->record_packet(*evt_ptr);
+            }
+        }
         return true;
     }
 
@@ -48,6 +56,11 @@ bool FirewallEngine::inspect(const uint8_t* data, size_t len) {
         _stats.packets_dropped++;
         LOG_DEBUG(FW, "Malformed packet dropped");
         return false;
+    }
+
+    // 无论后续决策如何，先采集 AI 指标（避免池耗尽时漏采集）
+    if (_ai) {
+        _ai->record_packet(*evt_ptr);
     }
 
     // 从池中获取 Decision
@@ -70,6 +83,13 @@ bool FirewallEngine::inspect(const uint8_t* data, size_t len) {
 
 bool FirewallEngine::inspect(const IPv4Packet& pkt) {
     if (!_config.enabled) {
+        if (_ai) {
+            auto evt_ptr = _event_pool.acquire_ptr();
+            if (evt_ptr) {
+                fill_event_from_ipv4(pkt, evt_ptr.get());
+                _ai->record_packet(*evt_ptr);
+            }
+        }
         return true;
     }
 
@@ -80,6 +100,11 @@ bool FirewallEngine::inspect(const IPv4Packet& pkt) {
     }
 
     fill_event_from_ipv4(pkt, evt_ptr.get());
+
+    // 先采集 AI 指标
+    if (_ai) {
+        _ai->record_packet(*evt_ptr);
+    }
 
     auto dec_ptr = _decision_pool.acquire_ptr();
     if (!dec_ptr) {
@@ -204,11 +229,7 @@ FirewallDecision FirewallEngine::evaluate(const PacketEvent& evt) {
     }
     
     // 2. AI 检测（如果启用）
-    // 无论模型是否加载，都持续采集指标，避免窗口空洞
-    if (_ai) {
-        _ai->record_packet(evt);
-    }
-
+    // record_packet() 已在 inspect() 入口处调用，这里只做评估
     if (_ai && _ai->is_loaded()) {
         // 获取 AI 决策（使用缓存的推理结果）
         auto ai_decision = _ai->evaluate();
@@ -255,18 +276,25 @@ void FirewallEngine::disable_ai() {
 
 void FirewallEngine::on_timer() {
     if (!_ai) return;
-    
-    // 每秒更新 AI 指标窗口
-    _ai->tick();
-    _tick_count++;
-    
+
+    auto now = std::chrono::steady_clock::now();
+
+    // tick() 需要每秒调用一次（滑动窗口 TICK_INTERVAL_MS = 1000）
+    // 使用时间戳判断，不依赖调用方的频率假设
+    auto tick_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - _last_tick_time).count();
+    if (tick_elapsed >= 1000) {
+        _ai->tick();
+        _last_tick_time = now;
+    }
+
     // 按配置间隔执行 AI 推理
-    // on_timer() 每秒调用，inference_interval_ms / 1000 = 每几个 tick 推理一次
     if (_ai->is_loaded()) {
-        uint32_t ticks_per_inference = std::max(
-            1u, _ai->inference_interval_ms() / 1000u);
-        if (_tick_count % ticks_per_inference == 0) {
+        auto inference_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - _last_inference_time).count();
+        if (inference_elapsed >= static_cast<int64_t>(_ai->inference_interval_ms())) {
             _ai->run_inference();
+            _last_inference_time = now;
         }
     }
 }

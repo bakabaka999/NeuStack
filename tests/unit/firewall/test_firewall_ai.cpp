@@ -162,7 +162,8 @@ TEST_CASE("FirewallAI: Basic Operations", "[firewall][ai]") {
     }
     
     SECTION("Threshold config") {
-        CHECK(ai.threshold() == 0.5f);
+        // 默认 anomaly_threshold = 0.0f (未加载模型时不会 fallback 到 0.5)
+        CHECK(ai.threshold() == 0.0f);
         ai.set_threshold(0.8f);
         CHECK(ai.threshold() == 0.8f);
     }

@@ -2,6 +2,7 @@
 #define NEUSTACK_FIREWALL_RATE_LIMITER_HPP
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <chrono>
 
@@ -135,7 +136,7 @@ public:
     void reset(uint32_t ip) {
         auto it = _buckets.find(ip);
         if (it != _buckets.end()) {
-            lru_remove(&it->second);
+            lru_remove(it->second.get());
             _buckets.erase(it);
         }
     }
@@ -207,10 +208,13 @@ private:
 
     // ─── 桶管理 ───
 
+    // 注意: _buckets 存储 unique_ptr<Bucket>，避免 rehash 导致 Bucket 地址变化
+    // 从而使 LRU 链表指针失效 (之前直接存 Bucket 值会在 rehash 时 crash)
+
     Bucket& get_or_create_bucket(uint32_t ip, uint64_t now_us) {
         auto it = _buckets.find(ip);
         if (it != _buckets.end()) {
-            return it->second;
+            return *it->second;
         }
 
         // 如果超过最大跟踪数，从 LRU 头部驱逐 1/4
@@ -218,8 +222,8 @@ private:
             evict_lru();
         }
 
-        // 创建新桶
-        auto [new_it, inserted] = _buckets.emplace(ip, Bucket{
+        // 创建新桶 (heap-allocated, 地址稳定)
+        auto bucket = std::make_unique<Bucket>(Bucket{
             .tokens = _config.burst_size,
             .last_update_us = now_us,
             .ewma_pps = 0.0,
@@ -227,8 +231,10 @@ private:
             .lru_prev = nullptr,
             .lru_next = nullptr
         });
-        lru_push_back(&new_it->second);
-        return new_it->second;
+        Bucket* raw = bucket.get();
+        _buckets.emplace(ip, std::move(bucket));
+        lru_push_back(raw);
+        return *raw;
     }
 
     void evict_lru() {
@@ -240,12 +246,12 @@ private:
             Bucket* victim = _lru_head;
             uint32_t victim_ip = victim->ip;
             lru_remove(victim);
-            _buckets.erase(victim_ip);
+            _buckets.erase(victim_ip);  // unique_ptr 自动释放
         }
     }
 
     Config _config;
-    std::unordered_map<uint32_t, Bucket> _buckets;
+    std::unordered_map<uint32_t, std::unique_ptr<Bucket>> _buckets;
     Bucket* _lru_head;  // 最久未访问
     Bucket* _lru_tail;  // 最近访问
 };

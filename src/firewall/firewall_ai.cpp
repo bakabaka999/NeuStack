@@ -128,6 +128,13 @@ float FirewallAI::run_inference() {
     // 获取当前指标快照
     auto snapshot = _metrics.snapshot();
 
+    // 无流量时跳过推理（全零输入的重构误差无意义）
+    if (snapshot.pps < 1.0) {
+        _cached_anomaly_score.store(0.0f, std::memory_order_relaxed);
+        _cached_is_anomaly.store(false, std::memory_order_relaxed);
+        return 0.0f;
+    }
+
     // 更新推理时间戳
     _last_inference_time = std::chrono::steady_clock::now();
 
@@ -167,15 +174,47 @@ float FirewallAI::run_inference() {
         }
 
         // 记录日志
-        LOG_WARN(FW, "[AI ANOMALY] score=%.4f threshold=%.4f syn_rate=%.1f rst_rate=%.1f pps=%.1f",
-                 score, _config.anomaly_threshold,
-                 snapshot.syn_rate, snapshot.rst_rate, snapshot.pps);
+        LOG_WARN(FW, "[AI ANOMALY] score=%.4f syn_rate=%.1f rst_rate=%.1f pps=%.1f",
+                 score, snapshot.syn_rate, snapshot.rst_rate, snapshot.pps);
 
         // 更新指标
         if (_config.shadow_mode) {
             _metrics.record_alert();
         } else {
             _stats.drops_by_ai++;
+        }
+    }
+
+    // Shadow Mode 自动升级/降级（带冷静期防震荡）
+    if (_config.auto_escalate) {
+        const uint64_t current_ms = now_ms();
+        const bool in_cooldown = (_last_escalation_time_ms > 0) &&
+            (current_ms - _last_escalation_time_ms < _config.escalate_cooldown_ms);
+
+        if (is_anomaly) {
+            _consecutive_anomaly++;
+            _consecutive_normal = 0;
+            if (_config.shadow_mode && !in_cooldown &&
+                _consecutive_anomaly >= _config.escalate_consecutive) {
+                _config.shadow_mode = false;
+                _consecutive_anomaly = 0;
+                _last_escalation_time_ms = current_ms;
+                _stats.escalations++;
+                LOG_WARN(FW, "[AI ESCALATE] Shadow Mode OFF after %u consecutive anomalies (cooldown %lums)",
+                         _config.escalate_consecutive, _config.escalate_cooldown_ms);
+            }
+        } else {
+            _consecutive_normal++;
+            _consecutive_anomaly = 0;
+            if (!_config.shadow_mode && !in_cooldown &&
+                _consecutive_normal >= _config.deescalate_normal_count) {
+                _config.shadow_mode = true;
+                _consecutive_normal = 0;
+                _last_escalation_time_ms = current_ms;
+                _stats.deescalations++;
+                LOG_INFO(FW, "[AI DE-ESCALATE] Shadow Mode ON after %u consecutive normal (cooldown %lums)",
+                         _config.deescalate_normal_count, _config.escalate_cooldown_ms);
+            }
         }
     }
 

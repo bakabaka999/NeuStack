@@ -50,10 +50,13 @@ struct StackConfig {
     std::string security_model_path;      // 防火墙安全异常检测模型
 
     // 防火墙 AI 配置
-    float security_threshold = 0.5f;      // 安全模型异常阈值
+    float security_threshold = 0.0f;      // 安全模型异常阈值（0 = 从模型 metadata 读取）
 
     // 数据采集输出目录（空 = 不采集）
     std::string data_output_dir;
+
+    // 安全数据标注 (仅采集时生效)
+    int security_label = 0;           // 0=正常, 1=异常
 };
 
 class NeuStack {

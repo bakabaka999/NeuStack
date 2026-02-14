@@ -1,18 +1,14 @@
 {
     "cmake.buildDirectory": "${workspaceFolder}/build",
     "cmake.configureOnOpen": true,
-
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "C_Cpp.default.cppStandard": "c++20",
-
     "files.associations": {
         "*.hpp": "cpp",
         "*.cpp": "cpp",
         "*.h": "cpp"
     },
-
     "editor.formatOnSave": true,
-
     "files.exclude": {
         "**/.DS_Store": true,
         "**/__pycache__": true,
@@ -25,9 +21,11 @@
         "MEMORY.md": true,
         "memory": true
     },
-
     "search.exclude": {
         "build/**": true,
         "third_party/**": true
-    }
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python-envs.pythonProjects": []
 }

@@ -23,10 +23,16 @@ namespace neustack {
 struct FirewallAIConfig {
     // ─── AI 模型配置 ───
     std::string model_path;           // ONNX 模型路径（空 = 禁用 AI）
-    float anomaly_threshold = 0.5f;   // 异常阈值（重构误差）
+    float anomaly_threshold = 0.0f;   // 异常阈值（0 = 从模型 metadata 读取）
     
     // ─── Shadow Mode 配置 ───
     bool shadow_mode = true;          // Shadow Mode: AI 判定异常时只告警不阻断
+    
+    // ─── Shadow Mode 自动升级 ───
+    bool auto_escalate = false;              // 是否启用自动升级
+    uint32_t escalate_consecutive = 5;       // 连续 N 次异常后自动关闭 Shadow Mode
+    uint32_t deescalate_normal_count = 30;   // 连续 N 次正常后自动恢复 Shadow Mode
+    uint64_t escalate_cooldown_ms = 60000;   // 升级/降级后的冷静期（毫秒），防止震荡
     
     // ─── 推理间隔配置 ───
     // AI 推理相对较慢，不应每个包都调用
@@ -54,6 +60,9 @@ struct FirewallAIStats {
     
     // 最近一次异常的时间戳（毫秒）
     uint64_t last_anomaly_time_ms = 0;
+    
+    uint64_t escalations = 0;         // 自动升级次数
+    uint64_t deescalations = 0;       // 自动恢复次数
 };
 
 /**
@@ -202,6 +211,11 @@ private:
 
     // 获取当前时间（毫秒）
     static uint64_t now_ms();
+
+    // ─── Shadow Mode 自动升级状态 ───
+    uint32_t _consecutive_anomaly = 0;
+    uint32_t _consecutive_normal = 0;
+    uint64_t _last_escalation_time_ms = 0;   // 上次升级/降级的时间戳
 };
 
 } // namespace neustack
