@@ -185,6 +185,31 @@ float FirewallAI::run_inference() {
         }
     }
 
+    // Shadow Mode 自动升级/降级
+    if (_config.auto_escalate) {
+        if (is_anomaly) {
+            _consecutive_anomaly++;
+            _consecutive_normal = 0;
+            if (_config.shadow_mode && _consecutive_anomaly >= _config.escalate_consecutive) {
+                _config.shadow_mode = false;
+                _consecutive_anomaly = 0;
+                _stats.escalations++;
+                LOG_WARN(FW, "[AI ESCALATE] Shadow Mode OFF after %u consecutive anomalies",
+                         _config.escalate_consecutive);
+            }
+        } else {
+            _consecutive_normal++;
+            _consecutive_anomaly = 0;
+            if (!_config.shadow_mode && _consecutive_normal >= _config.deescalate_normal_count) {
+                _config.shadow_mode = true;
+                _consecutive_normal = 0;
+                _stats.deescalations++;
+                LOG_INFO(FW, "[AI DE-ESCALATE] Shadow Mode ON after %u consecutive normal",
+                         _config.deescalate_normal_count);
+            }
+        }
+    }
+
     return score;
 #else
     return 0.0f;

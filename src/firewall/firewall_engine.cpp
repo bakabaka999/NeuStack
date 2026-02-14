@@ -30,8 +30,14 @@ FirewallEngine::FirewallEngine(const FirewallConfig& config)
 // ============================================================================
 
 bool FirewallEngine::inspect(const uint8_t* data, size_t len) {
-    // 防火墙关闭时直接放行
+    // 即使防火墙关闭，也尝试采集 AI 指标（用于监控）
     if (!_config.enabled) {
+        if (_ai) {
+            auto evt_ptr = _event_pool.acquire_ptr();
+            if (evt_ptr && parse_packet(data, len, evt_ptr.get())) {
+                _ai->record_packet(*evt_ptr);
+            }
+        }
         return true;
     }
 
@@ -77,6 +83,13 @@ bool FirewallEngine::inspect(const uint8_t* data, size_t len) {
 
 bool FirewallEngine::inspect(const IPv4Packet& pkt) {
     if (!_config.enabled) {
+        if (_ai) {
+            auto evt_ptr = _event_pool.acquire_ptr();
+            if (evt_ptr) {
+                fill_event_from_ipv4(pkt, evt_ptr.get());
+                _ai->record_packet(*evt_ptr);
+            }
+        }
         return true;
     }
 

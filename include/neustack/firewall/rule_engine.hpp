@@ -28,6 +28,11 @@ namespace neustack {
  * 3. 速率限制 - 超限拒绝
  * 4. 通用规则 - 按 priority 排序匹配
  * 5. 默认放行
+ *
+ * 线程安全:
+ * - evaluate() 可从数据面线程调用
+ * - add_rule/remove_rule/add_blacklist_ip 等修改操作不是线程安全的
+ * - 如果需要运行时修改规则，调用方必须自行同步（如 mutex 或停止数据面）
  */
 class RuleEngine {
 public:

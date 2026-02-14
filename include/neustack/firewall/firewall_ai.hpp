@@ -28,6 +28,11 @@ struct FirewallAIConfig {
     // ─── Shadow Mode 配置 ───
     bool shadow_mode = true;          // Shadow Mode: AI 判定异常时只告警不阻断
     
+    // ─── Shadow Mode 自动升级 ───
+    bool auto_escalate = false;              // 是否启用自动升级
+    uint32_t escalate_consecutive = 5;       // 连续 N 次异常后自动关闭 Shadow Mode
+    uint32_t deescalate_normal_count = 30;   // 连续 N 次正常后自动恢复 Shadow Mode
+    
     // ─── 推理间隔配置 ───
     // AI 推理相对较慢，不应每个包都调用
     // 改为定期推理，缓存结果
@@ -54,6 +59,9 @@ struct FirewallAIStats {
     
     // 最近一次异常的时间戳（毫秒）
     uint64_t last_anomaly_time_ms = 0;
+    
+    uint64_t escalations = 0;         // 自动升级次数
+    uint64_t deescalations = 0;       // 自动恢复次数
 };
 
 /**
@@ -202,6 +210,10 @@ private:
 
     // 获取当前时间（毫秒）
     static uint64_t now_ms();
+
+    // ─── Shadow Mode 自动升级状态 ───
+    uint32_t _consecutive_anomaly = 0;
+    uint32_t _consecutive_normal = 0;
 };
 
 } // namespace neustack

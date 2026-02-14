@@ -59,7 +59,6 @@ static void print_usage(const char *prog) {
     std::printf("  --dns <addr>        DNS server (default: 8.8.8.8)\n");
     std::printf("  --models <dir>      AI model directory (enables AI)\n");
     std::printf("  --collect           Enable data collection (CSV)\n");
-    std::printf("  --security-label N  Security label: 0=normal, 1=anomaly\n");
     std::printf("  --output-dir <dir>  Output directory (default: .)\n");
     std::printf("  --security-collect  Enable security data collection\n");
     std::printf("  --security-label N  Security label: 0=normal, 1=anomaly\n");
@@ -89,8 +88,6 @@ static bool parse_args(int argc, char *argv[], Config &cfg) {
             cfg.timestamp = false;
         } else if (std::strcmp(argv[i], "--collect") == 0) {
             cfg.collect_data = true;
-        } else if (std::strcmp(argv[i], "--security-label") == 0 && i + 1 < argc) {
-            cfg.security_label = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
             cfg.output_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--security-collect") == 0) {
@@ -258,6 +255,38 @@ static void setup_http_server(NeuStack &stack) {
         return HttpResponse().content_type("application/json").set_body(json);
     });
 #endif
+
+    // Firewall status API
+    server.get("/api/firewall/status", [&stack](const HttpRequest &) {
+        std::string json = "{";
+        auto *fw = stack.firewall();
+        if (fw) {
+            const auto &s = fw->stats();
+            json += "\"enabled\":true,";
+            json += "\"shadow_mode\":" + std::string(fw->shadow_mode() ? "true" : "false") + ",";
+            json += "\"packets_inspected\":" + std::to_string(s.packets_inspected) + ",";
+            json += "\"packets_passed\":" + std::to_string(s.packets_passed) + ",";
+            json += "\"packets_dropped\":" + std::to_string(s.packets_dropped) + ",";
+            json += "\"packets_alerted\":" + std::to_string(s.packets_alerted) + ",";
+            json += "\"rules\":" + std::to_string(fw->rule_engine().rule_count()) + ",";
+            json += "\"ai_enabled\":" + std::string(fw->ai_enabled() ? "true" : "false");
+            if (fw->ai()) {
+                const auto &ai_s = fw->ai()->stats();
+                json += ",\"ai\":{";
+                json += "\"inferences\":" + std::to_string(ai_s.inferences_total) + ",";
+                json += "\"anomalies\":" + std::to_string(ai_s.anomalies_detected) + ",";
+                json += "\"last_score\":" + std::to_string(ai_s.last_anomaly_score) + ",";
+                json += "\"max_score\":" + std::to_string(ai_s.max_anomaly_score) + ",";
+                json += "\"escalations\":" + std::to_string(ai_s.escalations) + ",";
+                json += "\"deescalations\":" + std::to_string(ai_s.deescalations);
+                json += "}";
+            }
+        } else {
+            json += "\"enabled\":false";
+        }
+        json += "}";
+        return HttpResponse().content_type("application/json").set_body(json);
+    });
 
     server.listen(80);
     LOG_INFO(HTTP, "server on port 80");
