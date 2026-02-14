@@ -23,7 +23,7 @@ namespace neustack {
 struct FirewallAIConfig {
     // ─── AI 模型配置 ───
     std::string model_path;           // ONNX 模型路径（空 = 禁用 AI）
-    float anomaly_threshold = 0.5f;   // 异常阈值（重构误差）
+    float anomaly_threshold = 0.0f;   // 异常阈值（0 = 从模型 metadata 读取）
     
     // ─── Shadow Mode 配置 ───
     bool shadow_mode = true;          // Shadow Mode: AI 判定异常时只告警不阻断

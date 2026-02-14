@@ -48,6 +48,11 @@ struct NeuStack::Impl {
             FirewallConfig fw_cfg;
             fw_cfg.enabled = true;
             fw_cfg.shadow_mode = config.firewall_shadow_mode;
+            // 如果有安全模型，通过 FirewallConfig 加载
+            if (!config.security_model_path.empty()) {
+                fw_cfg.ai_enabled = true;
+                fw_cfg.ai_model_path = config.security_model_path;
+            }
             firewall = std::make_unique<FirewallEngine>(fw_cfg);
 
             // 加载安全异常检测模型

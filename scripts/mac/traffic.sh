@@ -76,7 +76,7 @@ case "$MODE" in
     heavy)
         DOWNLOAD_SIZES=("1m" "5m" "10m")
         DOWNLOAD_ROUNDS=30
-        PARALLEL_CONNS=(4 8 12)
+        PARALLEL_CONNS=(4 6 8)
         BURST_ROUNDS=10
         ;;
     *)
@@ -153,7 +153,7 @@ for conns in "${PARALLEL_CONNS[@]}"; do
         for j in $(seq 1 $conns); do
             # 随机选择大小，制造不同完成时间
             SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-            curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
+            curl -s -m 30 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
         done
         wait
         echo -n "."
@@ -173,7 +173,7 @@ for i in $(seq 1 $BURST_ROUNDS); do
 
     for j in $(seq 1 $BURST_SIZE); do
         SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-        curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
+        curl -s -m 30 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
     done
     wait
 
@@ -207,7 +207,7 @@ while [ $SECONDS -lt $END_TIME ]; do
     CONNS=$((RANDOM % 6 + 1))
     for j in $(seq 1 $CONNS); do
         SIZE=${DOWNLOAD_SIZES[$((RANDOM % ${#DOWNLOAD_SIZES[@]}))]}
-        curl -s -m 120 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
+        curl -s -m 30 -o /dev/null "http://$SERVER_IP:$HTTP_PORT/download/$SIZE" &
     done
     wait
     echo -n "."

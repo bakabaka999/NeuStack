@@ -84,7 +84,7 @@ run_collection() {
 
     NEUSTACK_PID=""
 
-    local phase_cleanup() {
+    phase_cleanup() {
         echo ""
         echo "Stopping $phase_name collection..."
         [ -n "$NEUSTACK_PID" ] && kill $NEUSTACK_PID 2>/dev/null || true

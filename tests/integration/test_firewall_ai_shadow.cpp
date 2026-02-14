@@ -194,8 +194,9 @@ static void test_ai_with_model() {
         fw.inspect(pkt.data(), pkt.size());
     }
     
-    // 触发 AI 推理
-    fw.on_timer();
+    // 手动 tick + 推理（on_timer 依赖时间流逝，单元测试中直接调用）
+    fw.ai()->tick();
+    fw.ai()->run_inference();
     
     // 检查 AI 统计
     auto& ai_stats = fw.ai()->stats();
@@ -242,9 +243,11 @@ static void test_metrics_window() {
     // tick: 移动窗口
     metrics.tick();
     
-    // 第二秒：当前窗口清空，但历史窗口有数据
+    // 第二秒：当前计数器已重置
+    // 注意：snapshot() 的累积字段来自最近完成的窗口 slot（有 100 个 SYN）
+    // 而非 _current（已重置为 0）
     auto snap2 = metrics.snapshot();
-    check(snap2.syn_packets == 0, "Current window reset after tick");
+    check(snap2.syn_packets == 100, "Last completed window has 100 SYN packets");
     check(snap2.syn_rate > 0, "SYN rate reflects historical window");
     
     std::printf("  INFO: syn_rate = %.2f/s\n", snap2.syn_rate);

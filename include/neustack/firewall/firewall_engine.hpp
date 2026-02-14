@@ -28,7 +28,7 @@ struct FirewallConfig {
     // AI 配置
     bool ai_enabled = false;          // 是否启用 AI 检测
     std::string ai_model_path;        // AI 模型路径
-    float ai_threshold = 0.5f;        // AI 异常阈值
+    float ai_threshold = 0.0f;        // AI 异常阈值（0 = 从模型 metadata 读取）
 };
 
 /**
@@ -194,7 +194,8 @@ private:
 
     // ─── AI 模块 ───
     std::unique_ptr<FirewallAI> _ai;
-    uint32_t _tick_count = 0;  // 用于控制 AI 推理频率
+    std::chrono::steady_clock::time_point _last_tick_time;
+    std::chrono::steady_clock::time_point _last_inference_time;
 
     // ─── 内存池 ───
     FixedPool<PacketEvent, EVENT_POOL_SIZE> _event_pool;

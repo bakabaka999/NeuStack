@@ -192,6 +192,11 @@ void IntelligencePlane::process_anomaly(
     // 使用 AnomalyFeatures 构造正确归一化的 8-dim 输入
     auto features = AnomalyFeatures::from_delta(delta, active_connections);
 
+    // 无流量时跳过推理（全零输入的重构误差无意义）
+    if (features.packets_rx_norm < 0.001f && features.packets_tx_norm < 0.001f) {
+        return;
+    }
+
     IAnomalyModel::Input input{
         .packets_rx_norm = features.packets_rx_norm,
         .packets_tx_norm = features.packets_tx_norm,

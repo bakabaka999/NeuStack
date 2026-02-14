@@ -128,6 +128,13 @@ float FirewallAI::run_inference() {
     // 获取当前指标快照
     auto snapshot = _metrics.snapshot();
 
+    // 无流量时跳过推理（全零输入的重构误差无意义）
+    if (snapshot.pps < 1.0) {
+        _cached_anomaly_score.store(0.0f, std::memory_order_relaxed);
+        _cached_is_anomaly.store(false, std::memory_order_relaxed);
+        return 0.0f;
+    }
+
     // 更新推理时间戳
     _last_inference_time = std::chrono::steady_clock::now();
 
@@ -167,9 +174,8 @@ float FirewallAI::run_inference() {
         }
 
         // 记录日志
-        LOG_WARN(FW, "[AI ANOMALY] score=%.4f threshold=%.4f syn_rate=%.1f rst_rate=%.1f pps=%.1f",
-                 score, _config.anomaly_threshold,
-                 snapshot.syn_rate, snapshot.rst_rate, snapshot.pps);
+        LOG_WARN(FW, "[AI ANOMALY] score=%.4f syn_rate=%.1f rst_rate=%.1f pps=%.1f",
+                 score, snapshot.syn_rate, snapshot.rst_rate, snapshot.pps);
 
         // 更新指标
         if (_config.shadow_mode) {
