@@ -148,6 +148,7 @@ int main() {
 | [Firewall Guide](docs/api/firewall.md) | 防火墙配置指南 |
 | [AI Training](docs/api/ai-training.md) | AI 模型训练流程 |
 | [Project Whitepaper](docs/project_whitepaper.md) | 项目白皮书 (设计细节) |
+| [Changelog](CHANGELOG.md) | 版本更新记录 |
 
 ## AI 智能面 & NetworkAgent
 
@@ -157,7 +158,8 @@ NeuStack 的 AI 子系统通过 **NetworkAgent** 协调三个模型：
 |------|------|------|
 | **Orca** | SAC (强化学习) | 拥塞窗口智能调节 |
 | **带宽预测** | LSTM | 前瞻性带宽估计 |
-| **异常检测** | Autoencoder | 检测攻击/异常流量 |
+| **安全异常检测** | Deep Autoencoder | 防火墙安全威胁检测 |
+| **流量异常检测** | Autoencoder | 检测网络异常流量模式 |
 
 ### NetworkAgent 状态机
 
@@ -171,6 +173,33 @@ UNDER_ATTACK ──(恢复)──→ RECOVERY ──→ NORMAL
 
 详见 [AI Training Guide](docs/api/ai-training.md)。
 
+## 安全模型训练
+
+```bash
+# 1. 采集数据 (Docker 环境)
+cd docker && docker compose up -d
+./scripts/linux/collect_security.sh
+
+# 2. 清洗 & 生成数据集
+python training/security/data_clean.py --input data/ --output data/cleaned/
+python scripts/csv_to_dataset.py --security data/cleaned/ --output data/security_dataset.npz
+
+# 3. 训练
+python training/security/train.py --config training/security/config.yaml
+
+# 4. 导出 ONNX
+python training/security/export_onnx.py --checkpoint training/security/checkpoints/best.pt --output models/security_anomaly.onnx
+```
+
+## Docker 环境
+
+```bash
+cd docker
+docker compose up -d    # 启动 TUN 网络环境
+docker compose exec neustack bash
+./build/examples/neustack_demo --models models/
+```
+
 ## 防火墙
 
 NeuStack 内置零分配防火墙引擎，支持：
@@ -178,7 +207,24 @@ NeuStack 内置零分配防火墙引擎，支持：
 - **黑白名单**：O(1) 哈希查找
 - **端口封禁**：支持协议过滤 (TCP/UDP)
 - **令牌桶限速**：per-IP PPS 限制
-- **Shadow Mode**：AI 检测只告警不阻断
+- **Shadow Mode**：AI 检测只告警不阻断，支持自动升级
+- **安全 AI**：Deep Autoencoder 8 维特征异常检测，ONNX 推理
+
+### Shadow Mode 自动升级
+
+```
+正常流量 ──→ Shadow Mode (只告警)
+                │
+          连续 N 次异常
+                ↓
+         Blocking Mode (阻断)
+                │
+          连续 M 次正常
+                ↓
+         Shadow Mode (恢复)
+```
+
+配置 `auto_escalate = true` 启用，`escalate_cooldown_ms` 控制冷静期防止震荡。
 
 ```cpp
 auto& rules = stack->firewall().rule_engine();
@@ -233,8 +279,15 @@ NeuStack/
 ├── src/                       # 源代码实现
 ├── tests/                     # 测试代码
 ├── training/                  # Python 训练代码
+│   ├── orca/                  #   SAC 强化学习
+│   ├── bandwidth/             #   LSTM 带宽预测
+│   ├── anomaly/               #   流量异常检测
+│   └── security/              #   安全异常检测 (Deep AE)
 ├── models/                    # ONNX 模型
 ├── scripts/                   # Shell 脚本
+│   ├── linux/                 #   Linux 采集/流量脚本
+│   └── mac/                   #   macOS 采集/流量脚本
+├── docker/                    # Docker TUN 环境
 ├── examples/                  # 示例程序
 ├── docs/                      # 文档
 │   ├── api/                   #   API 参考
@@ -249,7 +302,7 @@ NeuStack/
 | `NEUSTACK_BUILD_TESTS` | ON | 编译测试 |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | 编译示例 |
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
-| `NEUSTACK_ENABLE_AI` | OFF | AI 拥塞控制 |
+| `NEUSTACK_ENABLE_AI` | OFF | AI 拥塞控制 + 安全异常检测 |
 
 ## 许可证
 
