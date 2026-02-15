@@ -170,7 +170,7 @@ static void setup_http_server(NeuStack &stack) {
     server.get("/api/status", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("application/json")
-            .set_body(R"({"status":"running","version":"1.1.0"})");
+            .set_body(R"({"status":"running","version":"1.2.0"})");
     });
 
     // Info API
@@ -403,7 +403,7 @@ int main(int argc, char *argv[]) {
     logger.set_color(cfg.color);
     logger.set_timestamp(cfg.timestamp);
 
-    LOG_INFO(APP, "NeuStack v1.1.0");
+    LOG_INFO(APP, "NeuStack v1.2.0");
 
     // 信号
     std::signal(SIGINT, signal_handler);
