@@ -92,29 +92,45 @@ NeuStack 是一个**完全从零实现**的用户态 TCP/IP 协议栈，具备 A
 - CMake >= 3.20
 - C++20 编译器 (Clang >= 14 / GCC >= 11 / MSVC 2019+)
 - 可选：ONNX Runtime (AI 推理)、Catch2 v3 (测试)
+- Windows：[Wintun](https://www.wintun.net/)（setup 会自动下载）
 
-### 构建
+### 一键配置
+
+setup 脚本自动检测平台、安装依赖、下载 ONNX Runtime 并启用 AI 编译。
 
 ```bash
-# 克隆
+# macOS / Linux
+./setup
+
+# Windows (以管理员身份运行 PowerShell)
+.\setup.bat
+# 或直接:
+.\scripts\windows\setup.ps1
+```
+
+不需要 AI：`./setup --no-ai`（Windows: `.\setup.bat -NoAI`）
+
+### 手动构建
+
+```bash
 git clone https://github.com/bakabaka999/NeuStack.git
 cd NeuStack
 
-# 构建
 cmake -B build -G Ninja
 cmake --build build
 
 # 测试
 cd build && ctest --output-on-failure
 
-# 运行 (需要 root)
-sudo ./build/examples/neustack_demo
+# 运行 (需要 root / 管理员权限)
+sudo ./build/examples/neustack_demo          # macOS / Linux
+.\build\examples\neustack_demo.exe           # Windows (管理员 PowerShell)
 ```
 
-### 启用 AI
+### 启用 AI (手动)
 
 ```bash
-./scripts/download_onnxruntime.sh
+./scripts/download/download_onnxruntime.sh
 cmake -B build -DNEUSTACK_ENABLE_AI=ON
 cmake --build build
 ```
@@ -189,7 +205,7 @@ cd docker && docker compose up -d
 
 # 2. 清洗 & 生成数据集
 python training/security/data_clean.py --input data/ --output data/cleaned/
-python scripts/csv_to_dataset.py --security data/cleaned/ --output data/security_dataset.npz
+python scripts/python/csv_to_dataset.py --security data/cleaned/ --output data/security_dataset.npz
 
 # 3. 训练
 python training/security/train.py --config training/security/config.yaml
@@ -296,8 +312,11 @@ NeuStack/
 │   └── security/              #   安全异常检测 (Deep AE)
 ├── models/                    # ONNX 模型
 ├── scripts/                   # Shell 脚本
+│   ├── download/              #   下载脚本 (ONNX Runtime, Wintun)
+│   ├── python/                #   Python 工具 (数据集转换, 测试模型生成)
 │   ├── linux/                 #   Linux 采集/流量脚本
-│   └── mac/                   #   macOS 采集/流量脚本
+│   ├── mac/                   #   macOS 采集/流量脚本
+│   └── windows/               #   Windows 配置 (PowerShell)
 ├── docker/                    # Docker TUN 环境
 ├── examples/                  # 示例程序
 ├── docs/                      # 文档

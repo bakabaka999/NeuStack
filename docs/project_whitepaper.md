@@ -485,7 +485,7 @@ sudo ./scripts/mac/collect.sh          # macOS
 sudo ./scripts/linux/collect.sh        # Linux
 
 # 3. 数据预处理
-python scripts/csv_to_dataset.py collected_data/ training/real_data/
+python scripts/python/csv_to_dataset.py collected_data/ training/real_data/
 
 # 4. 训练模型
 cd training/orca && python train.py
@@ -631,9 +631,12 @@ NeuStack/
 │   ├── nat/                        #   NAT 配置 (setup/teardown)
 │   ├── mac/                        #   macOS 数据采集/流量生成
 │   ├── linux/                      #   Linux 数据采集
-│   ├── csv_to_dataset.py           #   CSV → PyTorch 数据集转换
-│   ├── create_test_models.py       #   生成测试用 ONNX 模型
-│   └── download_onnxruntime.sh     #   下载 ONNX Runtime 预编译库
+│   ├── download/                   #   下载脚本
+│   │   ├── download_onnxruntime.sh #     下载 ONNX Runtime
+│   │   └── download_wintun.sh      #     下载 Wintun DLL (Windows)
+│   ├── python/                     #   Python 工具脚本
+│   │   ├── csv_to_dataset.py       #     CSV → PyTorch 数据集转换
+│   │   └── create_test_models.py   #     生成测试用 ONNX 模型
 ├── examples/                       # 示例程序
 │   ├── minimal.cpp                 #   最小 HTTP 服务器 (26 行)
 │   └── neustack_demo.cpp           #   完整交互式 Demo (CLI 参数, AI, CSV 采集)
@@ -690,7 +693,7 @@ sudo ./scripts/nat/setup_nat.sh --dev utun4
 启用 AI 拥塞控制：
 
 ```bash
-./scripts/download_onnxruntime.sh
+./scripts/download/download_onnxruntime.sh
 cmake -B build -G Ninja -DNEUSTACK_ENABLE_AI=ON
 cmake --build build
 ```
@@ -850,7 +853,7 @@ sudo modprobe tun
 
 ```bash
 # 下载 ONNX Runtime
-./scripts/download_onnxruntime.sh
+./scripts/download/download_onnxruntime.sh
 
 # 带 AI 构建
 cmake -B build -G Ninja -DNEUSTACK_ENABLE_AI=ON

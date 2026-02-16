@@ -417,7 +417,7 @@ RECOVERY            clamp(alpha, -0.1, 0.5)  — cautious recovery
 cmake -B build -DNEUSTACK_ENABLE_AI=ON
 
 # 下载 ONNX Runtime（如果没装）
-./scripts/download_onnxruntime.sh
+./scripts/download/download_onnxruntime.sh
 ```
 
 When enabled, the compiler defines the `NEUSTACK_AI_ENABLED` macro, making related headers and features available.
