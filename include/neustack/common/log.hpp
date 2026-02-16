@@ -118,7 +118,11 @@ public:
     // ─── 核心日志函数 (仅在 should_log 返回 true 时调用) ───
 
     void log_impl(LogModule module, LogLevel level, const char* fmt, ...)
+#if defined(__MINGW32__) || defined(__MINGW64__)
+        __attribute__((format(gnu_printf, 4, 5)))
+#else
         __attribute__((format(printf, 4, 5)))
+#endif
     {
         std::lock_guard<std::mutex> lock(_mutex);
 
