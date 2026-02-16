@@ -1,6 +1,13 @@
 #ifndef NEUSTACK_COMMON_LOG_HPP
 #define NEUSTACK_COMMON_LOG_HPP
 
+// MinGW 默认 printf 不支持 %zu/%zd，启用 ANSI C99 兼容实现
+#if defined(__MINGW32__) || defined(__MINGW64__)
+    #ifndef __USE_MINGW_ANSI_STDIO
+    #define __USE_MINGW_ANSI_STDIO 1
+    #endif
+#endif
+
 #include <cstdio>
 #include <cstdarg>
 #include <cstdint>

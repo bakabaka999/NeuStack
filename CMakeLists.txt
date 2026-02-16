@@ -52,6 +52,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_compile_options(/W4 /utf-8)
 endif()
 
+# MinGW: 使用符合标准的 printf，支持 %zu 等格式符
+# MINGW 变量有时不可靠 (Ninja generator)，用编译器宏双保险
+if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+    add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
+endif()
+
 # ============================================================================
 # Include Directories
 # ============================================================================
