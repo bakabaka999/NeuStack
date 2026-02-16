@@ -1,58 +1,77 @@
 # NeuStack API Reference
 
-本目录包含 NeuStack 的 API 参考文档。
+This directory contains the API reference documentation for NeuStack.
 
-## 目录
+## Contents
 
-| 文档 | 说明 |
-|------|------|
-| [Firewall](firewall.md) | 防火墙引擎 API |
-| [AI Training](ai-training.md) | AI 模型训练指南 |
-| [NeuStack Core](core.md) | 核心 API (协议栈/HTTP/DNS) |
+| Document | Description |
+|----------|-------------|
+| [Firewall](firewall.md) | Firewall engine API (rule engine, AI anomaly detection, Shadow Mode) |
+| [AI Training](ai-training.md) | AI model training guide |
+| [AI Inference](ai-inference.md) | AI inference engine & NetworkAgent decision layer |
+| [NeuStack Core](core.md) | Core API (protocol stack / HTTP / DNS) |
 
-## 快速链接
+## Quick Links
 
-### 防火墙
+### Firewall
 
 ```cpp
 #include "neustack/firewall.hpp"
 
-// 主要类
-FirewallEngine      // 防火墙主引擎
-RuleEngine          // 规则管理
-RateLimiter         // 令牌桶限速
-Rule                // 单条规则
-PacketEvent         // 解析后的数据包
-FirewallDecision    // 防火墙决策
+// Main classes
+FirewallEngine      // Firewall main engine
+RuleEngine          // Rule management
+RateLimiter         // Token bucket rate limiter
+Rule                // Single rule
+PacketEvent         // Parsed packet
+FirewallDecision    // Firewall decision
+FirewallAI          // AI anomaly detection layer
 ```
 
-### 协议栈
+### Protocol Stack
 
 ```cpp
 #include "neustack/neustack.hpp"
 
-// 主要类
-NeuStack            // 协议栈主类
-HttpServer          // HTTP 服务器
-HttpClient          // HTTP 客户端
-DNSClient           // DNS 客户端
-TCPLayer            // TCP 层
-IPv4Layer           // IP 层
+// Main classes
+NeuStack            // Protocol stack main class (facade)
+HttpServer          // HTTP server
+HttpClient          // HTTP client
+DNSClient           // DNS client
+TCPLayer            // TCP layer
+IPv4Layer           // IP layer
 ```
 
-### AI 智能面
+### NeuStack Facade API (Firewall)
+
+```cpp
+auto stack = NeuStack::create(config);
+
+// Firewall operations
+stack->firewall_rules();          // Access rule engine
+stack->firewall_inspect(data, len); // Inspect packet
+stack->firewall_stats();          // Firewall stats
+stack->firewall_ai_stats();       // AI stats
+stack->firewall_set_shadow_mode(true); // Toggle Shadow Mode
+stack->firewall_set_threshold(0.01f);  // Adjust AI threshold
+```
+
+### AI Intelligence Plane
 
 ```cpp
 #include "neustack/ai/network_agent.hpp"
+#include "neustack/ai/security_model.hpp"
 
-// 主要类
-NetworkAgent        // AI 决策层
-OrcaModel           // SAC 拥塞控制
-BandwidthPredictor  // LSTM 带宽预测
-AnomalyDetector     // Autoencoder 异常检测
+// Main classes
+NetworkAgent           // AI decision layer
+OrcaModel              // SAC congestion control
+BandwidthPredictor     // LSTM bandwidth prediction
+AnomalyDetector        // Autoencoder anomaly detection (TCP side)
+SecurityAnomalyModel   // Deep Autoencoder security anomaly detection (firewall side)
 ```
 
-## 版本
+## Versions
 
-- **v1.1**: 基础协议栈 + AI 拥塞控制
-- **v1.2**: 添加防火墙引擎 (当前)
+- **v1.0**: Base protocol stack + AI congestion control
+- **v1.1**: Performance optimization + test hardening
+- **v1.2**: AI firewall + security training pipeline + E2E test suite (current)

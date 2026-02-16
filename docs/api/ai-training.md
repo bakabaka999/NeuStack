@@ -1,30 +1,30 @@
 # AI Training Guide
 
-本文档介绍如何训练 NeuStack 的 AI 模型。
+This document describes how to train NeuStack's AI models.
 
-## 目录
+## Table of Contents
 
-- [概述](#概述)
-- [环境配置](#环境配置)
-- [数据采集](#数据采集)
-- [模型训练](#模型训练)
-- [ONNX 导出](#onnx-导出)
-- [部署验证](#部署验证)
+- [Overview](#overview)
+- [Environment Setup](#environment-setup)
+- [Data Collection](#data-collection)
+- [Model Training](#model-training)
+- [ONNX Export](#onnx-export)
+- [Deployment Verification](#deployment-verification)
 
 ---
 
-## 概述
+## Overview
 
-NeuStack 包含四个 AI 模型：
+NeuStack includes four AI models:
 
-| 模型 | 算法 | 输入维度 | 输出 | 用途 |
-|------|------|----------|------|------|
-| **Orca** | SAC | 7 维状态 | α ∈ [-1, 1] | 拥塞窗口调节 |
-| **带宽预测** | LSTM | 30×3 时序 | bytes/s | 前瞻性估计 |
-| **异常检测** | Autoencoder | 5 维特征 | 重构误差 | TCP 异常检测 |
-| **安全异常检测** | Autoencoder | 8 维特征 | 重构误差 + 置信度 | 防火墙威胁检测 |
+| Model | Algorithm | Input Dimensions | Output | Purpose |
+|-------|-----------|-----------------|--------|---------|
+| **Orca** | SAC | 7-dim state | α ∈ [-1, 1] | Congestion window adjustment |
+| **Bandwidth Prediction** | LSTM | 30×3 time series | bytes/s | Forward-looking estimation |
+| **Anomaly Detection** | Autoencoder | 5-dim features | Reconstruction error | TCP anomaly detection |
+| **Security Anomaly Detection** | Autoencoder | 8-dim features | Reconstruction error + confidence | Firewall threat detection |
 
-### Orca 输入特征 (7 维)
+### Orca Input Features (7-dim)
 
 ```
 [cwnd_normalized,        # 当前拥塞窗口 / 最大窗口
@@ -36,7 +36,7 @@ NeuStack 包含四个 AI 模型：
  trend]                  # 吞吐量变化趋势
 ```
 
-### 带宽预测输入 (30×3 时序)
+### Bandwidth Prediction Input (30×3 time series)
 
 ```
 [throughput,    # 瞬时吞吐量
@@ -44,7 +44,7 @@ NeuStack 包含四个 AI 模型：
  loss_rate]     # 丢包率
 ```
 
-### 异常检测输入 (5 维)
+### Anomaly Detection Input (5-dim)
 
 ```
 [syn_rate,       # SYN 包速率
@@ -54,9 +54,9 @@ NeuStack 包含四个 AI 模型：
  avg_pkt_size]   # 平均包大小
 ```
 
-### 安全异常检测输入 (8 维)
+### Security Anomaly Detection Input (8-dim)
 
-防火墙专用，由 `SecurityExporter` 采集原始数据，训练时归一化。
+Dedicated to the firewall. Raw data is collected by `SecurityExporter` and normalized during training.
 
 ```
 [pps_norm,             # 包速率
@@ -71,16 +71,16 @@ NeuStack 包含四个 AI 模型：
 
 ---
 
-## 环境配置
+## Environment Setup
 
-### 使用 Conda (推荐)
+### Using Conda (Recommended)
 
 ```bash
 conda env create -f training/environment.yml
 conda activate neustack
 ```
 
-### 使用 pip
+### Using pip
 
 ```bash
 python3 -m venv venv
@@ -88,7 +88,7 @@ source venv/bin/activate
 pip install -r training/requirements.txt
 ```
 
-### 依赖清单
+### Dependency List
 
 ```
 torch>=2.0.0
@@ -102,7 +102,7 @@ pyyaml>=6.0
 
 ---
 
-## 数据采集
+## Data Collection
 
 ### macOS
 
@@ -120,7 +120,7 @@ sudo ./build/examples/neustack_demo --export metrics.csv
 sudo ./scripts/linux/collect.sh --duration 3600 --output collected_data/
 ```
 
-### 数据格式
+### Data Format
 
 ```csv
 timestamp_ms,syn_received,rst_received,conn_established,conn_reset,packets_rx,bytes_rx
@@ -128,9 +128,9 @@ timestamp_ms,syn_received,rst_received,conn_established,conn_reset,packets_rx,by
 1234567990,0,0,0,0,3,256
 ```
 
-### 安全数据采集 (SecurityExporter)
+### Security Data Collection (SecurityExporter)
 
-防火墙安全模型使用独立的 `SecurityExporter` 采集数据：
+The firewall security model uses a dedicated `SecurityExporter` for data collection:
 
 ```cpp
 #include "neustack/metrics/security_exporter.hpp"
@@ -142,14 +142,14 @@ exporter.flush(0);  // label=0 正常流量
 exporter.flush(1);  // label=1 异常流量（手动标注/攻击注入时）
 ```
 
-输出 CSV 格式（15 列）：
+Output CSV format (15 columns):
 
 ```csv
 timestamp_ms,packets_total,bytes_total,syn_packets,syn_ack_packets,rst_packets,pps,bps,syn_rate,rst_rate,syn_ratio,new_conn_rate,avg_pkt_size,rst_ratio,label
 1707700000,5000,750000,100,95,10,500,75000,10,1,1.05,10,150,0.002,0
 ```
 
-### 数据预处理
+### Data Preprocessing
 
 ```bash
 python scripts/csv_to_dataset.py collected_data/ training/real_data/
@@ -157,9 +157,9 @@ python scripts/csv_to_dataset.py collected_data/ training/real_data/
 
 ---
 
-## 模型训练
+## Model Training
 
-### Orca (SAC 拥塞控制)
+### Orca (SAC Congestion Control)
 
 ```bash
 cd training/orca
@@ -194,7 +194,7 @@ environment:
   loss_rate: 0.01
 ```
 
-### 带宽预测 (LSTM)
+### Bandwidth Prediction (LSTM)
 
 ```bash
 cd training/bandwidth
@@ -217,7 +217,7 @@ training:
   learning_rate: 0.001
 ```
 
-### 异常检测 (Autoencoder)
+### Anomaly Detection (Autoencoder)
 
 ```bash
 cd training/anomaly
@@ -239,7 +239,7 @@ training:
   learning_rate: 0.001
 ```
 
-### 安全异常检测 (Autoencoder)
+### Security Anomaly Detection (Autoencoder)
 
 ```bash
 cd training/security
@@ -262,13 +262,13 @@ training:
   threshold_percentile: 99  # 正常数据的 99 分位数作为阈值
 ```
 
-> **注意**：训练数据由 `SecurityExporter` 采集。CSV 中原始值需在训练端归一化到 [0, 1]。
+> **Note**: Training data is collected by `SecurityExporter`. Raw values in the CSV need to be normalized to [0, 1] on the training side.
 
 ---
 
-## ONNX 导出
+## ONNX Export
 
-训练完成后，导出为 ONNX 格式：
+After training is complete, export to ONNX format:
 
 ```bash
 # Orca
@@ -288,13 +288,13 @@ cd training/security
 python export_onnx.py --checkpoint checkpoints/best_model.pth
 ```
 
-导出文件：
+Exported files:
 - `models/orca_actor.onnx`
 - `models/bandwidth_predictor.onnx`
 - `models/anomaly_detector.onnx`
 - `models/security_anomaly.onnx`
 
-### 验证 ONNX
+### Verify ONNX
 
 ```bash
 python -c "import onnx; onnx.checker.check_model(onnx.load('models/orca_actor.onnx'))"
@@ -302,22 +302,22 @@ python -c "import onnx; onnx.checker.check_model(onnx.load('models/orca_actor.on
 
 ---
 
-## 部署验证
+## Deployment Verification
 
-### 编译启用 AI
+### Build with AI Enabled
 
 ```bash
 cmake -B build -DNEUSTACK_ENABLE_AI=ON
 cmake --build build
 ```
 
-### 运行测试
+### Run Tests
 
 ```bash
 ./build/examples/ai_test
 ```
 
-预期输出：
+Expected output:
 ```
 === AI Actions ===
   [CWND] alpha=0.187024
@@ -325,7 +325,7 @@ cmake --build build
   [ANOMALY] score=0.0123
 ```
 
-### NetworkAgent 状态监控
+### NetworkAgent State Monitoring
 
 ```cpp
 auto& agent = stack->network_agent();
@@ -341,29 +341,29 @@ printf("State transitions: %lu\n", stats.state_transitions);
 
 ---
 
-## 故障排查
+## Troubleshooting
 
-### 训练不收敛
+### Training Does Not Converge
 
-1. 检查学习率是否过大
-2. 增加训练数据量
-3. 调整网络架构
+1. Check if learning rate is too high
+2. Increase training data volume
+3. Adjust network architecture
 
-### ONNX 导出失败
+### ONNX Export Fails
 
-1. 确保 PyTorch 版本 >= 2.0
-2. 检查模型是否有动态形状
-3. 使用 `opset_version=17`
+1. Ensure PyTorch version >= 2.0
+2. Check if the model has dynamic shapes
+3. Use `opset_version=17`
 
-### C++ 推理结果异常
+### Abnormal C++ Inference Results
 
-1. 检查输入数据归一化
-2. 确认 ONNX Runtime 版本兼容
-3. 验证模型输入输出维度
+1. Check input data normalization
+2. Confirm ONNX Runtime version compatibility
+3. Verify model input/output dimensions
 
 ---
 
-## 参考资料
+## References
 
 - [SAC Paper](https://arxiv.org/abs/1801.01290)
 - [Orca: A Congestion Control System](https://dl.acm.org/doi/10.1145/3544216.3544242)

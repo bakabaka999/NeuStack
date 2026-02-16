@@ -81,6 +81,10 @@ add_executable(test_firewall_ai_shadow integration/test_firewall_ai_shadow.cpp)
 target_link_libraries(test_firewall_ai_shadow PRIVATE neustack_lib)
 add_test(NAME "Integration: Firewall AI Shadow Mode" COMMAND test_firewall_ai_shadow)
 
+add_executable(test_firewall_e2e integration/test_firewall_e2e.cpp)
+target_link_libraries(test_firewall_e2e PRIVATE neustack_lib)
+add_test(NAME "Integration: Firewall E2E full feature" COMMAND test_firewall_e2e)
+
 # --- 性能测试---
 add_executable(bench_checksum benchmark/bench_checksum.cpp)
 target_link_libraries(bench_checksum PRIVATE neustack_lib)

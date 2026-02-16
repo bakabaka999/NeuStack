@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   build-and-test:
@@ -13,6 +13,7 @@ jobs:
     strategy:
       matrix:
         build_type: [Release, Debug]
+        ai_enabled: [OFF, ON]
 
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +30,19 @@ jobs:
           cmake --build /tmp/catch2/build
           sudo cmake --install /tmp/catch2/build
 
+      - name: Install ONNX Runtime
+        if: matrix.ai_enabled == 'ON'
+        run: |
+          ONNX_VERSION=1.17.0
+          curl -sL https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz | tar xz -C /tmp
+          echo "ONNXRUNTIME_ROOT=/tmp/onnxruntime-linux-x64-${ONNX_VERSION}" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=/tmp/onnxruntime-linux-x64-${ONNX_VERSION}" >> $GITHUB_ENV
+
       - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }}
 
       - name: Build
         run: cmake --build build

@@ -151,7 +151,7 @@ static void setup_http_server(NeuStack &stack) {
                 "<ul>\n"
                 "  <li><a href=\"/api/status\">/api/status</a></li>\n"
                 "  <li><a href=\"/api/info\">/api/info</a></li>\n"
-                "  <li><a href=\"/api/firewall/status\">/api/firewall/status</a></li>\n"
+                "  <li><a href=\"/api/firewall/status\">/api/firewall/status</a> - Firewall + rule engine stats</li>\n"
                 "  <li>POST /api/echo</li>\n"
                 "</ul>\n"
                 "<h2>Download</h2>\n"
@@ -170,35 +170,59 @@ static void setup_http_server(NeuStack &stack) {
     server.get("/api/status", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("application/json")
-            .set_body(R"({"status":"running","version":"1.1.0"})");
+            .set_body(R"({"status":"running","version":"1.2.0"})");
     });
 
     // Info API
-    server.get("/api/info", [local_ip](const HttpRequest &) {
+    server.get("/api/info", [local_ip, &stack](const HttpRequest &) {
         std::string json = R"({"local_ip":")" + ip_to_string(local_ip) + R"(",)";
-        json += R"("services":["icmp","udp-echo:7","tcp-echo:7","http:80","dns-client"]})";
+        json += R"("services":["icmp","udp-echo:7","tcp-echo:7","http:80","dns-client")";
+        if (stack.firewall_enabled()) json += R"(,"firewall")";
+        if (stack.firewall_ai_enabled()) json += R"(,"firewall-ai")";
+        if (stack.ai_enabled()) json += R"(,"ai-intelligence")";
+        json += "]}";
         return HttpResponse().content_type("application/json").set_body(json);
     });
 
     // Firewall Status API
     server.get("/api/firewall/status", [&stack](const HttpRequest &) {
-        auto fw = stack.firewall_stats();
         std::string json = "{";
-        json += "\"enabled\":" + std::string(stack.firewall_enabled() ? "true" : "false") + ",";
-        json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
-        json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false") + ",";
-        json += "\"packets_inspected\":" + std::to_string(fw.packets_inspected) + ",";
-        json += "\"packets_passed\":" + std::to_string(fw.packets_passed) + ",";
-        json += "\"packets_dropped\":" + std::to_string(fw.packets_dropped) + ",";
-        json += "\"packets_alerted\":" + std::to_string(fw.packets_alerted);
-        if (stack.firewall_ai_enabled()) {
-            auto ai = stack.firewall_ai_stats();
-            json += ",\"ai\":{";
-            json += "\"inferences\":" + std::to_string(ai.inferences_total) + ",";
-            json += "\"anomalies\":" + std::to_string(ai.anomalies_detected) + ",";
-            json += "\"last_score\":" + std::to_string(ai.last_anomaly_score) + ",";
-            json += "\"max_score\":" + std::to_string(ai.max_anomaly_score);
-            json += "}";
+        if (stack.firewall_enabled()) {
+            const auto s = stack.firewall_stats();
+            auto *rules = stack.firewall_rules();
+            json += "\"enabled\":true,";
+            json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
+            json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false") + ",";
+            json += "\"packets_inspected\":" + std::to_string(s.packets_inspected) + ",";
+            json += "\"packets_passed\":" + std::to_string(s.packets_passed) + ",";
+            json += "\"packets_dropped\":" + std::to_string(s.packets_dropped) + ",";
+            json += "\"packets_alerted\":" + std::to_string(s.packets_alerted);
+            if (rules) {
+                json += ",\"whitelist_size\":" + std::to_string(rules->whitelist_size());
+                json += ",\"blacklist_size\":" + std::to_string(rules->blacklist_size());
+                json += ",\"rule_count\":" + std::to_string(rules->rule_count());
+                auto &st = rules->stats();
+                json += ",\"rule_engine\":{";
+                json += "\"whitelist_hits\":" + std::to_string(st.whitelist_hits) + ",";
+                json += "\"blacklist_hits\":" + std::to_string(st.blacklist_hits) + ",";
+                json += "\"rate_limit_drops\":" + std::to_string(st.rate_limit_drops) + ",";
+                json += "\"rule_matches\":" + std::to_string(st.rule_matches) + ",";
+                json += "\"default_passes\":" + std::to_string(st.default_passes);
+                json += "}";
+            }
+            if (stack.firewall_ai_enabled()) {
+                const auto ai = stack.firewall_ai_stats();
+                json += ",\"ai\":{";
+                json += "\"inferences\":" + std::to_string(ai.inferences_total) + ",";
+                json += "\"anomalies\":" + std::to_string(ai.anomalies_detected) + ",";
+                json += "\"last_score\":" + std::to_string(ai.last_anomaly_score) + ",";
+                json += "\"max_score\":" + std::to_string(ai.max_anomaly_score) + ",";
+                json += "\"escalations\":" + std::to_string(ai.escalations) + ",";
+                json += "\"deescalations\":" + std::to_string(ai.deescalations);
+                json += "}";
+            }
+        } else {
+            json += "\"enabled\":false";
         }
         json += "}";
         return HttpResponse().content_type("application/json").set_body(json);
@@ -256,36 +280,6 @@ static void setup_http_server(NeuStack &stack) {
     });
 #endif
 
-    // Firewall status API
-    server.get("/api/firewall/status", [&stack](const HttpRequest &) {
-        std::string json = "{";
-        if (stack.firewall_enabled()) {
-            const auto s = stack.firewall_stats();
-            json += "\"enabled\":true,";
-            json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
-            json += "\"packets_inspected\":" + std::to_string(s.packets_inspected) + ",";
-            json += "\"packets_passed\":" + std::to_string(s.packets_passed) + ",";
-            json += "\"packets_dropped\":" + std::to_string(s.packets_dropped) + ",";
-            json += "\"packets_alerted\":" + std::to_string(s.packets_alerted) + ",";
-            json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false");
-            if (stack.firewall_ai_enabled()) {
-                const auto ai_s = stack.firewall_ai_stats();
-                json += ",\"ai\":{";
-                json += "\"inferences\":" + std::to_string(ai_s.inferences_total) + ",";
-                json += "\"anomalies\":" + std::to_string(ai_s.anomalies_detected) + ",";
-                json += "\"last_score\":" + std::to_string(ai_s.last_anomaly_score) + ",";
-                json += "\"max_score\":" + std::to_string(ai_s.max_anomaly_score) + ",";
-                json += "\"escalations\":" + std::to_string(ai_s.escalations) + ",";
-                json += "\"deescalations\":" + std::to_string(ai_s.deescalations);
-                json += "}";
-            }
-        } else {
-            json += "\"enabled\":false";
-        }
-        json += "}";
-        return HttpResponse().content_type("application/json").set_body(json);
-    });
-
     server.listen(80);
     LOG_INFO(HTTP, "server on port 80");
 }
@@ -296,12 +290,24 @@ static void setup_http_server(NeuStack &stack) {
 
 static void print_help() {
     std::printf("\nCommands:\n");
-    std::printf("  d <hostname>  - DNS lookup\n");
-    std::printf("  g <ip> <path> - HTTP GET\n");
-    std::printf("  m             - Show metrics\n");
-    std::printf("  f             - Show firewall stats\n");
-    std::printf("  h             - Help\n");
-    std::printf("  q             - Quit\n\n");
+    std::printf("  d <hostname>       - DNS lookup\n");
+    std::printf("  g <ip> <path>      - HTTP GET\n");
+    std::printf("  m                  - Show metrics\n");
+    std::printf("  f                  - Show firewall stats\n");
+    std::printf("  fw shadow [on|off] - Toggle shadow mode\n");
+    std::printf("  fw threshold <val> - Set AI anomaly threshold\n");
+    std::printf("  fw bl add <ip>     - Add IP to blacklist\n");
+    std::printf("  fw bl del <ip>     - Remove IP from blacklist\n");
+    std::printf("  fw bl clear        - Clear blacklist\n");
+    std::printf("  fw wl add <ip>     - Add IP to whitelist\n");
+    std::printf("  fw wl del <ip>     - Remove IP from whitelist\n");
+    std::printf("  fw wl clear        - Clear whitelist\n");
+    std::printf("  fw rule add <id> <port> [tcp|udp] - Block port\n");
+    std::printf("  fw rule del <id>   - Remove rule by ID\n");
+    std::printf("  fw rule list       - List rules\n");
+    std::printf("  fw rate <pps>      - Set rate limit (0=disable)\n");
+    std::printf("  h                  - Help\n");
+    std::printf("  q                  - Quit\n\n");
 }
 
 static void handle_command(const std::string &line, NeuStack &stack) {
@@ -348,6 +354,108 @@ static void handle_command(const std::string &line, NeuStack &stack) {
             if (ip) LOG_INFO(DNS, "%s -> %s", hostname.c_str(), ip_to_string(*ip).c_str());
             else    LOG_WARN(DNS, "%s: no A record", hostname.c_str());
         });
+    } else if (line.rfind("fw ", 0) == 0) {
+        // ─── Firewall commands ───
+        auto *rules = stack.firewall_rules();
+        if (!rules) {
+            std::printf("Firewall not available\n");
+            return;
+        }
+        std::string sub = line.substr(3);
+
+        if (sub.rfind("shadow", 0) == 0) {
+            if (sub.find("on") != std::string::npos) {
+                stack.firewall_set_shadow_mode(true);
+                std::printf("Shadow mode: ON (alert only)\n");
+            } else if (sub.find("off") != std::string::npos) {
+                stack.firewall_set_shadow_mode(false);
+                std::printf("Shadow mode: OFF (enforce)\n");
+            } else {
+                std::printf("Usage: fw shadow [on|off]\n");
+            }
+        } else if (sub.rfind("threshold ", 0) == 0) {
+            float t = std::strtof(sub.c_str() + 10, nullptr);
+            stack.firewall_set_threshold(t);
+            std::printf("AI anomaly threshold set to %.4f\n", t);
+        } else if (sub.rfind("bl add ", 0) == 0) {
+            uint32_t ip = ip_from_string(sub.substr(7).c_str());
+            if (ip == 0) { std::printf("Invalid IP\n"); return; }
+            rules->add_blacklist_ip(ip);
+            std::printf("Blacklisted %s (total: %zu)\n", sub.substr(7).c_str(), rules->blacklist_size());
+        } else if (sub.rfind("bl del ", 0) == 0) {
+            uint32_t ip = ip_from_string(sub.substr(7).c_str());
+            if (ip == 0) { std::printf("Invalid IP\n"); return; }
+            rules->remove_blacklist_ip(ip);
+            std::printf("Removed %s from blacklist (total: %zu)\n", sub.substr(7).c_str(), rules->blacklist_size());
+        } else if (sub == "bl clear") {
+            rules->clear_blacklist();
+            std::printf("Blacklist cleared\n");
+        } else if (sub.rfind("wl add ", 0) == 0) {
+            uint32_t ip = ip_from_string(sub.substr(7).c_str());
+            if (ip == 0) { std::printf("Invalid IP\n"); return; }
+            rules->add_whitelist_ip(ip);
+            std::printf("Whitelisted %s (total: %zu)\n", sub.substr(7).c_str(), rules->whitelist_size());
+        } else if (sub.rfind("wl del ", 0) == 0) {
+            uint32_t ip = ip_from_string(sub.substr(7).c_str());
+            if (ip == 0) { std::printf("Invalid IP\n"); return; }
+            rules->remove_whitelist_ip(ip);
+            std::printf("Removed %s from whitelist (total: %zu)\n", sub.substr(7).c_str(), rules->whitelist_size());
+        } else if (sub == "wl clear") {
+            rules->clear_whitelist();
+            std::printf("Whitelist cleared\n");
+        } else if (sub.rfind("rule add ", 0) == 0) {
+            // fw rule add <id> <port> [tcp|udp]
+            unsigned id = 0, port = 0;
+            char proto_str[8] = {};
+            int n = std::sscanf(sub.c_str() + 9, "%u %u %7s", &id, &port, proto_str);
+            if (n < 2) { std::printf("Usage: fw rule add <id> <port> [tcp|udp]\n"); return; }
+            uint8_t proto = 0;
+            if (std::strcmp(proto_str, "tcp") == 0) proto = 6;
+            else if (std::strcmp(proto_str, "udp") == 0) proto = 17;
+            if (rules->add_rule(Rule::block_port(static_cast<uint16_t>(id),
+                                                  static_cast<uint16_t>(port), proto))) {
+                std::printf("Rule #%u: block port %u %s (rules: %zu)\n",
+                            id, port, proto == 6 ? "TCP" : proto == 17 ? "UDP" : "any", rules->rule_count());
+            } else {
+                std::printf("Failed to add rule (max %zu)\n", RuleEngine::MAX_RULES);
+            }
+        } else if (sub.rfind("rule del ", 0) == 0) {
+            unsigned id = 0;
+            std::sscanf(sub.c_str() + 9, "%u", &id);
+            if (rules->remove_rule(static_cast<uint16_t>(id)))
+                std::printf("Removed rule #%u\n", id);
+            else
+                std::printf("Rule #%u not found\n", id);
+        } else if (sub == "rule list") {
+            std::printf("\n=== Firewall Rules ===\n");
+            std::printf("  Whitelist IPs: %zu\n", rules->whitelist_size());
+            std::printf("  Blacklist IPs: %zu\n", rules->blacklist_size());
+            std::printf("  Custom rules:  %zu\n", rules->rule_count());
+            auto &rl = rules->rate_limiter();
+            std::printf("  Rate limiter:  %s", rl.enabled() ? "ON" : "OFF");
+            std::printf("\n");
+            auto &st = rules->stats();
+            std::printf("  --- Hits ---\n");
+            std::printf("  whitelist:     %" PRIu64 "\n", st.whitelist_hits);
+            std::printf("  blacklist:     %" PRIu64 "\n", st.blacklist_hits);
+            std::printf("  rate_drops:    %" PRIu64 "\n", st.rate_limit_drops);
+            std::printf("  rule_matches:  %" PRIu64 "\n", st.rule_matches);
+            std::printf("  default_pass:  %" PRIu64 "\n", st.default_passes);
+            std::printf("======================\n\n");
+        } else if (sub.rfind("rate ", 0) == 0) {
+            unsigned pps = 0;
+            std::sscanf(sub.c_str() + 5, "%u", &pps);
+            if (pps == 0) {
+                rules->rate_limiter().set_enabled(false);
+                std::printf("Rate limiter disabled\n");
+            } else {
+                rules->rate_limiter().set_rate(pps, pps * 2);
+                rules->rate_limiter().set_enabled(true);
+                std::printf("Rate limiter: %u pps (burst %u)\n", pps, pps * 2);
+            }
+        } else {
+            std::printf("Unknown firewall command. Type 'h' for help.\n");
+        }
     } else if (line[0] == 'm') {
         auto snap = global_metrics().snapshot();
         std::printf("\n=== Global Metrics ===\n");
@@ -376,6 +484,8 @@ static void handle_command(const std::string &line, NeuStack &stack) {
             std::printf("  anomalies:   %" PRIu64 "\n", ai.anomalies_detected);
             std::printf("  last_score:  %.4f\n", ai.last_anomaly_score);
             std::printf("  max_score:   %.4f\n", ai.max_anomaly_score);
+            std::printf("  escalations: %" PRIu64 "\n", ai.escalations);
+            std::printf("  deescalations: %" PRIu64 "\n", ai.deescalations);
         }
         std::printf("======================\n\n");
     } else if (line[0] == 'h') {
@@ -403,7 +513,7 @@ int main(int argc, char *argv[]) {
     logger.set_color(cfg.color);
     logger.set_timestamp(cfg.timestamp);
 
-    LOG_INFO(APP, "NeuStack v1.1.0");
+    LOG_INFO(APP, "NeuStack v1.2.0");
 
     // 信号
     std::signal(SIGINT, signal_handler);
@@ -467,6 +577,9 @@ int main(int argc, char *argv[]) {
         if (n > 0) {
             // 防火墙检查
             bool pass = stack->firewall_inspect(buf, static_cast<size_t>(n));
+            if (!pass) {
+                LOG_WARN(FW, "Packet dropped by firewall (%zd bytes)", n);
+            }
             if (pass) {
                 stack->ip().on_receive(buf, n);
             }

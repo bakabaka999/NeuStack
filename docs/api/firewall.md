@@ -1,60 +1,144 @@
 # Firewall API Reference
 
-NeuStack 防火墙引擎提供零分配的数据包过滤能力。
+The NeuStack firewall engine provides zero-allocation packet filtering with integrated AI anomaly detection.
 
-## 目录
+## Table of Contents
 
-- [概述](#概述)
+- [Overview](#overview)
+- [NeuStack Facade API](#neustack-facade-api)
 - [FirewallEngine](#firewallengine)
 - [RuleEngine](#ruleengine)
 - [RateLimiter](#ratelimiter)
 - [Rule](#rule)
-- [使用示例](#使用示例)
+- [FirewallAI](#firewallai)
+- [Shadow Mode Auto-Escalation/De-escalation](#shadow-mode-auto-escalationde-escalation)
+- [SecurityAnomalyModel](#securityanomalymodel)
+- [SecurityExporter](#securityexporter)
+- [Demo Interactive Commands](#demo-interactive-commands)
+- [Usage Examples](#usage-examples)
+- [Notes](#notes)
 
 ---
 
-## 概述
+## Overview
 
-### 架构
+### Architecture
 
 ```
-┌─ 网络层入口 ────────────────────────────────────┐
+┌─ Network Layer Entry ───────────────────────────────┐
 │                                                │
 │   recv() → FirewallEngine::inspect()           │
 │               │                                │
-│               ├─ 白名单检查 (O(1))              │
-│               ├─ 黑名单检查 (O(1))              │
-│               ├─ 限速检查 (Token Bucket)        │
-│               ├─ 自定义规则匹配                 │
-│               └─ AI Shadow Mode (Phase 3)      │
+│               ├─ Whitelist check (O(1))         │
+│               ├─ Blacklist check (O(1))         │
+│               ├─ Rate limit check (Token Bucket) │
+│               ├─ Custom rule matching           │
+│               └─ FirewallAI anomaly detection   │
 │               │                                │
 │               ▼                                │
-│   IPv4Layer::on_receive() (放行时)             │
+│   IPv4Layer::on_receive() (when passed)        │
 │                                                │
 └────────────────────────────────────────────────┘
 ```
 
-### 匹配优先级
+### Matching Priority
 
-1. **白名单** - 最高优先级，直接放行
-2. **黑名单** - 直接丢弃
-3. **限速** - 超限丢弃
-4. **自定义规则** - 按 priority 值排序
-5. **默认放行**
+1. **Whitelist** - Highest priority, pass immediately
+2. **Blacklist** - Drop immediately
+3. **Rate limiting** - Drop when limit exceeded
+4. **Custom rules** - Sorted by priority value
+5. **AI anomaly detection** - Shadow Mode alert or Enforce Mode block
+6. **Default pass**
+
+---
+
+## NeuStack Facade API
+
+Access firewall functionality through the `NeuStack` facade class without directly operating internal engines.
+
+### Header File
+
+```cpp
+#include "neustack/neustack.hpp"
+```
+
+### StackConfig Firewall-Related Configuration
+
+```cpp
+struct StackConfig {
+    // 防火墙开关
+    bool enable_firewall = true;          // 启用防火墙
+    bool firewall_shadow_mode = true;     // Shadow Mode: AI 只告警不阻断
+
+    // AI 安全模型
+    std::string security_model_path;      // ONNX 模型路径（空 = 不启用 AI）
+    float security_threshold = 0.0f;      // 异常阈值（0 = 从模型 metadata 读取）
+};
+```
+
+> **Threshold Note**: `security_threshold = 0.0f` means the optimal threshold saved during training is automatically read from the ONNX model's metadata. Manually specifying a positive number overrides the model's built-in threshold.
+
+### Facade Methods
+
+```cpp
+auto stack = NeuStack::create(config);
+
+// ─── Status Queries ───
+bool firewall_enabled() const;         // 防火墙是否启用
+bool firewall_ai_enabled() const;      // AI 模型是否已加载
+bool firewall_shadow_mode() const;     // 当前是否 Shadow Mode
+
+// ─── Configuration ───
+void firewall_set_shadow_mode(bool shadow);  // 动态切换 Shadow/Enforce Mode
+void firewall_set_threshold(float threshold); // 动态调整 AI 阈值
+
+// ─── Data Plane (for manual event loop) ───
+bool firewall_inspect(const uint8_t* data, size_t len);  // 检查包，true=放行
+void firewall_on_timer();                                 // 每秒调用一次
+
+// ─── Advanced Access ───
+RuleEngine* firewall_rules();          // 直接操作规则引擎（添加黑白名单、规则等）
+FirewallStats firewall_stats() const;  // 防火墙统计
+FirewallAIStats firewall_ai_stats() const;  // AI 统计
+```
+
+### Typical Usage
+
+```cpp
+StackConfig config;
+config.enable_firewall = true;
+config.firewall_shadow_mode = true;
+config.security_model_path = "models/security_anomaly.onnx";
+config.security_threshold = 0.0f;  // 使用模型内置阈值
+
+auto stack = NeuStack::create(config);
+
+// 添加规则
+auto* rules = stack->firewall_rules();
+rules->add_blacklist_ip(ip_from_string("1.2.3.4"));
+rules->rate_limiter().set_enabled(true);
+rules->rate_limiter().set_rate(1000, 100);
+
+// 查看统计
+auto stats = stack->firewall_stats();
+auto ai_stats = stack->firewall_ai_stats();
+printf("Inspected: %lu, Anomalies: %lu\n",
+       stats.packets_inspected, ai_stats.anomalies_detected);
+```
 
 ---
 
 ## FirewallEngine
 
-防火墙主引擎，负责数据包检查。
+The main firewall engine responsible for packet inspection.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/firewall/firewall_engine.hpp"
 ```
 
-### 构造
+### Construction
 
 ```cpp
 // 使用默认配置
@@ -68,7 +152,7 @@ config.log_dropped = true;
 FirewallEngine fw(config);
 ```
 
-### 主要方法
+### Main Methods
 
 ```cpp
 // 检查数据包
@@ -107,15 +191,15 @@ struct FirewallStats {
 
 ## RuleEngine
 
-规则管理引擎，管理黑白名单、自定义规则和限速。
+The rule management engine that manages whitelists, blacklists, custom rules, and rate limiting.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/firewall/rule_engine.hpp"
 ```
 
-### 黑白名单
+### Whitelist/Blacklist
 
 ```cpp
 RuleEngine& rules = fw.rule_engine();
@@ -133,7 +217,7 @@ rules.clear_blacklist();
 size_t blacklist_size() const;
 ```
 
-### 自定义规则
+### Custom Rules
 
 ```cpp
 // 添加规则
@@ -152,13 +236,13 @@ void clear_rules();
 size_t rule_count() const;
 ```
 
-### 限速器访问
+### Rate Limiter Access
 
 ```cpp
 RateLimiter& rate_limiter();
 ```
 
-### 统计
+### Statistics
 
 ```cpp
 struct Stats {
@@ -177,15 +261,15 @@ void reset_stats();
 
 ## RateLimiter
 
-令牌桶限速器，per-IP PPS 限制。
+Token bucket rate limiter with per-IP PPS limits.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/firewall/rate_limiter.hpp"
 ```
 
-### 配置
+### Configuration
 
 ```cpp
 RateLimiter& limiter = rules.rate_limiter();
@@ -200,7 +284,7 @@ bool enabled() const;
 limiter.set_rate(1000, 100);  // 1000 PPS, 突发 100
 ```
 
-### 手动检查 (通常不需要)
+### Manual Check (usually not needed)
 
 ```cpp
 struct Result {
@@ -213,7 +297,7 @@ struct Result {
 Result check(uint32_t ip, uint64_t now_us);
 ```
 
-### 重置
+### Reset
 
 ```cpp
 void reset(uint32_t ip);  // 重置特定 IP
@@ -225,15 +309,15 @@ size_t tracked_count() const;
 
 ## Rule
 
-单条防火墙规则。
+A single firewall rule.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/firewall/rule.hpp"
 ```
 
-### 结构
+### Structure
 
 ```cpp
 struct Rule {
@@ -245,7 +329,7 @@ struct Rule {
     uint16_t src_port;
     uint16_t dst_port;
     uint8_t  protocol;      // 0=any, 6=TCP, 17=UDP
-    
+
     // 规则属性
     uint16_t id;
     uint16_t priority;      // 越小越优先
@@ -255,7 +339,7 @@ struct Rule {
 };
 ```
 
-### 工厂方法
+### Factory Methods
 
 ```cpp
 // IP 黑名单规则
@@ -268,7 +352,7 @@ static Rule whitelist_ip(uint16_t id, uint32_t ip, uint16_t priority = 50);
 static Rule block_port(uint16_t id, uint16_t port, uint8_t proto = 0, uint16_t priority = 100);
 ```
 
-### 匹配方法
+### Match Method
 
 ```cpp
 bool matches(uint32_t src_ip, uint32_t dst_ip,
@@ -278,94 +362,35 @@ bool matches(uint32_t src_ip, uint32_t dst_ip,
 
 ---
 
-## 使用示例
-
-### 基础配置
-
-```cpp
-#include "neustack/neustack.hpp"
-
-auto stack = NeuStack::create();
-auto& fw = stack->firewall();
-auto& rules = fw.rule_engine();
-
-// 白名单本地网络
-rules.add_whitelist_ip(ip_from_string("192.168.1.0") & 0xFFFFFF00);
-
-// 黑名单已知攻击 IP
-rules.add_blacklist_ip(ip_from_string("1.2.3.4"));
-
-// 封禁危险端口
-rules.add_rule(Rule::block_port(1, 22, 6));   // SSH
-rules.add_rule(Rule::block_port(2, 23, 6));   // Telnet
-rules.add_rule(Rule::block_port(3, 3389, 6)); // RDP
-```
-
-### DDoS 防护
-
-```cpp
-// 启用限速
-auto& limiter = rules.rate_limiter();
-limiter.set_enabled(true);
-limiter.set_rate(1000, 100);  // 1000 PPS per IP, 突发 100
-```
-
-### 监控统计
-
-```cpp
-// 定期打印统计
-void print_stats() {
-    auto& stats = fw.stats();
-    printf("Inspected: %lu, Passed: %lu, Dropped: %lu\n",
-           stats.packets_inspected,
-           stats.packets_passed,
-           stats.packets_dropped);
-    
-    auto& rule_stats = rules.stats();
-    printf("Whitelist hits: %lu, Blacklist hits: %lu, Rate limited: %lu\n",
-           rule_stats.whitelist_hits,
-           rule_stats.blacklist_hits,
-           rule_stats.rate_limit_drops);
-}
-```
-
-### 决策回调
-
-```cpp
-// 设置决策回调 (用于日志/监控)
-fw.set_decision_callback([](const PacketEvent& evt, const FirewallDecision& dec) {
-    if (dec.should_drop()) {
-        printf("[DROPPED] src=%08x dst=%08x reason=%d\n",
-               evt.src_ip, evt.dst_ip, static_cast<int>(dec.reason));
-    }
-});
-```
-
----
-
 ## FirewallAI
 
-防火墙 AI 层，集成 `SecurityAnomalyModel` 进行流量异常检测。
+The firewall AI layer, integrating `SecurityAnomalyModel` for traffic anomaly detection.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/firewall/firewall_ai.hpp"
 ```
 
-### 构造与配置
+### Configuration
 
 ```cpp
 FirewallAIConfig config;
 config.model_path = "models/security_anomaly.onnx";
-config.anomaly_threshold = 0.5f;
-config.shadow_mode = true;          // 只告警不阻断
-config.inference_interval_ms = 1000; // 每秒推理一次
+config.anomaly_threshold = 0.0f;        // 0 = 从模型 metadata 自动读取
+config.shadow_mode = true;              // 只告警不阻断
+config.inference_interval_ms = 1000;    // 每秒推理一次
+
+// 自动升降级（默认关闭）
+config.auto_escalate = false;
+config.escalate_consecutive = 5;        // 连续 5 次异常 → 关闭 Shadow Mode
+config.deescalate_normal_count = 30;    // 连续 30 次正常 → 恢复 Shadow Mode
+config.escalate_cooldown_ms = 60000;    // 升降级后 60 秒冷静期
 
 FirewallAI ai(config);
 ```
 
-### 使用模式
+### Usage Pattern
 
 ```cpp
 // 1. 数据面：每个包调用
@@ -379,9 +404,23 @@ float score = ai.run_inference();
 
 // 4. 数据面：获取缓存的 AI 决策
 FirewallDecision dec = ai.evaluate();
+// dec.action == PASS / ALERT (Shadow) / DROP (Enforce)
 ```
 
-### 告警回调
+### Configuration API
+
+```cpp
+void set_threshold(float threshold);
+float threshold() const;
+
+void set_shadow_mode(bool shadow);
+bool shadow_mode() const;
+
+void set_inference_interval_ms(uint32_t ms);
+uint32_t inference_interval_ms() const;
+```
+
+### Alert Callback
 
 ```cpp
 ai.set_alert_callback([](float score, const SecurityMetrics::Snapshot& snap) {
@@ -390,51 +429,100 @@ ai.set_alert_callback([](float score, const SecurityMetrics::Snapshot& snap) {
 });
 ```
 
-### 统计
+### FirewallAIStats
 
 ```cpp
-auto& stats = ai.stats();
-printf("Inferences: %lu, Anomalies: %lu, Alerts: %lu\n",
-       stats.inferences_total,
-       stats.anomalies_detected,
-       stats.alerts_triggered);
+struct FirewallAIStats {
+    uint64_t inferences_total;    // 总推理次数
+    uint64_t anomalies_detected;  // 检测到的异常次数
+    uint64_t alerts_triggered;    // 触发告警次数
+    uint64_t drops_by_ai;         // AI 导致的丢包（非 Shadow Mode）
+
+    float last_anomaly_score;     // 最近一次异常分数
+    float max_anomaly_score;      // 历史最高异常分数
+    uint64_t last_anomaly_time_ms; // 最近一次异常的时间戳（毫秒）
+
+    uint64_t escalations;         // 自动升级次数（Shadow → Enforce）
+    uint64_t deescalations;       // 自动恢复次数（Enforce → Shadow）
+};
+
+const Stats& stats = ai.stats();
 ```
+
+---
+
+## Shadow Mode Auto-Escalation/De-escalation
+
+FirewallAI supports automatic switching between Shadow Mode (alert only) and Enforce Mode (block), based on consecutive anomalous/normal inference results.
+
+### Workflow
+
+```
+Normal Traffic ──→ Shadow Mode (alert only)
+                │
+          N consecutive anomalies (default 5)
+                ↓
+         Enforce Mode (block anomalous traffic)
+                │
+          M consecutive normal (default 30)
+                ↓
+         Shadow Mode (restore alert mode)
+```
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `auto_escalate` | `false` | Whether to enable auto-escalation/de-escalation |
+| `escalate_consecutive` | `5` | Consecutive anomaly count threshold; Shadow Mode is disabled when reached |
+| `deescalate_normal_count` | `30` | Consecutive normal count threshold; Shadow Mode is restored when reached |
+| `escalate_cooldown_ms` | `60000` | Cooldown period after escalation/de-escalation (ms), prevents oscillation |
+
+### Cooldown Mechanism
+
+A cooldown timer starts after each escalation or de-escalation (default 60 seconds). No further mode changes occur during the cooldown period, preventing frequent switching during traffic fluctuations.
+
+### Configuration Notes
+
+`auto_escalate` is configured in `FirewallAIConfig` and is disabled by default. The current version's `StackConfig` high-level API does not expose this parameter yet; it needs to be enabled by directly constructing `FirewallAIConfig` or manually in the demo.
 
 ---
 
 ## SecurityAnomalyModel
 
-专用于防火墙的 Autoencoder 异常检测模型（第 4 个 AI 模型）。
+A Deep Autoencoder anomaly detection model dedicated to the firewall.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/ai/security_model.hpp"
 ```
 
-### 与其他模型的对比
+### Comparison with Other Models
 
-| 模型 | 接口 | 输入 | 输出 | 用途 |
-|------|------|------|------|------|
-| Orca | `ICongestionModel` | 7 维 TCP 特征 | α | 拥塞控制 |
-| 带宽预测 | `IBandwidthModel` | 时序历史 | bytes/s | 带宽预测 |
-| AnomalyDetector | `IAnomalyModel` | 8 维通用流量 | 误差+异常 | TCP 异常检测 |
-| **SecurityAnomalyModel** | **`ISecurityModel`** | **8 维安全特征** | **误差+异常+置信度** | **防火墙威胁检测** |
+| Model | Interface | Input | Output | Purpose |
+|-------|-----------|-------|--------|---------|
+| Orca | `ICongestionModel` | 7-dim TCP features | α | Congestion control |
+| Bandwidth Prediction | `IBandwidthModel` | Time series history | bytes/s | Bandwidth prediction |
+| AnomalyDetector | `IAnomalyModel` | 8-dim general traffic | Error + anomaly | TCP anomaly detection |
+| **SecurityAnomalyModel** | **`ISecurityModel`** | **8-dim security features** | **Error + anomaly + confidence** | **Firewall threat detection** |
 
-### ISecurityModel::Input (8 维)
+### ISecurityModel::Input (8-dim)
 
 ```cpp
 struct Input {
-    float pps_norm;             // 包速率
-    float bps_norm;             // 字节速率
-    float syn_rate_norm;        // SYN 速率
-    float rst_rate_norm;        // RST 速率
-    float syn_ratio_norm;       // SYN/SYN-ACK 比率
-    float new_conn_rate_norm;   // 新连接速率
-    float avg_pkt_size_norm;    // 平均包大小
-    float rst_ratio_norm;       // RST/总包 比率
+    float pps_norm;             // 包速率（归一化）
+    float bps_norm;             // 字节速率（归一化）
+    float syn_rate_norm;        // SYN 速率（归一化）
+    float rst_rate_norm;        // RST 速率（归一化）
+    float syn_ratio_norm;       // SYN/SYN-ACK 比率（归一化）
+    float new_conn_rate_norm;   // 新连接速率（归一化）
+    float avg_pkt_size_norm;    // 平均包大小（归一化）
+    float rst_ratio_norm;       // RST/总包 比率（归一化）
 };
 ```
+
+Normalization method: `value / max_value`, where `max_value` is defined in `SecurityFeatureExtractor` (e.g., `max_pps = 10000`). The Python training side and C++ inference side use the same normalization parameters.
 
 ### ISecurityModel::Output
 
@@ -446,122 +534,23 @@ struct Output {
 };
 ```
 
-### 置信度计算
+### Confidence Calculation
 
-置信度基于误差与阈值的距离，使用 sigmoid 映射：
+Confidence is based on the distance between the error and the threshold, using a sigmoid mapping:
 
 ```
 confidence = 1 / (1 + exp(-6 * (error/threshold - 1)))
 ```
 
-- `error << threshold` → confidence ≈ 0（确信正常）
+- `error << threshold` → confidence ≈ 0 (confident normal)
 - `error == threshold` → confidence ≈ 0.5
-- `error >> threshold` → confidence ≈ 1.0（确信异常）
+- `error >> threshold` → confidence ≈ 1.0 (confident anomaly)
 
----
-
-## SecurityExporter
-
-CSV 数据导出器，为安全模型训练采集数据。
-
-### 头文件
+### Usage Example
 
 ```cpp
-#include "neustack/metrics/security_exporter.hpp"
-```
+SecurityAnomalyModel model("models/security_anomaly.onnx");
 
-### 使用
-
-```cpp
-SecurityExporter exporter("security_data.csv", metrics);
-
-// 定时器中每秒调用
-exporter.flush(0);  // label=0 正常
-exporter.flush(1);  // label=1 异常 (手动标注)
-
-// 强制刷盘
-exporter.sync();
-```
-
-### CSV 列
-
-```
-timestamp_ms, packets_total, bytes_total,
-syn_packets, syn_ack_packets, rst_packets,
-pps, bps, syn_rate, rst_rate,
-syn_ratio, new_conn_rate, avg_pkt_size, rst_ratio,
-label
-```
-
-- 记录原始值 + 衍生速率，归一化由 Python 训练端负责
-- `label`: `0`=正常, `1`=异常
-
----
-
-## 注意事项
-
-1. **IP 字节序**：`add_blacklist_ip()` 等方法接受**网络字节序**的 IP 地址
-2. **线程安全**：FirewallEngine 不是线程安全的，应在单线程中使用
-3. **内存管理**：使用 FixedPool，热路径零分配
-4. **性能**：黑白名单 O(1)，自定义规则 O(n)
-
----
-
-## FirewallAI
-
-AI 驱动的异常检测层，以 Shadow Mode 或主动拦截模式运行。
-
-### 头文件
-
-```cpp
-#include "neustack/firewall/firewall_ai.hpp"
-```
-
-### 配置
-
-```cpp
-FirewallAIConfig config;
-config.model_path = "models/security_anomaly.onnx";
-config.anomaly_threshold = 0.5f;    // 重构误差阈值
-config.shadow_mode = true;          // 只告警不阻断
-config.inference_interval_ms = 1000; // 推理频率
-
-FirewallAI ai(config);
-```
-
-### 使用模式
-
-```cpp
-// 1. 数据面：每个包调用
-ai.record_packet(evt);
-
-// 2. 定时器：每秒调用
-ai.tick();
-
-// 3. 定时器：每 N 秒执行推理
-float score = ai.run_inference();
-
-// 4. 数据面：获取缓存的 AI 决策
-auto decision = ai.evaluate();
-```
-
-### 告警回调
-
-```cpp
-ai.set_alert_callback([](float score, const SecurityMetrics::Snapshot& snap) {
-    printf("[AI ALERT] score=%.4f pps=%.1f syn_rate=%.1f\n",
-           score, snap.pps, snap.syn_rate);
-});
-```
-
-### SecurityAnomalyModel
-
-专用于防火墙的 Autoencoder 异常检测模型（区别于 TCP 侧的通用 `AnomalyDetector`）。
-
-```cpp
-#include "neustack/ai/security_model.hpp"
-
-// 8 维安全特征输入
 ISecurityModel::Input input{
     .pps_norm           = 0.3f,
     .bps_norm           = 0.2f,
@@ -573,7 +562,6 @@ ISecurityModel::Input input{
     .rst_ratio_norm     = 0.05f,
 };
 
-SecurityAnomalyModel model("models/security_anomaly.onnx");
 auto result = model.infer(input);
 // result->reconstruction_error  重构误差
 // result->is_anomaly            是否异常
@@ -584,15 +572,15 @@ auto result = model.infer(input);
 
 ## SecurityExporter
 
-安全指标 CSV 导出器，为 AI 模型训练采集数据。
+A CSV data exporter for collecting data for security model training.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/metrics/security_exporter.hpp"
 ```
 
-### 使用
+### Usage
 
 ```cpp
 SecurityMetrics metrics;
@@ -604,7 +592,7 @@ exporter.flush(1);   // label=1 异常（手动标注）
 exporter.sync();     // 强制刷盘
 ```
 
-### CSV 列
+### CSV Columns
 
 ```
 timestamp_ms, packets_total, bytes_total,
@@ -614,12 +602,103 @@ syn_ratio, new_conn_rate, avg_pkt_size, rst_ratio,
 label
 ```
 
-原始值 + 衍生速率一并导出，归一化由 Python 训练端负责。
+Raw values and derived rates are exported together; normalization is handled by the Python training side. `label`: `0`=normal, `1`=anomaly.
 
 ---
 
-## 版本历史
+## Demo Interactive Commands
 
-- **v1.2.0**: 初始版本，支持黑白名单、端口封禁、令牌桶限速
-- **v1.2.1**: AI Shadow Mode 集成，RateLimiter O(1) LRU 升级
-- **v1.2.2**: 专用 SecurityAnomalyModel + SecurityExporter 数据采集
+`neustack_demo` provides real-time firewall management commands:
+
+| Command | Description |
+|---------|-------------|
+| `f` | Display real-time firewall statistics (including AI inference count, anomaly score, escalation/de-escalation counts) |
+| `fw shadow on` | Enable Shadow Mode (alert only, no blocking) |
+| `fw shadow off` | Disable Shadow Mode (anomalous traffic will be blocked) |
+| `fw threshold <val>` | Adjust AI anomaly threshold |
+| `fw bl add <ip>` | Add IP to blacklist |
+| `fw bl del <ip>` | Remove IP from blacklist |
+| `m` | View global protocol stack metrics |
+
+### HTTP API
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/status` | Protocol stack running status |
+| `GET /api/info` | List of enabled services (including firewall, firewall-ai) |
+| `GET /api/firewall/status` | Complete firewall status JSON (including rule statistics, AI statistics, Shadow Mode status) |
+
+---
+
+## Usage Examples
+
+### Basic Configuration
+
+```cpp
+#include "neustack/neustack.hpp"
+
+auto stack = NeuStack::create();
+auto* rules = stack->firewall_rules();
+
+// 白名单本地网络
+rules->add_whitelist_ip(ip_from_string("192.168.1.0") & 0xFFFFFF00);
+
+// 黑名单已知攻击 IP
+rules->add_blacklist_ip(ip_from_string("1.2.3.4"));
+
+// 封禁危险端口
+rules->add_rule(Rule::block_port(1, 22, 6));   // SSH
+rules->add_rule(Rule::block_port(2, 23, 6));   // Telnet
+rules->add_rule(Rule::block_port(3, 3389, 6)); // RDP
+```
+
+### DDoS Protection
+
+```cpp
+// 启用限速
+auto& limiter = rules->rate_limiter();
+limiter.set_enabled(true);
+limiter.set_rate(1000, 100);  // 1000 PPS per IP, 突发 100
+```
+
+### Monitoring Statistics
+
+```cpp
+void print_stats(NeuStack& stack) {
+    auto stats = stack.firewall_stats();
+    printf("Inspected: %lu, Passed: %lu, Dropped: %lu, Alerted: %lu\n",
+           stats.packets_inspected,
+           stats.packets_passed,
+           stats.packets_dropped,
+           stats.packets_alerted);
+
+    auto ai_stats = stack.firewall_ai_stats();
+    printf("AI Inferences: %lu, Anomalies: %lu, Score: %.4f\n",
+           ai_stats.inferences_total,
+           ai_stats.anomalies_detected,
+           ai_stats.last_anomaly_score);
+}
+```
+
+### Decision Callback
+
+```cpp
+// 设置决策回调 (用于日志/监控)
+fw.set_decision_callback([](const PacketEvent& evt, const FirewallDecision& dec) {
+    if (dec.should_drop()) {
+        printf("[DROPPED] src=%08x dst=%08x reason=%d\n",
+               evt.src_ip, evt.dst_ip, static_cast<int>(dec.reason));
+    }
+});
+```
+
+---
+
+## Notes
+
+1. **IP byte order**: Methods like `add_blacklist_ip()` accept IP addresses in **network byte order**
+2. **Thread safety**: FirewallEngine is not thread-safe and should be used in a single thread; FirewallAI's `evaluate()` can be called from any thread (reads atomic cache)
+3. **Memory management**: Uses FixedPool, zero allocation on hot paths
+4. **Performance**: Whitelist/blacklist O(1), custom rules O(n)
+5. **AI inference frequency**: Default once per second (`inference_interval_ms = 1000`); results are cached for data plane use without blocking the hot path
+6. **Threshold default**: `anomaly_threshold = 0.0f` means the optimal threshold determined during training is automatically read from ONNX model metadata

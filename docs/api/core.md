@@ -1,29 +1,29 @@
 # NeuStack Core API Reference
 
-本文档介绍 NeuStack 核心协议栈 API。
+This document describes the NeuStack core protocol stack API.
 
-## 目录
+## Table of Contents
 
 - [NeuStack](#neustack)
 - [HTTP Server](#http-server)
 - [HTTP Client](#http-client)
 - [DNS Client](#dns-client)
 - [TCP Layer](#tcp-layer)
-- [配置选项](#配置选项)
+- [Configuration Options](#configuration-options)
 
 ---
 
 ## NeuStack
 
-协议栈主类，提供统一的接口。
+The main protocol stack class, providing a unified interface.
 
-### 头文件
+### Header File
 
 ```cpp
 #include "neustack/neustack.hpp"
 ```
 
-### 创建实例
+### Creating an Instance
 
 ```cpp
 // 默认配置
@@ -37,7 +37,7 @@ config.device_name = "utun4";
 auto stack = NeuStack::create(config);
 ```
 
-### 主要方法
+### Main Methods
 
 ```cpp
 // 获取各层组件
@@ -61,9 +61,9 @@ void on_timer();               // 手动触发定时器
 
 ## HTTP Server
 
-简单的 HTTP/1.1 服务器。
+A simple HTTP/1.1 server.
 
-### 路由注册
+### Route Registration
 
 ```cpp
 auto& server = stack->http_server();
@@ -118,9 +118,9 @@ class HttpResponse {
 
 ## HTTP Client
 
-HTTP/1.1 客户端。
+HTTP/1.1 client.
 
-### 发起请求
+### Making Requests
 
 ```cpp
 auto& client = stack->http_client();
@@ -151,9 +151,9 @@ client.post("http://example.com/api/data",
 
 ## DNS Client
 
-异步 DNS 解析。
+Asynchronous DNS resolution.
 
-### 解析域名
+### Resolving Domain Names
 
 ```cpp
 auto& dns = stack->dns_client();
@@ -178,9 +178,9 @@ dns.resolve("example.com",
 
 ## TCP Layer
 
-底层 TCP 接口。
+Low-level TCP interface.
 
-### 监听
+### Listening
 
 ```cpp
 auto& tcp = stack->tcp_layer();
@@ -198,7 +198,7 @@ tcp.listen(8080, [](IStreamConnection* conn) -> StreamCallbacks {
 });
 ```
 
-### 连接
+### Connecting
 
 ```cpp
 tcp.connect(server_ip, 8080,
@@ -240,7 +240,7 @@ class IStreamConnection {
 
 ---
 
-## 配置选项
+## Configuration Options
 
 ### NeuStackConfig
 
@@ -285,9 +285,9 @@ enum class CongestionControlType {
 
 ---
 
-## 工具函数
+## Utility Functions
 
-### IP 地址转换
+### IP Address Conversion
 
 ```cpp
 #include "neustack/common/ip_addr.hpp"
@@ -299,7 +299,7 @@ uint32_t ip = ip_from_string("192.168.1.1");
 std::string str = ip_to_string(ip);
 ```
 
-### 日志
+### Logging
 
 ```cpp
 #include "neustack/common/log.hpp"
@@ -316,24 +316,24 @@ LOG_ERROR(APP, "Error message");
 
 ---
 
-## 错误码
+## Error Codes
 
-| 错误码 | 含义 |
-|--------|------|
-| 0 | 成功 |
-| -1 | 通用错误 |
-| -2 | 连接被拒绝 |
-| -3 | 连接超时 |
-| -4 | 连接重置 |
-| -5 | 网络不可达 |
+| Error Code | Meaning |
+|------------|---------|
+| 0 | Success |
+| -1 | General error |
+| -2 | Connection refused |
+| -3 | Connection timeout |
+| -4 | Connection reset |
+| -5 | Network unreachable |
 
 ---
 
-## 线程安全
+## Thread Safety
 
-NeuStack **不是**线程安全的。所有操作应在单线程中进行，或使用外部同步机制。
+NeuStack is **not** thread-safe. All operations should be performed in a single thread, or use external synchronization mechanisms.
 
-推荐模式：
+Recommended pattern:
 ```cpp
 // 主线程运行事件循环
 stack->run();

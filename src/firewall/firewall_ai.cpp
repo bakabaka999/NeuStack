@@ -200,8 +200,8 @@ float FirewallAI::run_inference() {
                 _consecutive_anomaly = 0;
                 _last_escalation_time_ms = current_ms;
                 _stats.escalations++;
-                LOG_WARN(FW, "[AI ESCALATE] Shadow Mode OFF after %u consecutive anomalies (cooldown %lums)",
-                         _config.escalate_consecutive, _config.escalate_cooldown_ms);
+                LOG_WARN(FW, "[AI ESCALATE] Shadow Mode OFF after %u consecutive anomalies (cooldown %llums)",
+                         _config.escalate_consecutive, static_cast<unsigned long long>(_config.escalate_cooldown_ms));
             }
         } else {
             _consecutive_normal++;
@@ -212,8 +212,8 @@ float FirewallAI::run_inference() {
                 _consecutive_normal = 0;
                 _last_escalation_time_ms = current_ms;
                 _stats.deescalations++;
-                LOG_INFO(FW, "[AI DE-ESCALATE] Shadow Mode ON after %u consecutive normal (cooldown %lums)",
-                         _config.deescalate_normal_count, _config.escalate_cooldown_ms);
+                LOG_INFO(FW, "[AI DE-ESCALATE] Shadow Mode ON after %u consecutive normal (cooldown %llums)",
+                         _config.deescalate_normal_count, static_cast<unsigned long long>(_config.escalate_cooldown_ms));
             }
         }
     }
