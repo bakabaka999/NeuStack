@@ -27,9 +27,19 @@ All notable changes to NeuStack will be documented in this file.
 - Traffic generation scripts for security data collection
 - Data merge and npz generation pipeline
 
+**Testing**
+- End-to-end firewall test suite: 16 test cases / 91 assertions covering rule priority, rate limiting, AI shadow/enforce mode, malformed packet handling, 10k packet stress test, dynamic rules, mixed protocols, bulk IP lists
+- Firewall AI Shadow Mode integration test
+- Firewall packet filtering integration test
+
+**Demo & API**
+- `GET /api/firewall/status` HTTP endpoint with full AI statistics
+- `GET /api/info` dynamically lists enabled services (firewall, firewall-ai, ai-intelligence)
+- Demo interactive commands: `f` (firewall stats), `fw shadow on/off`, `fw threshold <val>`, `fw bl add/del <ip>`
+- Escalation/de-escalation counters in both CLI and API output
+
 **Infrastructure**
 - Docker playground for single-container TUN networking (#7)
-- `GET /api/firewall/status` HTTP endpoint with AI statistics
 - CI: AI build matrix (ON/OFF) with ONNX Runtime installation
 
 ### Fixed
@@ -37,6 +47,8 @@ All notable changes to NeuStack will be documented in this file.
 - `record_packet` missed on certain code paths, causing incomplete metrics
 - `on_timer` changed to timestamp-driven to avoid timer frequency dependency
 - Duplicate `--security-label` in demo CLI
+- Duplicate `/api/firewall/status` route registration in demo
+- Firewall inspect decision not displayed in event loop log
 
 ### Changed
 - Project version 1.1.0 → 1.2.0
