@@ -26,7 +26,7 @@ enum class DNSType : uint16_t{
 };
 
 enum class DNSClass : uint16_t {
-    IN = 1          // Internet
+    INET = 1        // Internet
 };
 
 // DNS 响应码

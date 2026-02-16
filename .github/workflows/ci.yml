@@ -4,37 +4,133 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
-
     strategy:
       matrix:
-        build_type: [Release, Debug]
+        include:
+          # Linux: full matrix (Release/Debug × AI ON/OFF)
+          - os: ubuntu-latest
+            build_type: Release
+            ai_enabled: ON
+          - os: ubuntu-latest
+            build_type: Release
+            ai_enabled: OFF
+          - os: ubuntu-latest
+            build_type: Debug
+            ai_enabled: ON
+          - os: ubuntu-latest
+            build_type: Debug
+            ai_enabled: OFF
+          # macOS: Release only (with and without AI)
+          - os: macos-latest
+            build_type: Release
+            ai_enabled: ON
+          - os: macos-latest
+            build_type: Release
+            ai_enabled: OFF
+          # Windows: Release (with and without AI)
+          - os: windows-latest
+            build_type: Release
+            ai_enabled: ON
+          - os: windows-latest
+            build_type: Release
+            ai_enabled: OFF
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      # ─── Linux dependencies ───
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ ninja-build
 
+      # ─── macOS dependencies ───
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      # ─── Windows dependencies ───
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      # ─── Catch2 (all platforms) ───
       - name: Install Catch2 v3
         run: |
-          git clone --depth 1 --branch v3.5.2 https://github.com/catchorg/Catch2.git /tmp/catch2
-          cmake -B /tmp/catch2/build -S /tmp/catch2 -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build /tmp/catch2/build
-          sudo cmake --install /tmp/catch2/build
+          git clone --depth 1 --branch v3.5.2 https://github.com/catchorg/Catch2.git ${{ runner.temp }}/catch2
+          cmake -B ${{ runner.temp }}/catch2/build -S ${{ runner.temp }}/catch2 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build ${{ runner.temp }}/catch2/build
+          sudo cmake --install ${{ runner.temp }}/catch2/build
+        if: runner.os != 'Windows'
 
-      - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Install Catch2 v3 (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          git clone --depth 1 --branch v3.5.2 https://github.com/catchorg/Catch2.git ${{ runner.temp }}/catch2
+          cmake -B ${{ runner.temp }}/catch2/build -S ${{ runner.temp }}/catch2 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build ${{ runner.temp }}/catch2/build
+          cmake --install ${{ runner.temp }}/catch2/build --prefix "${{ runner.temp }}/catch2-install"
 
+      # ─── ONNX Runtime (Linux/macOS, when AI=ON) ───
+      - name: Install ONNX Runtime (Linux)
+        if: matrix.ai_enabled == 'ON' && runner.os == 'Linux'
+        run: |
+          ONNX_VERSION=1.17.0
+          curl -sL https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz | tar xz -C /tmp
+          echo "ONNXRUNTIME_ROOT=/tmp/onnxruntime-linux-x64-${ONNX_VERSION}" >> $GITHUB_ENV
+
+      - name: Install ONNX Runtime (macOS)
+        if: matrix.ai_enabled == 'ON' && runner.os == 'macOS'
+        run: |
+          ONNX_VERSION=1.17.0
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            ORT_NAME="onnxruntime-osx-arm64-${ONNX_VERSION}"
+          else
+            ORT_NAME="onnxruntime-osx-x86_64-${ONNX_VERSION}"
+          fi
+          curl -sL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/${ORT_NAME}.tgz" | tar xz -C /tmp
+          echo "ONNXRUNTIME_ROOT=/tmp/${ORT_NAME}" >> $GITHUB_ENV
+
+      - name: Install ONNX Runtime (Windows)
+        if: matrix.ai_enabled == 'ON' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ONNX_VERSION = "1.17.0"
+          $ORT_NAME = "onnxruntime-win-x64-$ONNX_VERSION"
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$ONNX_VERSION/$ORT_NAME.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ort.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\ort.zip" -DestinationPath "$env:RUNNER_TEMP"
+          echo "ONNXRUNTIME_ROOT=$env:RUNNER_TEMP\$ORT_NAME" >> $env:GITHUB_ENV
+
+      # ─── Configure ───
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }}
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+            -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }} `
+            -DCMAKE_PREFIX_PATH="${{ runner.temp }}/catch2-install"
+
+      # ─── Build ───
       - name: Build
         run: cmake --build build
 
+      # ─── Test ───
       - name: Test
         run: cd build && ctest --output-on-failure --timeout 60
 

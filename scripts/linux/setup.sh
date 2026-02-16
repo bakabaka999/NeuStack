@@ -1,21 +1,30 @@
 #!/bin/bash
 # scripts/linux/setup.sh
 #
-# Linux 服务器环境配置与编译
+# Linux environment setup & build
 #
-# 功能:
-#   1. 检查 / 安装依赖 (cmake, g++, socat)
-#   2. 检查 TUN 模块
-#   3. 下载 ONNX Runtime (如果需要)
-#   4. 编译 NeuStack
+# What it does:
+#   1. Check / install dependencies (cmake, g++, ninja, socat)
+#   2. Check TUN module
+#   3. Download ONNX Runtime if needed (auto-detect arch)
+#   4. Build NeuStack (auto-enable AI if ORT found)
 #
-# 用法:
-#   sudo bash scripts/linux/setup.sh
+# Usage:
+#   sudo bash scripts/linux/setup.sh [--no-ai]
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Parse args
+FORCE_NO_AI=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-ai) FORCE_NO_AI=1 ;;
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--no-ai]"; exit 1 ;;
+    esac
+done
 
 echo "=============================================="
 echo "  NeuStack Linux Setup"
@@ -24,7 +33,26 @@ echo "  Project: $PROJECT_ROOT"
 echo "=============================================="
 echo ""
 
-# ─── 1. 检查依赖 ───
+# ─── Helper: install packages ───
+install_packages() {
+    local pkgs=("$@")
+    echo "  Installing: ${pkgs[*]}..."
+    if command -v apt-get &> /dev/null; then
+        apt-get update -qq
+        apt-get install -y -qq "${pkgs[@]}"
+    elif command -v dnf &> /dev/null; then
+        dnf install -y "${pkgs[@]}"
+    elif command -v yum &> /dev/null; then
+        yum install -y "${pkgs[@]}"
+    elif command -v pacman &> /dev/null; then
+        pacman -Sy --noconfirm "${pkgs[@]}"
+    else
+        echo "  ERROR: Unknown package manager. Please install manually: ${pkgs[*]}"
+        exit 1
+    fi
+}
+
+# ─── 1. Check dependencies ───
 echo "[1/4] Checking dependencies..."
 
 check_cmd() {
@@ -37,44 +65,58 @@ check_cmd() {
     fi
 }
 
-MISSING=0
-check_cmd cmake  || MISSING=1
-check_cmd g++    || MISSING=1
-check_cmd curl   || MISSING=1
-check_cmd socat  || MISSING=1
+MISSING_PKGS=()
 
-if [ $MISSING -eq 1 ]; then
-    echo ""
-    echo "  Installing missing packages..."
-    if command -v apt-get &> /dev/null; then
-        apt-get update -qq
-        apt-get install -y -qq cmake g++ curl socat
-    elif command -v yum &> /dev/null; then
-        yum install -y cmake gcc-c++ curl socat
-    elif command -v dnf &> /dev/null; then
-        dnf install -y cmake gcc-c++ curl socat
-    elif command -v pacman &> /dev/null; then
-        pacman -Sy --noconfirm cmake gcc curl socat
-    else
-        echo "  ERROR: Unknown package manager. Please install: cmake g++ curl socat"
-        exit 1
-    fi
-    echo "  Done"
+# Map command → package name (apt style, adjust per distro in install_packages)
+command -v cmake  &>/dev/null || MISSING_PKGS+=(cmake)
+command -v g++    &>/dev/null || MISSING_PKGS+=(g++)
+command -v curl   &>/dev/null || MISSING_PKGS+=(curl)
+command -v socat  &>/dev/null || MISSING_PKGS+=(socat)
+
+# Ninja: preferred but optional
+HAS_NINJA=0
+if command -v ninja &> /dev/null; then
+    HAS_NINJA=1
+else
+    # Try to install ninja
+    MISSING_PKGS+=(ninja-build)
 fi
 
-# 检查 g++ 版本 (需要 C++20 → g++ >= 10)
+if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    install_packages "${MISSING_PKGS[@]}"
+fi
+
+# Re-check ninja after install attempt
+if command -v ninja &> /dev/null; then
+    HAS_NINJA=1
+fi
+
+# Show status
+check_cmd cmake
+check_cmd g++
+check_cmd curl
+check_cmd socat
+if [ $HAS_NINJA -eq 1 ]; then
+    echo "  ✓ ninja"
+else
+    echo "  - ninja (not found, will use make)"
+fi
+
+# Check g++ version (need C++20 → g++ >= 10)
 GCC_VER=$(g++ -dumpversion | cut -d. -f1)
 if [ "$GCC_VER" -lt 10 ]; then
     echo ""
-    echo "  WARNING: g++ $GCC_VER too old, need >= 10 for C++20"
-    echo "  Install newer version:"
-    echo "    apt install g++-12"
-    echo "    export CXX=g++-12"
+    echo "  ERROR: g++ $GCC_VER is too old, need >= 10 for C++20"
+    echo ""
+    echo "  Fix:"
+    echo "    apt install g++-12 && export CXX=g++-12"
+    echo "    # or"
+    echo "    dnf install gcc-toolset-12-gcc-c++"
     exit 1
 fi
 echo "  ✓ g++ version $GCC_VER (C++20 OK)"
 
-# ─── 2. TUN 模块 ───
+# ─── 2. TUN module ───
 echo ""
 echo "[2/4] Checking TUN support..."
 
@@ -96,33 +138,84 @@ fi
 echo ""
 echo "[3/4] Checking ONNX Runtime..."
 
-ORT_DIR="$PROJECT_ROOT/third_party/onnxruntime/linux-x64"
+# Detect architecture
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64)  ORT_PLATFORM="linux-x64" ;;
+    aarch64) ORT_PLATFORM="linux-aarch64" ;;
+    *)
+        echo "  WARNING: Unsupported architecture '$ARCH' for ONNX Runtime"
+        echo "  AI features will be disabled"
+        ORT_PLATFORM=""
+        ;;
+esac
+echo "  Architecture: $ARCH → ${ORT_PLATFORM:-unsupported}"
 
-if [ -f "$ORT_DIR/lib/libonnxruntime.so" ]; then
-    echo "  ✓ ONNX Runtime (linux-x64) already exists"
-else
-    echo "  Downloading ONNX Runtime (linux-x64)..."
-    bash "$PROJECT_ROOT/scripts/download_onnxruntime.sh" linux-x64
+ORT_FOUND=0
+if [ -n "$ORT_PLATFORM" ]; then
+    ORT_DIR="$PROJECT_ROOT/third_party/onnxruntime/$ORT_PLATFORM"
+
+    if [ -f "$ORT_DIR/lib/libonnxruntime.so" ]; then
+        echo "  ✓ ONNX Runtime already installed"
+        ORT_FOUND=1
+    else
+        echo "  Downloading ONNX Runtime ($ORT_PLATFORM)..."
+        if bash "$PROJECT_ROOT/scripts/download/download_onnxruntime.sh" "$ORT_PLATFORM"; then
+            ORT_FOUND=1
+            echo "  ✓ ONNX Runtime downloaded"
+        else
+            echo "  ✗ Download failed, AI features will be disabled"
+        fi
+    fi
 fi
 
-# ─── 4. 编译 ───
+# Determine AI flag
+if [ $FORCE_NO_AI -eq 1 ]; then
+    ENABLE_AI=OFF
+    echo "  AI: disabled (--no-ai flag)"
+elif [ $ORT_FOUND -eq 1 ]; then
+    ENABLE_AI=ON
+    echo "  AI: enabled (ONNX Runtime found)"
+else
+    ENABLE_AI=OFF
+    echo "  AI: disabled (ONNX Runtime not available)"
+fi
+
+# ─── 4. Build ───
 echo ""
 echo "[4/4] Building NeuStack..."
 
 BUILD_DIR="$PROJECT_ROOT/build"
 mkdir -p "$BUILD_DIR"
+
+# Select generator
+CMAKE_ARGS=(
+    -DNEUSTACK_ENABLE_AI=$ENABLE_AI
+    -DCMAKE_BUILD_TYPE=Release
+)
+if [ $HAS_NINJA -eq 1 ]; then
+    CMAKE_ARGS+=(-G Ninja)
+    BUILD_CMD="ninja"
+else
+    BUILD_CMD="make -j$(nproc)"
+fi
+
 cd "$BUILD_DIR"
-
-cmake .. -DNEUSTACK_ENABLE_AI=OFF -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+cmake .. "${CMAKE_ARGS[@]}"
+$BUILD_CMD
 
 echo ""
 echo "=============================================="
-echo "  Build Complete!"
+echo "  ✓ Build Complete!"
 echo "=============================================="
 echo ""
-echo "  Binary: $BUILD_DIR/neustack"
+echo "  AI enabled:  $ENABLE_AI"
+echo "  Binary:      $BUILD_DIR/examples/neustack_demo"
 echo ""
-echo "  Next step: start data collection"
-echo "    sudo bash scripts/linux/collect.sh"
+echo "  Quick start:"
+echo "    # Start the stack (requires root for TUN)"
+echo "    sudo ./build/examples/neustack_demo --ip 10.0.0.2 -v"
+echo ""
+echo "    # With data collection"
+echo "    sudo ./build/examples/neustack_demo --ip 10.0.0.2 --collect -v"
 echo ""

@@ -1,6 +1,7 @@
 #ifndef NEUSTACK_APP_HTTP_TYPES_HPP
 #define NEUSTACK_APP_HTTP_TYPES_HPP
 
+#include "neustack/common/platform.hpp"
 #include <string>
 #include <unordered_map>
 #include <functional>

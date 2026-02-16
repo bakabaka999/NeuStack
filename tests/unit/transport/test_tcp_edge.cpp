@@ -5,7 +5,7 @@
 #include "neustack/net/ipv4.hpp" // 需要 IPv4Packet 定义
 #include <vector>
 #include <cstring>
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 using namespace neustack;
 

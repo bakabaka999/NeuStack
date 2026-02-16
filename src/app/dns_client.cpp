@@ -131,7 +131,7 @@ std::vector<uint8_t> DNSClient::build_query(uint16_t id,
     packet.push_back(reinterpret_cast<uint8_t *>(&qtype)[1]);
 
     // QCLASS（IN）
-    uint16_t qclass = htons(static_cast<uint16_t>(DNSClass::IN));
+    uint16_t qclass = htons(static_cast<uint16_t>(DNSClass::INET));
     packet.push_back(reinterpret_cast<uint8_t *>(&qclass)[0]);
     packet.push_back(reinterpret_cast<uint8_t *>(&qclass)[1]);
 

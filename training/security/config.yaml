@@ -1,0 +1,40 @@
+model:
+  type: "deep"  # "simple" 或 "deep"
+  input_dim: 8
+  # Deep Autoencoder (BatchNorm + GELU + Dropout)
+  # 编码器: 8 → 64 → 32 → 4 (latent)
+  # 解码器: 4 → 32 → 64 → 8
+  hidden_dims: [64, 32]
+  latent_dim: 4      # 真正的瓶颈 (50% 压缩率)
+  dropout: 0.1
+  # Simple Autoencoder (baseline)
+  simple_hidden_dims: [32, 16]
+  simple_latent_dim: 8
+
+training:
+  epochs: 200
+  batch_size: 128
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 15
+  # Cosine Annealing LR scheduler
+  scheduler: "cosine"
+  scheduler_T_max: 200
+  scheduler_eta_min: 0.00001
+
+data:
+  # 有标签数据: 训练用正常 (label=0), 评估用异常 (label=1)
+  train_ratio: 0.8    # 正常数据的训练/验证分割
+  seed: 42
+  # 合成数据参数 (无真实数据时使用)
+  train_samples: 10000
+  val_samples: 2000
+
+threshold:
+  # 阈值搜索策略
+  method: "f1_optimal"  # "percentile" 或 "f1_optimal"
+  percentile: 95        # percentile 方法的分位数
+
+output:
+  model_dir: "checkpoints"
+  onnx_path: "../../models/security_anomaly.onnx"

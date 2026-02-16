@@ -1,12 +1,24 @@
 #ifndef NEUSTACK_COMMON_LOG_HPP
 #define NEUSTACK_COMMON_LOG_HPP
 
+// MinGW 默认 printf 不支持 %zu/%zd，启用 ANSI C99 兼容实现
+#if defined(__MINGW32__) || defined(__MINGW64__)
+    #ifndef __USE_MINGW_ANSI_STDIO
+    #define __USE_MINGW_ANSI_STDIO 1
+    #endif
+#endif
+
 #include <cstdio>
 #include <cstdarg>
 #include <cstdint>
 #include <chrono>
 #include <mutex>
 #include <atomic>
+
+// windows.h 定义了 #define ERROR 0, 必须在定义 LogLevel 之前 undef
+#ifdef ERROR
+#undef ERROR
+#endif
 
 namespace neustack {
 
@@ -39,6 +51,7 @@ enum class LogModule : uint8_t {
     DNS  = 7,
     APP  = 8,
     AI   = 9,
+    FW   = 10,  // Firewall
     MAX_MODULES
 };
 
@@ -105,7 +118,11 @@ public:
     // ─── 核心日志函数 (仅在 should_log 返回 true 时调用) ───
 
     void log_impl(LogModule module, LogLevel level, const char* fmt, ...)
+#if defined(__MINGW32__) || defined(__MINGW64__)
+        __attribute__((format(gnu_printf, 4, 5)))
+#else
         __attribute__((format(printf, 4, 5)))
+#endif
     {
         std::lock_guard<std::mutex> lock(_mutex);
 
@@ -235,7 +252,7 @@ private:
             case LogModule::IPv4: return "\033[34m";  // Blue
             case LogModule::ICMP: return "\033[96m";  // Bright Cyan (与IPv4区分)
 
-            // 传输层 (鲜艳的对比色)：这是你最常调试的“修罗场”
+            // 传输层 (鲜艳的对比色)：这是你最常调试的"修罗场"
             case LogModule::UDP:  return "\033[32m";  // Green (UDP通常简单、快速)
             case LogModule::TCP:  return "\033[31m";  // Red (TCP逻辑最重，红色醒目)
 
@@ -245,7 +262,8 @@ private:
 
             // 顶层应用 (纯白或加粗)：你写的业务逻辑
             case LogModule::APP:  return "\033[1;37m"; // Bold White (最显眼)
-            case LogModule::AI:   return "\033[1;36m"; // Bold Cyan (AI 模块通常代表“高科技”，青色很合适)
+            case LogModule::AI:   return "\033[1;36m"; // Bold Cyan (AI 模块通常代表"高科技"，青色很合适)
+            case LogModule::FW:   return "\033[1;33m"; // Bold Yellow (防火墙，安全相关)
 
             default: return RESET;
         }
@@ -263,6 +281,7 @@ private:
             case LogModule::DNS:  return "DNS ";
             case LogModule::APP:  return "APP ";
             case LogModule::AI:   return "AI  ";
+            case LogModule::FW:   return "FW  ";
             default: return "????";
         }
     }

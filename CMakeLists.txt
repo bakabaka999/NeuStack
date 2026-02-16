@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(NeuStack
-    VERSION 1.1.0
-    DESCRIPTION "Cross-platform User-space TCP/IP Stack with AI-powered Congestion Control"
+    VERSION 1.2.0
+    DESCRIPTION "Cross-platform User-space TCP/IP Stack with AI-powered Congestion Control and Intelligent Firewall"
     LANGUAGES CXX
 )
 
@@ -52,6 +52,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_compile_options(/W4 /utf-8)
 endif()
 
+# MinGW %zu support: handled in cmake/Platform.cmake
+
 # ============================================================================
 # Include Directories
 # ============================================================================
@@ -98,6 +100,11 @@ set(METRICS_SOURCES
     src/metrics/ai_features.cpp
 )
 
+set(FIREWALL_SOURCES
+    src/firewall/firewall_engine.cpp
+    src/firewall/firewall_ai.cpp
+)
+
 # Platform-specific HAL sources
 if(NEUSTACK_PLATFORM_MACOS)
     set(HAL_SOURCES
@@ -114,6 +121,9 @@ elseif(NEUSTACK_PLATFORM_WINDOWS)
         src/hal/device.cpp
         src/hal/hal_windows.cpp
     )
+    # Wintun: loaded at runtime, no build-time dependency
+    # User must place wintun.dll in the working directory
+    # Download: https://www.wintun.net/
 endif()
 
 # AI sources (optional)
@@ -127,6 +137,7 @@ if(NEUSTACK_ENABLE_AI)
             src/ai/orca_model.cpp
             src/ai/anomaly_model.cpp
             src/ai/bandwidth_model.cpp
+            src/ai/security_model.cpp
             src/ai/intelligence_plane.cpp
             src/ai/ai_agent.cpp
         )
@@ -146,6 +157,7 @@ add_library(neustack_lib STATIC
     ${TRANSPORT_SOURCES}
     ${APP_SOURCES}
     ${METRICS_SOURCES}
+    ${FIREWALL_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
 )
@@ -168,6 +180,11 @@ if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
     target_include_directories(neustack_lib PUBLIC ${ONNXRUNTIME_INCLUDE_DIRS})
     target_link_libraries(neustack_lib PRIVATE ${ONNXRUNTIME_LIBRARIES})
     target_compile_definitions(neustack_lib PUBLIC NEUSTACK_AI_ENABLED)
+endif()
+
+# MinGW: 确保 %zu 等格式符支持 (target 级别，比目录级更可靠)
+if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+    target_compile_definitions(neustack_lib PUBLIC __USE_MINGW_ANSI_STDIO=1)
 endif()
 
 # ============================================================================
@@ -196,12 +213,40 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
+include(CMakePackageConfigHelpers)
+
 install(TARGETS neustack_lib
+    EXPORT NeuStackTargets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
 
 install(DIRECTORY include/neustack DESTINATION include)
+
+# Generate CMake package config files for find_package(NeuStack)
+install(EXPORT NeuStackTargets
+    FILE NeuStackTargets.cmake
+    NAMESPACE NeuStack::
+    DESTINATION lib/cmake/NeuStack
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/NeuStackConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/NeuStack
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfigVersion.cmake"
+    DESTINATION lib/cmake/NeuStack
+)
 
 # ============================================================================
 # Summary

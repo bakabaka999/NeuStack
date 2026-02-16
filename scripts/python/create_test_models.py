@@ -7,10 +7,11 @@
     python scripts/create_test_models.py
 
 生成的模型:
-    models/test_simple.onnx     - 最简单的测试模型 (3 -> 1)
-    models/orca_actor.onnx      - Orca 拥塞控制 (6 -> 1)
-    models/anomaly_detector.onnx - 异常检测 Autoencoder (5 -> 5)
+    models/test_simple.onnx         - 最简单的测试模型 (3 -> 1)
+    models/orca_actor.onnx          - Orca 拥塞控制 (6 -> 1)
+    models/anomaly_detector.onnx    - 异常检测 Autoencoder (5 -> 5)
     models/bandwidth_predictor.onnx - 带宽预测 (30 -> 1)
+    models/security_anomaly.onnx    - 安全异常检测 Autoencoder (8 -> 8)
 """
 
 import os
@@ -128,6 +129,41 @@ class BandwidthPredictor(nn.Module):
 
 
 # ============================================================================
+# 5. 安全异常检测 Autoencoder
+# ============================================================================
+class SecurityAutoencoder(nn.Module):
+    """
+    安全异常检测 Autoencoder (简化版用于测试)
+
+    输入 (8维) — ISecurityModel::Input:
+        pps_norm, bps_norm, syn_rate_norm, rst_rate_norm,
+        syn_ratio_norm, new_conn_rate_norm, avg_pkt_size_norm, rst_ratio_norm
+
+    输出 (8维): 重构输入，用于计算重构误差
+    """
+    def __init__(self, input_dim=8, hidden_dim=32, latent_dim=4):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, latent_dim),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, input_dim),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
+
+
+# ============================================================================
 # 导出函数
 # ============================================================================
 def export_model(model, input_shape, output_path, input_name="input", output_name="output"):
@@ -186,19 +222,26 @@ def main():
     print()
 
     # 4. Bandwidth Predictor
-    print("[4/4] Creating Bandwidth Predictor model...")
+    print("[4/5] Creating Bandwidth Predictor model...")
     model = BandwidthPredictor()
     export_model(model, (30,), "models/bandwidth_predictor.onnx")
+    print()
+
+    # 5. Security Anomaly Detector
+    print("[5/5] Creating Security Anomaly Detector model...")
+    model = SecurityAutoencoder()
+    export_model(model, (8,), "models/security_anomaly.onnx")
     print()
 
     print("=" * 60)
     print("All models created successfully!")
     print()
     print("Models saved to:")
-    print("  models/test_simple.onnx        (3 -> 1)")
-    print("  models/orca_actor.onnx         (6 -> 1)")
-    print("  models/anomaly_detector.onnx   (5 -> 5)")
-    print("  models/bandwidth_predictor.onnx (30 -> 1)")
+    print("  models/test_simple.onnx          (3 -> 1)")
+    print("  models/orca_actor.onnx           (6 -> 1)")
+    print("  models/anomaly_detector.onnx     (5 -> 5)")
+    print("  models/bandwidth_predictor.onnx  (30 -> 1)")
+    print("  models/security_anomaly.onnx     (8 -> 8)")
     print()
     print("Note: These are randomly initialized models for testing.")
     print("      Real models need to be trained with actual data.")

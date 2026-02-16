@@ -52,6 +52,14 @@ neustack_add_test(test_http_edge   unit/app/test_http_edge.cpp)
 # --- 指标测试 (metrics/) ---
 neustack_add_test(test_global_metrics unit/metrics/test_global_metrics.cpp)
 
+# --- 防火墙测试 (firewall/) ---
+neustack_add_test(test_rule_engine  unit/firewall/test_rule_engine.cpp)
+neustack_add_test(test_rate_limiter unit/firewall/test_rate_limiter.cpp)
+neustack_add_test(test_firewall_ai  unit/firewall/test_firewall_ai.cpp)
+
+# --- 安全模型测试 (security/) ---
+neustack_add_test(test_security_model unit/ai/test_security_model.cpp)
+
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)
 target_link_libraries(test_tcp_handshake PRIVATE neustack_lib)
@@ -64,6 +72,18 @@ add_test(NAME "Integration: HTTP request/response roundtrip" COMMAND test_http_r
 add_executable(test_tcp_stress integration/test_tcp_stress.cpp)
 target_link_libraries(test_tcp_stress PRIVATE neustack_lib)
 add_test(NAME "Integration: TCP connection stress limits" COMMAND test_tcp_stress)
+
+add_executable(test_firewall_integration integration/test_firewall_integration.cpp)
+target_link_libraries(test_firewall_integration PRIVATE neustack_lib)
+add_test(NAME "Integration: Firewall packet filtering" COMMAND test_firewall_integration)
+
+add_executable(test_firewall_ai_shadow integration/test_firewall_ai_shadow.cpp)
+target_link_libraries(test_firewall_ai_shadow PRIVATE neustack_lib)
+add_test(NAME "Integration: Firewall AI Shadow Mode" COMMAND test_firewall_ai_shadow)
+
+add_executable(test_firewall_e2e integration/test_firewall_e2e.cpp)
+target_link_libraries(test_firewall_e2e PRIVATE neustack_lib)
+add_test(NAME "Integration: Firewall E2E full feature" COMMAND test_firewall_e2e)
 
 # --- 性能测试---
 add_executable(bench_checksum benchmark/bench_checksum.cpp)

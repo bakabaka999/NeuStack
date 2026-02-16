@@ -1,15 +1,16 @@
 """
 scripts/csv_to_dataset.py
 
-将 NeuStack 采集的 CSV 转换为三个 AI 模型的训练数据集。
+将 NeuStack 采集的 CSV 转换为四个 AI 模型的训练数据集。
 
-支持 6 组数据采集场景:
+支持 7 组数据采集场景:
   场景 1: 本机普通 (local_normal)             -> Orca + Bandwidth
   场景 2: 本机 + tc (local_tc)                -> Orca + Bandwidth
   场景 3: 服务器普通 (server_normal)          -> Orca + Bandwidth
   场景 4: 服务器 + tc (server_tc)             -> Orca + Bandwidth
   场景 5: Anomaly short (local_anomaly_short) -> Anomaly
   场景 6: Anomaly mixed (local_anomaly_mix)   -> Anomaly
+  场景 7: Security data (security_data*)      -> Security
 
 用法:
     # 从 collected_data 目录自动识别并生成所有数据集
@@ -22,7 +23,8 @@ scripts/csv_to_dataset.py
     training/real_data/
     ├── orca_dataset.npz         # Orca DDPG 训练数据
     ├── bandwidth_dataset.npz    # 带宽预测 LSTM 训练数据
-    └── anomaly_dataset.npz      # 异常检测 Autoencoder 训练数据
+    ├── anomaly_dataset.npz      # 异常检测 Autoencoder 训练数据
+    └── security_dataset.npz     # 安全异常检测 Autoencoder 训练数据
 """
 
 import argparse
@@ -59,8 +61,22 @@ ANOMALY_PATTERNS = [
     'global_metrics_local_anomaly_mix*.csv',
 ]
 
+# Security 使用的 security_data 文件 (场景 7, 防火墙采集)
+SECURITY_PATTERNS = [
+    'security_data*.csv',
+]
+
 # Anomaly 聚合窗口 (将 100ms 采样聚合为 1s)
 ANOMALY_AGGREGATE_WINDOW = 10
+
+# ─── Security 归一化参数（与 C++ SecurityFeatureExtractor 严格一致）───
+SECURITY_MAX_PPS = 10000.0
+SECURITY_MAX_BPS = 100000000.0   # 100 MB/s
+SECURITY_MAX_SYN_RATE = 1000.0
+SECURITY_MAX_RST_RATE = 500.0
+SECURITY_MAX_CONN_RATE = 500.0
+SECURITY_SYN_RATIO_MIDPOINT = 5.0  # sigmoid 中点
+SECURITY_MAX_PKT_SIZE = 1500.0
 
 
 # ============================================================================
@@ -433,6 +449,138 @@ def generate_bandwidth_dataset(
 
 
 # ============================================================================
+# 安全异常检测数据集生成 (SecurityAutoencoder: ISecurityModel::Input 8 维)
+# ============================================================================
+
+def normalize_linear(value: float, max_value: float) -> float:
+    """线性归一化: value / max, clip [0, 1]  — 与 C++ SecurityFeatureExtractor 一致"""
+    if max_value <= 0:
+        return 0.0
+    return float(np.clip(value / max_value, 0.0, 1.0))
+
+
+def normalize_log(value: float, max_value: float) -> float:
+    """对数归一化: log(1+value)/log(1+max), clip [0, 1]  — 与 C++ 一致"""
+    if max_value <= 0 or value <= 0:
+        return 0.0
+    log_value = np.log1p(value)
+    log_max = np.log1p(max_value)
+    return float(np.clip(log_value / log_max, 0.0, 1.0))
+
+
+def normalize_sigmoid(value: float, midpoint: float, k: float = 1.0) -> float:
+    """Sigmoid 归一化: 1/(1+exp(-k*(value-midpoint)))  — 与 C++ 一致"""
+    x = k * (value - midpoint)
+    return float(1.0 / (1.0 + np.exp(-x)))
+
+
+def merge_security_data(*csv_files) -> List[Dict]:
+    """合并多个 security_data*.csv 文件"""
+    all_rows = []
+    for csv_file in csv_files:
+        rows = []
+        with open(csv_file) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    parsed = {
+                        'timestamp_ms': int(row['timestamp_ms']),
+                        'packets_total': int(row['packets_total']),
+                        'bytes_total': int(row['bytes_total']),
+                        'syn_packets': int(row['syn_packets']),
+                        'syn_ack_packets': int(row['syn_ack_packets']),
+                        'rst_packets': int(row['rst_packets']),
+                        'pps': float(row['pps']),
+                        'bps': float(row['bps']),
+                        'syn_rate': float(row['syn_rate']),
+                        'rst_rate': float(row['rst_rate']),
+                        'syn_ratio': float(row['syn_ratio']),
+                        'new_conn_rate': float(row['new_conn_rate']),
+                        'avg_pkt_size': float(row['avg_pkt_size']),
+                        'rst_ratio': float(row['rst_ratio']),
+                        'label': int(row.get('label', 0)),
+                    }
+                    rows.append(parsed)
+                except (ValueError, KeyError):
+                    continue
+        all_rows.extend(rows)
+        n_normal = sum(1 for r in rows if r['label'] == 0)
+        n_anomaly = sum(1 for r in rows if r['label'] == 1)
+        print(f"    {os.path.basename(csv_file):50s} {len(rows):>6d} rows "
+              f"(normal={n_normal}, anomaly={n_anomaly})")
+
+    print(f"  Total: {len(all_rows)} security rows merged")
+    return all_rows
+
+
+def compute_security_features(row: Dict) -> np.ndarray:
+    """
+    从 SecurityExporter CSV 行提取 8 维 ISecurityModel::Input
+
+    归一化策略与 C++ SecurityFeatureExtractor::extract_security() 严格一致:
+      pps_norm           = linear(pps, 10000)
+      bps_norm           = log(bps, 1e8)
+      syn_rate_norm      = linear(syn_rate, 1000)
+      rst_rate_norm      = linear(rst_rate, 500)
+      syn_ratio_norm     = sigmoid(syn_ratio, midpoint=5.0)
+      new_conn_rate_norm = linear(new_conn_rate, 500)
+      avg_pkt_size_norm  = linear(avg_pkt_size, 1500)
+      rst_ratio_norm     = clamp(rst_ratio, 0, 1)
+    """
+    return np.array([
+        normalize_linear(row['pps'], SECURITY_MAX_PPS),
+        normalize_log(row['bps'], SECURITY_MAX_BPS),
+        normalize_linear(row['syn_rate'], SECURITY_MAX_SYN_RATE),
+        normalize_linear(row['rst_rate'], SECURITY_MAX_RST_RATE),
+        normalize_sigmoid(row['syn_ratio'], SECURITY_SYN_RATIO_MIDPOINT),
+        normalize_linear(row['new_conn_rate'], SECURITY_MAX_CONN_RATE),
+        normalize_linear(row['avg_pkt_size'], SECURITY_MAX_PKT_SIZE),
+        float(np.clip(row['rst_ratio'], 0.0, 1.0)),
+    ], dtype=np.float32)
+
+
+def generate_security_dataset(rows: List[Dict]) -> Dict:
+    """
+    生成安全异常检测训练数据
+
+    特征: 8 维 ISecurityModel::Input (与 C++ 归一化一致)
+    标签: label 列 (0=正常, 1=异常)
+
+    返回:
+      inputs: (N, 8) float32
+      labels: (N,) int32
+    """
+    print(f"    Raw security rows: {len(rows)}")
+
+    features = []
+    labels = []
+    skipped = 0
+
+    for row in rows:
+        feat = compute_security_features(row)
+        # 过滤完全空闲的行 (所有速率为 0)
+        if row['pps'] == 0 and row['bps'] == 0:
+            skipped += 1
+            continue
+        features.append(feat)
+        labels.append(row['label'])
+
+    print(f"    After filtering idle: {len(features)} kept, {skipped} skipped")
+
+    features = np.array(features, dtype=np.float32)
+    labels = np.array(labels, dtype=np.int32)
+
+    n_normal = np.sum(labels == 0)
+    n_anomaly = np.sum(labels == 1)
+    print(f"    Normal: {n_normal}, Anomaly: {n_anomaly}")
+
+    return {
+        'inputs': features,
+        'labels': labels,
+    }
+
+
+# ============================================================================
 # 主函数
 # ============================================================================
 
@@ -446,7 +594,8 @@ def main():
     parser.add_argument('--global-metrics', help='Override: specific global_metrics file/dir')
     parser.add_argument('--output-dir', default='training/real_data/',
                         help='Output directory for datasets')
-    parser.add_argument('--model', choices=['all', 'orca', 'anomaly', 'bandwidth'],
+    parser.add_argument('--security-data', help='Override: specific security_data file/dir')
+    parser.add_argument('--model', choices=['all', 'orca', 'anomaly', 'bandwidth', 'security'],
                         default='all', help='Which model dataset to generate')
     parser.add_argument('--min-samples', type=int, default=100,
                         help='Minimum samples required')
@@ -557,6 +706,41 @@ def main():
                                            'tx_rx_ratio', 'active_conns']):
                     col = anomaly_data['inputs'][:, i]
                     print(f"    {name:12s}: [{col.min():.4f}, {col.max():.4f}] "
+                          f"mean={col.mean():.4f} nonzero={np.count_nonzero(col)}")
+
+    # ─── Security: 场景 7 的 security_data ───
+    if args.model in ['all', 'security']:
+        print("\n" + "-" * 60)
+        print("[4/4] Generating Security Anomaly Detection dataset...")
+
+        if args.security_data:
+            if os.path.isdir(args.security_data):
+                sec_files = sorted(glob.glob(os.path.join(args.security_data, 'security_data*.csv')))
+            else:
+                sec_files = [args.security_data]
+        else:
+            sec_files = find_files_by_patterns(args.data_dir, SECURITY_PATTERNS)
+
+        if not sec_files:
+            print("  WARNING: No security_data files found, skipping security dataset")
+        else:
+            sec_files.sort()
+            sec_rows = merge_security_data(*sec_files)
+
+            if len(sec_rows) < 10:
+                print("  WARNING: Too few security samples")
+            else:
+                sec_data = generate_security_dataset(sec_rows)
+                sec_path = os.path.join(args.output_dir, 'security_dataset.npz')
+                np.savez(sec_path, **sec_data)
+                print(f"  Saved: {sec_path}")
+                print(f"    Samples:     {len(sec_data['inputs'])}")
+                print(f"    Feature dim: {sec_data['inputs'].shape[1]}")
+                feat_names = ['pps', 'bps', 'syn_rate', 'rst_rate',
+                              'syn_ratio', 'new_conn_rate', 'avg_pkt_size', 'rst_ratio']
+                for i, name in enumerate(feat_names):
+                    col = sec_data['inputs'][:, i]
+                    print(f"    {name:16s}: [{col.min():.4f}, {col.max():.4f}] "
                           f"mean={col.mean():.4f} nonzero={np.count_nonzero(col)}")
 
     print("\n" + "=" * 60)
