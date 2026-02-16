@@ -3,7 +3,9 @@
 #include <stdexcept>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#undef ERROR  // windows.h 定义 #define ERROR 0, 与 LogLevel::ERROR 冲突
 namespace {
     std::wstring to_wide(const std::string& s) {
         if (s.empty()) return {};
