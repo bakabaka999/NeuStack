@@ -19,8 +19,14 @@
 #include <cstring>
 #include <cinttypes>
 #include <chrono>
+
+#ifdef _WIN32
+#include <conio.h>
+#include <io.h>
+#else
 #include <poll.h>
 #include <unistd.h>
+#endif
 
 using namespace neustack;
 
@@ -613,6 +619,18 @@ int main(int argc, char *argv[]) {
             last_fw_timer = now;
         }
 
+        // 非阻塞读取 stdin 命令
+#ifdef _WIN32
+        if (_kbhit()) {
+            char ch = static_cast<char>(_getch());
+            if (ch == '\r' || ch == '\n') {
+                handle_command(cmd_buf, *stack);
+                cmd_buf.clear();
+            } else {
+                cmd_buf += ch;
+            }
+        }
+#else
         struct pollfd pfd = {STDIN_FILENO, POLLIN, 0};
         if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
             char ch;
@@ -625,6 +643,7 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+#endif
     }
 
     LOG_INFO(APP, "shutdown");

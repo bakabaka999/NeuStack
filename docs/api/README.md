@@ -9,6 +9,7 @@ This directory contains the API reference documentation for NeuStack.
 | [Firewall](firewall.md) | Firewall engine API (rule engine, AI anomaly detection, Shadow Mode) |
 | [AI Training](ai-training.md) | AI model training guide |
 | [AI Inference](ai-inference.md) | AI inference engine & NetworkAgent decision layer |
+| [Integration](integration.md) | How to use NeuStack as a library in your project |
 | [NeuStack Core](core.md) | Core API (protocol stack / HTTP / DNS) |
 
 ## Quick Links

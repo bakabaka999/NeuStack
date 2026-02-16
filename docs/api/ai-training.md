@@ -152,7 +152,7 @@ timestamp_ms,packets_total,bytes_total,syn_packets,syn_ack_packets,rst_packets,p
 ### Data Preprocessing
 
 ```bash
-python scripts/csv_to_dataset.py collected_data/ training/real_data/
+python scripts/python/csv_to_dataset.py collected_data/ training/real_data/
 ```
 
 ---

@@ -4,8 +4,7 @@
  */
 
 #include "neustack/common/checksum.hpp"
-
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 namespace neustack {
 

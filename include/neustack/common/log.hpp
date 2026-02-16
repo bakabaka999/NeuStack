@@ -1,12 +1,24 @@
 #ifndef NEUSTACK_COMMON_LOG_HPP
 #define NEUSTACK_COMMON_LOG_HPP
 
+// MinGW 默认 printf 不支持 %zu/%zd，启用 ANSI C99 兼容实现
+#if defined(__MINGW32__) || defined(__MINGW64__)
+    #ifndef __USE_MINGW_ANSI_STDIO
+    #define __USE_MINGW_ANSI_STDIO 1
+    #endif
+#endif
+
 #include <cstdio>
 #include <cstdarg>
 #include <cstdint>
 #include <chrono>
 #include <mutex>
 #include <atomic>
+
+// windows.h 定义了 #define ERROR 0, 必须在定义 LogLevel 之前 undef
+#ifdef ERROR
+#undef ERROR
+#endif
 
 namespace neustack {
 
@@ -106,7 +118,11 @@ public:
     // ─── 核心日志函数 (仅在 should_log 返回 true 时调用) ───
 
     void log_impl(LogModule module, LogLevel level, const char* fmt, ...)
+#if defined(__MINGW32__) || defined(__MINGW64__)
+        __attribute__((format(gnu_printf, 4, 5)))
+#else
         __attribute__((format(printf, 4, 5)))
+#endif
     {
         std::lock_guard<std::mutex> lock(_mutex);
 

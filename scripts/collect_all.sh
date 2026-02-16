@@ -186,7 +186,7 @@ cat << 'EOF'
 【数据合并与训练】
 
   合并所有 CSV 并生成训练数据集:
-    python scripts/csv_to_dataset.py --data-dir collected_data/
+    python scripts/python/csv_to_dataset.py --data-dir collected_data/
 
   训练模型:
     cd training/orca && python train.py --data ../real_data/orca_dataset.npz

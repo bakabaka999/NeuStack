@@ -4,7 +4,13 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
-#include <sys/types.h>
+
+#ifdef _WIN32
+    #include <BaseTsd.h>
+    typedef SSIZE_T ssize_t;
+#else
+    #include <sys/types.h>
+#endif
 
 namespace neustack {
 

@@ -1,7 +1,7 @@
 #ifndef NEUSTACK_TRANSPORT_UDP_HPP
 #define NEUSTACK_TRANSPORT_UDP_HPP
 
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 #include <cstdint>
 #include <functional>
 #include <unordered_map>

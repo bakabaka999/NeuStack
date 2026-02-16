@@ -92,29 +92,45 @@ NeuStack is a **fully from-scratch** user-space TCP/IP stack with AI-driven cong
 - CMake >= 3.20
 - C++20 compiler (Clang >= 14 / GCC >= 11 / MSVC 2019+)
 - Optional: ONNX Runtime (AI inference), Catch2 v3 (tests)
+- Windows only: [Wintun](https://www.wintun.net/) (downloaded automatically by setup)
 
-### Build
+### One-Command Setup
+
+The setup script auto-detects your platform, installs dependencies, downloads ONNX Runtime, and builds the project with AI enabled.
 
 ```bash
-# Clone
+# macOS / Linux
+./setup
+
+# Windows (PowerShell as Administrator)
+.\setup.bat
+# or directly:
+.\scripts\windows\setup.ps1
+```
+
+To build without AI: `./setup --no-ai` (or `.\setup.bat -NoAI` on Windows).
+
+### Manual Build
+
+```bash
 git clone https://github.com/bakabaka999/NeuStack.git
 cd NeuStack
 
-# Build
 cmake -B build -G Ninja
 cmake --build build
 
 # Test
 cd build && ctest --output-on-failure
 
-# Run (requires root)
-sudo ./build/examples/neustack_demo
+# Run (requires root / Administrator)
+sudo ./build/examples/neustack_demo          # macOS / Linux
+.\build\examples\neustack_demo.exe           # Windows (Admin PowerShell)
 ```
 
-### Enable AI
+### Enable AI (manual)
 
 ```bash
-./scripts/download_onnxruntime.sh
+./scripts/download/download_onnxruntime.sh
 cmake -B build -DNEUSTACK_ENABLE_AI=ON
 cmake --build build
 ```
@@ -153,6 +169,7 @@ int main() {
 | [Firewall Guide](docs/api/firewall.md) | Firewall configuration guide |
 | [AI Training](docs/api/ai-training.md) | AI model training guide |
 | [AI Inference](docs/api/ai-inference.md) | AI inference & NetworkAgent API |
+| [Integration Guide](docs/api/integration.md) | Use NeuStack as a library in your project |
 | [Project Whitepaper](docs/project_whitepaper.md) | Project whitepaper (design details) |
 | [Changelog](CHANGELOG.md) | Version history |
 | [Contributing](CONTRIBUTING.md) | Contribution guide |
@@ -189,7 +206,7 @@ cd docker && docker compose up -d
 
 # 2. Clean & generate dataset
 python training/security/data_clean.py --input data/ --output data/cleaned/
-python scripts/csv_to_dataset.py --security data/cleaned/ --output data/security_dataset.npz
+python scripts/python/csv_to_dataset.py --security data/cleaned/ --output data/security_dataset.npz
 
 # 3. Train
 python training/security/train.py --config training/security/config.yaml
@@ -296,8 +313,11 @@ NeuStack/
 │   └── security/              #   Security anomaly detection (Deep AE)
 ├── models/                    # ONNX models
 ├── scripts/                   # Shell scripts
+│   ├── download/              #   Download scripts (ONNX Runtime, Wintun)
+│   ├── python/                #   Python tools (csv_to_dataset, test model gen)
 │   ├── linux/                 #   Linux collection/traffic scripts
-│   └── mac/                   #   macOS collection/traffic scripts
+│   ├── mac/                   #   macOS collection/traffic scripts
+│   └── windows/               #   Windows setup (PowerShell)
 ├── docker/                    # Docker TUN environment
 ├── examples/                  # Example programs
 ├── docs/                      # Documentation

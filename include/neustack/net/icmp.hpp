@@ -1,7 +1,7 @@
 #ifndef NEUSTACK_NET_ICMP_HPP
 #define NEUSTACK_NET_ICMP_HPP
 
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 #include "neustack/net/protocol_handler.hpp"
 #include "neustack/net/ipv4.hpp"

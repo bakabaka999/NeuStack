@@ -17,7 +17,7 @@ cmake -B build -G Ninja
 cmake --build build
 
 # Enable AI
-./scripts/download_onnxruntime.sh
+./scripts/download/download_onnxruntime.sh
 cmake -B build -DNEUSTACK_ENABLE_AI=ON
 cmake --build build
 

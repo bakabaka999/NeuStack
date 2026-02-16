@@ -9,6 +9,7 @@
 #include <vector>
 #include <iostream>
 #include <string>
+#include <cstring>
 #include <neustack/common/log.hpp>
 
 int main() {
@@ -29,9 +30,15 @@ int main() {
 
         // 3. 加载模型
         std::cout << "[3] Loading model..." << std::endl;
-        const char* model_path = "models/test_simple.onnx";
-        Ort::Session session(env, model_path, session_options);
-        std::cout << "    Loaded: " << model_path << std::endl;
+        const char* model_path_str = "models/test_simple.onnx";
+#ifdef _WIN32
+        // Windows: ORTCHAR_T = wchar_t
+        std::wstring wide_path(model_path_str, model_path_str + std::strlen(model_path_str));
+        Ort::Session session(env, wide_path.c_str(), session_options);
+#else
+        Ort::Session session(env, model_path_str, session_options);
+#endif
+        std::cout << "    Loaded: " << model_path_str << std::endl;
 
         // 4. 获取输入/输出信息
         std::cout << "[4] Getting model metadata..." << std::endl;

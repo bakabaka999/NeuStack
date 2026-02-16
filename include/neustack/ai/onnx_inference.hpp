@@ -1,6 +1,9 @@
 #ifndef NEUSTACK_AI_ONNX_INFERENCE_HPP
 #define NEUSTACK_AI_ONNX_INFERENCE_HPP
 
+// MinGW 兼容: 在 ONNX Runtime 头文件之前定义缺失的 SAL 注解和宏
+#include "neustack/ai/onnxruntime_mingw_compat.hpp"
+
 #include <onnxruntime_cxx_api.h>
 #include <string>
 #include <vector>

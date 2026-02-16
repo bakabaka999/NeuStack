@@ -2,7 +2,7 @@
 #include "neustack/common/checksum.hpp"
 #include <vector>
 #include <cstdint>
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 using namespace neustack;
 

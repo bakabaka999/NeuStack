@@ -6,7 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
-#include <arpa/inet.h> 
+#include "neustack/common/platform.hpp" 
 
 using namespace neustack;
 

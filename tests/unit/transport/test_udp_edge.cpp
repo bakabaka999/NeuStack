@@ -3,7 +3,7 @@
 #include "neustack/common/checksum.hpp"
 #include <cstring>
 #include <vector>
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 using namespace neustack;
 

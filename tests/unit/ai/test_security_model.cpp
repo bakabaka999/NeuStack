@@ -127,7 +127,7 @@ TEST_CASE("extract_security: direct ISecurityModel::Input output", "[ai][securit
 // ============================================================================
 
 TEST_CASE("SecurityExporter: CSV output format", "[metrics][security]") {
-    const std::string test_file = "/tmp/test_security_export.csv";
+    const std::string test_file = (std::filesystem::temp_directory_path() / "test_security_export.csv").string();
     // 清理
     std::remove(test_file.c_str());
 
@@ -182,7 +182,7 @@ TEST_CASE("SecurityExporter: CSV output format", "[metrics][security]") {
 }
 
 TEST_CASE("SecurityExporter: column count matches header", "[metrics][security]") {
-    const std::string test_file = "/tmp/test_security_export_cols.csv";
+    const std::string test_file = (std::filesystem::temp_directory_path() / "test_security_export_cols.csv").string();
     std::remove(test_file.c_str());
 
     SecurityMetrics metrics;

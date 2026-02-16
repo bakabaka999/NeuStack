@@ -90,7 +90,7 @@ if [ -f "$ORT_DIR/lib/libonnxruntime.dylib" ]; then
     ORT_FOUND=1
 else
     echo "  Downloading ONNX Runtime ($ORT_PLATFORM)..."
-    if bash "$PROJECT_ROOT/scripts/download_onnxruntime.sh" "$ORT_PLATFORM"; then
+    if bash "$PROJECT_ROOT/scripts/download/download_onnxruntime.sh" "$ORT_PLATFORM"; then
         ORT_FOUND=1
         echo "  ✓ ONNX Runtime downloaded"
     else

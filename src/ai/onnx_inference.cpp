@@ -2,6 +2,25 @@
 #include "neustack/common/log.hpp"
 #include <stdexcept>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef ERROR  // windows.h 定义 #define ERROR 0, 与 LogLevel::ERROR 冲突
+namespace {
+    std::wstring to_wide(const std::string& s) {
+        if (s.empty()) return {};
+        int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+        if (len <= 0) {
+            // fallback: basic ASCII conversion
+            return std::wstring(s.begin(), s.end());
+        }
+        std::wstring ws(len - 1, 0);
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, ws.data(), len);
+        return ws;
+    }
+}
+#endif
+
 using namespace neustack;
 
 Ort::Env &ONNXInference::get_env() {
@@ -30,7 +49,12 @@ ONNXInference::ONNXInference(const std::string& model_path, int num_threads)
 
     // 加载模型
     try {
+#ifdef _WIN32
+        auto wide_path = to_wide(model_path);
+        _session = std::make_unique<Ort::Session>(get_env(), wide_path.c_str(), options);
+#else
         _session = std::make_unique<Ort::Session>(get_env(), model_path.c_str(), options);
+#endif
         LOG_INFO(AI, "Loaded ONNX model: %s", model_path.c_str());
     } catch (const Ort::Exception& e) {
         LOG_ERROR(AI, "Failed to load ONNX model '%s': %s", model_path.c_str(), e.what());

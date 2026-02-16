@@ -3,7 +3,7 @@
 #include "neustack/common/log.hpp"
 
 #include <chrono>
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 namespace neustack {
 

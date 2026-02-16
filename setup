@@ -1,34 +1,38 @@
 #!/bin/bash
-# setup - NeuStack 配置入口
+# setup - NeuStack one-command setup (cross-platform)
 #
-# 自动检测平台并调用对应的配置脚本
+# Auto-detects OS and dispatches to platform-specific scripts.
+# Windows users: run scripts/windows/setup.ps1 in PowerShell.
 #
-# 用法:
-#   ./setup [command]
+# Usage:
+#   ./setup [command] [args...]
 #
-# 命令:
-#   (无)       编译项目
-#   build      同上，编译项目
-#   collect    启动数据采集
-#   traffic    生成流量 (仅 Mac, 需要服务器 IP)
-#   help       显示帮助
+# Commands:
+#   (none)       Build the project (default)
+#   build        Same as above
+#   collect      Start data collection (requires sudo)
+#   traffic IP   Generate traffic to server
+#   help         Show this help
 #
-# 示例:
-#   ./setup                        # 编译
-#   sudo ./setup collect           # 采集数据
-#   ./setup traffic 1.2.3.4        # 向服务器发流量
+# Examples:
+#   ./setup                        # Build
+#   sudo ./setup collect           # Collect data
+#   ./setup traffic 1.2.3.4        # Send traffic to server
 #
-# 跨平台部署流程:
+# Cross-platform deployment:
 #   ┌─────────────────────────────────────────────────────────┐
-#   │  1. Linux 服务器                                         │
+#   │  1. Linux server                                         │
 #   │     scp -r NeuStack user@server:~/                      │
 #   │     ssh server "cd NeuStack && sudo ./setup"            │
 #   │     ssh server "cd NeuStack && sudo ./setup collect"    │
 #   │                                                          │
-#   │  2. Mac 客户端                                           │
+#   │  2. Mac client                                           │
 #   │     ./setup traffic SERVER_IP                           │
 #   │                                                          │
-#   │  3. 服务器 Ctrl+C 停止, 查看 collected_data/             │
+#   │  3. Server: Ctrl+C to stop, check collected_data/       │
+#   │                                                          │
+#   │  4. Windows (PowerShell as Admin)                        │
+#   │     .\scripts\windows\setup.ps1                         │
 #   └─────────────────────────────────────────────────────────┘
 
 set -e
@@ -39,9 +43,10 @@ cd "$SCRIPT_DIR"
 # 检测平台
 detect_platform() {
     case "$(uname -s)" in
-        Darwin*)  echo "mac";;
-        Linux*)   echo "linux";;
-        *)        echo "unknown";;
+        Darwin*)       echo "mac" ;;
+        Linux*)        echo "linux" ;;
+        MINGW*|MSYS*)  echo "windows" ;;
+        *)             echo "unknown" ;;
     esac
 }
 
@@ -57,7 +62,7 @@ show_help() {
     echo "Commands:"
     echo "  build           Build NeuStack (default)"
     echo "  collect         Start data collection (requires sudo)"
-    echo "  traffic IP      Generate traffic to server (Mac only)"
+    echo "  traffic IP      Generate traffic to server"
     echo "  help            Show this help"
     echo ""
     echo "Platform: $PLATFORM"
@@ -67,11 +72,9 @@ show_help() {
     echo "  sudo ./setup collect        # Collect data"
     echo "  ./setup traffic 1.2.3.4     # Send traffic to server"
     echo ""
-    echo "Workflow for real network data:"
-    echo "  1. Copy NeuStack to Linux server"
-    echo "  2. On server: sudo ./setup && sudo ./setup collect"
-    echo "  3. On Mac:    ./setup traffic SERVER_IP"
-    echo "  4. On server: Ctrl+C to stop, check collected_data/"
+    echo "Windows:"
+    echo "  Run in PowerShell as Administrator:"
+    echo "  .\\scripts\\windows\\setup.ps1"
 }
 
 # 主逻辑
@@ -80,9 +83,18 @@ case "$COMMAND" in
         echo "Platform: $PLATFORM"
         echo ""
         if [ "$PLATFORM" = "mac" ]; then
-            bash scripts/mac/setup.sh
+            bash scripts/mac/setup.sh "${@:2}"
         elif [ "$PLATFORM" = "linux" ]; then
-            bash scripts/linux/setup.sh
+            bash scripts/linux/setup.sh "${@:2}"
+        elif [ "$PLATFORM" = "windows" ]; then
+            echo "Windows detected (MSYS/MinGW shell)."
+            echo ""
+            echo "Please use PowerShell instead:"
+            echo "  .\\scripts\\windows\\setup.ps1"
+            echo ""
+            echo "Or from this shell, try:"
+            echo "  powershell -ExecutionPolicy Bypass -File scripts/windows/setup.ps1"
+            exit 1
         else
             echo "ERROR: Unsupported platform: $(uname -s)"
             exit 1
@@ -90,14 +102,13 @@ case "$COMMAND" in
         ;;
 
     collect)
+        shift
         if [ "$PLATFORM" = "mac" ]; then
-            shift
             exec bash scripts/mac/collect.sh "$@"
         elif [ "$PLATFORM" = "linux" ]; then
-            shift
             exec bash scripts/linux/collect.sh "$@"
         else
-            echo "ERROR: Unsupported platform"
+            echo "ERROR: collect not supported on $PLATFORM"
             exit 1
         fi
         ;;

@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  ONNX_VERSION: "1.17.0"
+  WINTUN_VERSION: "0.14.1"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: neustack-linux-x64
+            ort_platform: linux-x64
+            ort_archive: onnxruntime-linux-x64
+            ort_ext: tgz
+            ort_lib: lib/libonnxruntime.so
+          - os: macos-latest
+            artifact: neustack-macos-arm64
+            ort_platform: osx-arm64
+            ort_archive: onnxruntime-osx-arm64
+            ort_ext: tgz
+            ort_lib: lib/libonnxruntime.dylib
+          - os: windows-latest
+            artifact: neustack-windows-x64
+            ort_platform: win-x64
+            ort_archive: onnxruntime-win-x64
+            ort_ext: zip
+            ort_lib: lib/onnxruntime.dll
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ─── Dependencies ───
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      # ─── ONNX Runtime (all platforms) ───
+      - name: Download ONNX Runtime (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ORT_NAME="${{ matrix.ort_archive }}-${{ env.ONNX_VERSION }}"
+          curl -sL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/${ORT_NAME}.tgz" | tar xz -C /tmp
+          mkdir -p third_party/onnxruntime/${{ matrix.ort_platform }}
+          cp -r /tmp/${ORT_NAME}/* third_party/onnxruntime/${{ matrix.ort_platform }}/
+
+      - name: Download ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ORT_NAME = "${{ matrix.ort_archive }}-${{ env.ONNX_VERSION }}"
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/${ORT_NAME}.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ort.zip"
+          Expand-Archive -Path "$env:TEMP\ort.zip" -DestinationPath "$env:TEMP\ort"
+          New-Item -ItemType Directory -Force -Path "third_party\onnxruntime\${{ matrix.ort_platform }}"
+          Copy-Item -Recurse "$env:TEMP\ort\${ORT_NAME}\*" "third_party\onnxruntime\${{ matrix.ort_platform }}\"
+
+      # ─── Wintun (Windows only) ───
+      - name: Download Wintun
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://www.wintun.net/builds/wintun-${{ env.WINTUN_VERSION }}.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\wintun.zip"
+          Expand-Archive -Path "$env:TEMP\wintun.zip" -DestinationPath "$env:TEMP\wintun"
+          Copy-Item "$env:TEMP\wintun\wintun\bin\amd64\wintun.dll" "."
+
+      # ─── Build ───
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNEUSTACK_ENABLE_AI=ON \
+            -DNEUSTACK_BUILD_TESTS=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DNEUSTACK_ENABLE_AI=ON `
+            -DNEUSTACK_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      # ─── Package ───
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          TAG=${{ github.ref_name }}
+          PKG="${{ matrix.artifact }}-${TAG}"
+          cmake --install build --prefix "${PKG}"
+
+          # Bundle ONNX Runtime shared library
+          ORT_DIR="third_party/onnxruntime/${{ matrix.ort_platform }}"
+          mkdir -p "${PKG}/lib"
+          cp -P ${ORT_DIR}/lib/libonnxruntime* "${PKG}/lib/" 2>/dev/null || true
+
+          # Bundle ONNX models
+          [ -d models ] && cp -r models "${PKG}/"
+
+          tar czf "${PKG}.tar.gz" "${PKG}"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $TAG = "${{ github.ref_name }}"
+          $PKG = "${{ matrix.artifact }}-${TAG}"
+          cmake --install build --prefix "${PKG}"
+
+          # Bundle ONNX Runtime DLL
+          $ortDir = "third_party\onnxruntime\${{ matrix.ort_platform }}"
+          Copy-Item "$ortDir\lib\onnxruntime.dll" "${PKG}\lib\" -ErrorAction SilentlyContinue
+          Copy-Item "$ortDir\lib\onnxruntime.lib" "${PKG}\lib\" -ErrorAction SilentlyContinue
+
+          # Bundle Wintun DLL
+          if (Test-Path "wintun.dll") {
+            Copy-Item "wintun.dll" "${PKG}\lib\"
+          }
+
+          # Bundle ONNX models
+          if (Test-Path "models") { Copy-Item -Recurse "models" "${PKG}\" }
+
+          Compress-Archive -Path "${PKG}" -DestinationPath "${PKG}.zip"
+
+      # ─── Upload artifact ───
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}-*.tar.gz
+            ${{ matrix.artifact }}-*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
