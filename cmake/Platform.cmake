@@ -24,6 +24,15 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # MinGW: 启用 C99 兼容 printf，支持 %zu/%zd
     add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
 
+    # MinGW GCC: ONNX Runtime 兼容
+    # 全局强制预包含兼容头文件, 确保 _stdcall 映射和 SAL 注解对所有编译单元生效
+    # (包括测试文件等不经过 onnx_inference.hpp 的文件)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(
+            "-include" "${CMAKE_SOURCE_DIR}/include/neustack/ai/onnxruntime_mingw_compat.hpp"
+        )
+    endif()
+
 else()
     message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
 endif()
