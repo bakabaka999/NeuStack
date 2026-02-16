@@ -119,6 +119,9 @@ elseif(NEUSTACK_PLATFORM_WINDOWS)
         src/hal/device.cpp
         src/hal/hal_windows.cpp
     )
+    # Wintun: loaded at runtime, no build-time dependency
+    # User must place wintun.dll in the working directory
+    # Download: https://www.wintun.net/
 endif()
 
 # AI sources (optional)
