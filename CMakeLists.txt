@@ -177,7 +177,9 @@ elseif(NEUSTACK_PLATFORM_WINDOWS)
 endif()
 
 if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
-    target_include_directories(neustack_lib PUBLIC ${ONNXRUNTIME_INCLUDE_DIRS})
+    target_include_directories(neustack_lib PUBLIC
+        $<BUILD_INTERFACE:${ONNXRUNTIME_INCLUDE_DIRS}>
+    )
     target_link_libraries(neustack_lib PRIVATE ${ONNXRUNTIME_LIBRARIES})
     target_compile_definitions(neustack_lib PUBLIC NEUSTACK_AI_ENABLED)
 endif()
