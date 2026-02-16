@@ -31,7 +31,10 @@ jobs:
           - os: macos-latest
             build_type: Release
             ai_enabled: OFF
-          # Windows: Release only (no AI — ONNX Runtime setup is complex on Windows CI)
+          # Windows: Release (with and without AI)
+          - os: windows-latest
+            build_type: Release
+            ai_enabled: ON
           - os: windows-latest
             build_type: Release
             ai_enabled: OFF
@@ -95,6 +98,17 @@ jobs:
           fi
           curl -sL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/${ORT_NAME}.tgz" | tar xz -C /tmp
           echo "ONNXRUNTIME_ROOT=/tmp/${ORT_NAME}" >> $GITHUB_ENV
+
+      - name: Install ONNX Runtime (Windows)
+        if: matrix.ai_enabled == 'ON' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ONNX_VERSION = "1.17.0"
+          $ORT_NAME = "onnxruntime-win-x64-$ONNX_VERSION"
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$ONNX_VERSION/$ORT_NAME.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ort.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\ort.zip" -DestinationPath "$env:RUNNER_TEMP"
+          echo "ONNXRUNTIME_ROOT=$env:RUNNER_TEMP\$ORT_NAME" >> $env:GITHUB_ENV
 
       # ─── Configure ───
       - name: Configure (Unix)

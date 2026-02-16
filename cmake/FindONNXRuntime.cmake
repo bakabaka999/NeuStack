@@ -8,7 +8,14 @@
 #   ONNXRUNTIME_LIBRARIES    - 库文件路径
 #   ONNXRUNTIME_PLATFORM     - 当前平台标识
 
-set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
+# 优先使用环境变量 / CMake 变量，否则默认 third_party 目录
+if(NOT ONNXRUNTIME_ROOT)
+    if(DEFINED ENV{ONNXRUNTIME_ROOT})
+        set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_ROOT}")
+    else()
+        set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
+    endif()
+endif()
 
 # ─── 检测平台 ───
 if(APPLE)
@@ -41,19 +48,24 @@ endif()
 set(ONNXRUNTIME_DIR "${ONNXRUNTIME_ROOT}/${ONNXRUNTIME_PLATFORM}")
 
 # ─── 查找头文件和库 ───
-# ONNX Runtime 的头文件可能在 include/ 或 include/onnxruntime/ 下
+# 搜索 ${ROOT}/${PLATFORM}/ (本地 third_party 结构) 和 ${ROOT}/ (CI 下载的扁平结构)
 find_path(ONNXRUNTIME_INCLUDE_DIR
     NAMES onnxruntime_cxx_api.h
     PATHS
         "${ONNXRUNTIME_DIR}/include"
         "${ONNXRUNTIME_DIR}/include/onnxruntime"
         "${ONNXRUNTIME_DIR}/include/onnxruntime/core/session"
+        "${ONNXRUNTIME_ROOT}/include"
+        "${ONNXRUNTIME_ROOT}/include/onnxruntime"
+        "${ONNXRUNTIME_ROOT}/include/onnxruntime/core/session"
     NO_DEFAULT_PATH
 )
 
 find_library(ONNXRUNTIME_LIBRARY
     NAMES onnxruntime
-    PATHS "${ONNXRUNTIME_DIR}/lib"
+    PATHS
+        "${ONNXRUNTIME_DIR}/lib"
+        "${ONNXRUNTIME_ROOT}/lib"
     NO_DEFAULT_PATH
 )
 
