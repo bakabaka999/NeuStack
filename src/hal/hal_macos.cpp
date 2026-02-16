@@ -8,7 +8,7 @@
 #include "neustack/hal/hal_macos.hpp"
 #include "neustack/common/log.hpp"
 
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 #include <cstring>
 #include <fcntl.h>
 #include <net/if.h>

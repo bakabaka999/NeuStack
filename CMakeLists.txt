@@ -53,9 +53,21 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 endif()
 
 # MinGW: 使用符合标准的 printf，支持 %zu 等格式符
-# MINGW 变量有时不可靠 (Ninja generator)，用编译器宏双保险
+# 多重检测：MINGW 变量 / WIN32+GNU / 直接检测编译器宏
 if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
     add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
+elseif(WIN32)
+    # 兜底：检测编译器是否为 MinGW（有些 generator 不设置 MINGW 变量）
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles("
+        #ifndef __MINGW32__
+        #error not mingw
+        #endif
+        int main() { return 0; }
+    " _IS_MINGW)
+    if(_IS_MINGW)
+        add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
+    endif()
 endif()
 
 # ============================================================================
@@ -184,6 +196,11 @@ if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
     target_include_directories(neustack_lib PUBLIC ${ONNXRUNTIME_INCLUDE_DIRS})
     target_link_libraries(neustack_lib PRIVATE ${ONNXRUNTIME_LIBRARIES})
     target_compile_definitions(neustack_lib PUBLIC NEUSTACK_AI_ENABLED)
+endif()
+
+# MinGW: 确保 %zu 等格式符支持 (target 级别，比目录级更可靠)
+if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+    target_compile_definitions(neustack_lib PUBLIC __USE_MINGW_ANSI_STDIO=1)
 endif()
 
 # ============================================================================

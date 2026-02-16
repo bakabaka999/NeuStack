@@ -21,6 +21,17 @@
 #endif
 #include <windows.h>
 
+// windows.h 重新污染的宏，必须清理
+#ifdef ERROR
+#undef ERROR
+#endif
+#ifdef DELETE
+#undef DELETE
+#endif
+#ifdef IN
+#undef IN
+#endif
+
 using namespace neustack;
 
 // ─── Wintun 函数签名 (与 wintun.h 一致) ───

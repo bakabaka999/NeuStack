@@ -19,7 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 using namespace neustack;
 
