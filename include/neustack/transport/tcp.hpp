@@ -2,7 +2,7 @@
 #define NEUSTACK_TRANSPORT_TCP_HPP
 
 #include <cstdint>
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 namespace neustack {
 

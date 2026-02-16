@@ -8,6 +8,11 @@
 #include <mutex>
 #include <atomic>
 
+// windows.h 定义了 #define ERROR 0, 必须在定义 LogLevel 之前 undef
+#ifdef ERROR
+#undef ERROR
+#endif
+
 namespace neustack {
 
 // ============================================================================

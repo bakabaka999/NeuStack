@@ -1,7 +1,7 @@
 #ifndef NEUSTACK_NET_IPV4_HPP
 #define NEUSTACK_NET_IPV4_HPP
 
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 
 #include <cstdint>
 #include <memory>

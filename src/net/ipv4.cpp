@@ -9,7 +9,7 @@
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/common/log.hpp"
 
-#include <arpa/inet.h>
+#include "neustack/common/platform.hpp"
 #include <cstring>
 
 using namespace neustack;
