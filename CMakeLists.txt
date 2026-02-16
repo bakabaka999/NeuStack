@@ -52,23 +52,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_compile_options(/W4 /utf-8)
 endif()
 
-# MinGW: 使用符合标准的 printf，支持 %zu 等格式符
-# 多重检测：MINGW 变量 / WIN32+GNU / 直接检测编译器宏
-if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-    add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
-elseif(WIN32)
-    # 兜底：检测编译器是否为 MinGW（有些 generator 不设置 MINGW 变量）
-    include(CheckCXXSourceCompiles)
-    check_cxx_source_compiles("
-        #ifndef __MINGW32__
-        #error not mingw
-        #endif
-        int main() { return 0; }
-    " _IS_MINGW)
-    if(_IS_MINGW)
-        add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
-    endif()
-endif()
+# MinGW %zu support: handled in cmake/Platform.cmake
 
 # ============================================================================
 # Include Directories

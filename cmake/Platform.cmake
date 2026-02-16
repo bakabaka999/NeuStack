@@ -21,6 +21,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(NEUSTACK_PLATFORM_NAME "Windows")
     message(STATUS "Platform: Windows - using Wintun")
 
+    # MinGW: 启用 C99 兼容 printf，支持 %zu/%zd
+    add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
+
 else()
     message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
 endif()

@@ -21,6 +21,11 @@
 #endif
 #include <windows.h>
 
+// windows.h 宏污染清理 — 与 LogLevel::ERROR 冲突
+#ifdef ERROR
+#undef ERROR
+#endif
+
 // windows.h 重新污染的宏，必须清理
 #ifdef ERROR
 #undef ERROR
