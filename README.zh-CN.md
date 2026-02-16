@@ -169,6 +169,8 @@ int main() {
 | [Firewall Guide](docs/api/firewall.md) | 防火墙配置指南 |
 | [AI Training](docs/api/ai-training.md) | AI 模型训练流程 |
 | [AI Inference](docs/api/ai-inference.md) | AI 推理 & NetworkAgent API |
+| [集成指南](docs/api/integration.md) | 将 NeuStack 作为库集成到你的项目 |
+| [Integration](docs/api/integration.md) | 将 NeuStack 作为第三方库集成到你的项目 |
 | [Project Whitepaper](docs/project_whitepaper.md) | 项目白皮书 (设计细节) |
 | [Changelog](CHANGELOG.md) | 版本更新记录 |
 | [Contributing](CONTRIBUTING.md) | 贡献指南 |

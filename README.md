@@ -169,6 +169,7 @@ int main() {
 | [Firewall Guide](docs/api/firewall.md) | Firewall configuration guide |
 | [AI Training](docs/api/ai-training.md) | AI model training guide |
 | [AI Inference](docs/api/ai-inference.md) | AI inference & NetworkAgent API |
+| [Integration Guide](docs/api/integration.md) | Use NeuStack as a library in your project |
 | [Project Whitepaper](docs/project_whitepaper.md) | Project whitepaper (design details) |
 | [Changelog](CHANGELOG.md) | Version history |
 | [Contributing](CONTRIBUTING.md) | Contribution guide |

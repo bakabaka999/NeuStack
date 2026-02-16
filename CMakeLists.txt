@@ -206,12 +206,40 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
+include(CMakePackageConfigHelpers)
+
 install(TARGETS neustack_lib
+    EXPORT NeuStackTargets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
 
 install(DIRECTORY include/neustack DESTINATION include)
+
+# Generate CMake package config files for find_package(NeuStack)
+install(EXPORT NeuStackTargets
+    FILE NeuStackTargets.cmake
+    NAMESPACE NeuStack::
+    DESTINATION lib/cmake/NeuStack
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/NeuStackConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/NeuStack
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/NeuStackConfigVersion.cmake"
+    DESTINATION lib/cmake/NeuStack
+)
 
 # ============================================================================
 # Summary
