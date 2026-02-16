@@ -4,18 +4,28 @@
 /**
  * MinGW 兼容层 for ONNX Runtime C API headers
  *
- * 问题: onnxruntime_c_api.h 使用了 MSVC 独有的 SAL 注解 (_In_, _Out_, etc.)
- *       和 ORT_API_CALL 宏。在 MinGW (定义 _WIN32 但没有 _MSC_VER) 下
- *       这些宏可能未定义或定义不正确，导致编译失败。
+ * 核心问题:
+ *   onnxruntime_c_api.h 在 _WIN32 下定义 ORT_API_CALL 为 _stdcall (单下划线),
+ *   这是 MSVC 扩展。MinGW GCC 只认 __stdcall (双下划线), 不认 _stdcall,
+ *   导致所有函数指针声明解析失败。
  *
- * 方案: 在 include ONNX Runtime 头文件之前，先 include 此文件，
- *       将所有缺失的 SAL 注解定义为空。
+ *   同时, SAL2 注解 (_Check_return_, _Ret_maybenull_ 等) 在 _WIN32 路径下
+ *   假设由 Windows SDK 提供, 但 MinGW 的 SDK 可能缺少部分扩展注解。
+ *
+ * 方案:
+ *   在 include ONNX Runtime 头文件之前 include 此文件。
  */
 
 #if defined(__MINGW32__) || defined(__MINGW64__)
 
+// ─── 调用约定兼容 ───
+// _stdcall 是 MSVC 扩展, MinGW GCC 不认识, 映射到 GCC 认识的 __stdcall
+#ifndef _stdcall
+#define _stdcall __stdcall
+#endif
+
 // ─── SAL (Source Annotation Language) 空实现 ───
-// MSVC 用这些做静态分析，MinGW 不需要
+// MSVC 用这些做静态分析, MinGW 不需要, 定义为空即可
 
 #ifndef _In_
 #define _In_
@@ -82,42 +92,6 @@
 
 #ifndef _Success_
 #define _Success_(x)
-#endif
-
-// ─── ORT_API_CALL: 在 MinGW 下使用 __stdcall ───
-// ONNX Runtime 在 _WIN32 + _MSC_VER 下定义为 __stdcall
-// MinGW GCC 也支持 __stdcall，但 onnxruntime header 可能检测不到
-
-#ifndef ORT_API_CALL
-#define ORT_API_CALL __stdcall
-#endif
-
-// ─── NO_EXCEPTION ───
-#ifndef NO_EXCEPTION
-#ifdef __cplusplus
-#define NO_EXCEPTION noexcept
-#else
-#define NO_EXCEPTION
-#endif
-#endif
-
-// ─── ORT_MUST_USE_RESULT ───
-#ifndef ORT_MUST_USE_RESULT
-#if __has_cpp_attribute(nodiscard)
-#define ORT_MUST_USE_RESULT [[nodiscard]]
-#else
-#define ORT_MUST_USE_RESULT
-#endif
-#endif
-
-// ─── ORT_ALL_ARGS_NONNULL ───
-#ifndef ORT_ALL_ARGS_NONNULL
-#define ORT_ALL_ARGS_NONNULL __attribute__((nonnull))
-#endif
-
-// ─── ORT_EXPORT ───
-#ifndef ORT_EXPORT
-#define ORT_EXPORT __attribute__((visibility("default")))
 #endif
 
 #endif // __MINGW32__ || __MINGW64__
