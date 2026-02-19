@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <atomic>
 #include <array>
+#include <cassert>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -154,6 +155,12 @@ public:
         , _boundaries(std::move(boundaries))
         , _bucket_count(_boundaries.size() + 1)  // +1 for +Inf
     {
+        assert(!_boundaries.empty() && "Histogram needs at least one boundary");
+        assert(_bucket_count <= MAX_BUCKETS && "Too many buckets");
+        for (size_t i = 1; i < _boundaries.size(); ++i) {
+            assert(_boundaries[i] > _boundaries[i - 1]
+                   && "Histogram boundaries must be strictly increasing");
+        }
         for (size_t i = 0; i < MAX_BUCKETS; ++i) {
             _buckets[i].store(0, std::memory_order_relaxed);
         }

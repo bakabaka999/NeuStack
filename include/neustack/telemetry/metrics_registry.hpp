@@ -93,8 +93,9 @@ public:
         auto ptr = std::make_unique<Counter>(MetricMeta{name, help, unit});
         auto& ref = *ptr;
         std::lock_guard lock(_mutex);
+        bool is_new = (_counters.find(name) == _counters.end());
         _counters[name] = std::move(ptr);
-        _order.push_back({MetricKind::COUNTER, name});
+        if (is_new) _order.push_back({MetricKind::COUNTER, name});
         return ref;
     }
 
@@ -111,8 +112,9 @@ public:
         auto ptr = std::make_unique<Gauge>(MetricMeta{name, help, unit});
         auto& ref = *ptr;
         std::lock_guard lock(_mutex);
+        bool is_new = (_gauges.find(name) == _gauges.end());
         _gauges[name] = std::move(ptr);
-        _order.push_back({MetricKind::GAUGE, name});
+        if (is_new) _order.push_back({MetricKind::GAUGE, name});
         return ref;
     }
 
@@ -132,8 +134,9 @@ public:
             MetricMeta{name, help, unit}, std::move(boundaries));
         auto& ref = *ptr;
         std::lock_guard lock(_mutex);
+        bool is_new = (_histograms.find(name) == _histograms.end());
         _histograms[name] = std::move(ptr);
-        _order.push_back({MetricKind::HISTOGRAM, name});
+        if (is_new) _order.push_back({MetricKind::HISTOGRAM, name});
         return ref;
     }
 
@@ -157,8 +160,9 @@ public:
     void bridge_gauge(const std::string& name, const std::string& help,
                       GaugeCallback cb, const std::string& unit = "") {
         std::lock_guard lock(_mutex);
+        bool is_new = (_bridges.find(name) == _bridges.end());
         _bridges[name] = {MetricMeta{name, help, unit}, std::move(cb)};
-        _order.push_back({MetricKind::BRIDGE_GAUGE, name});
+        if (is_new) _order.push_back({MetricKind::BRIDGE_GAUGE, name});
     }
 
     // ─── 遍历接口 (导出器使用) ───
