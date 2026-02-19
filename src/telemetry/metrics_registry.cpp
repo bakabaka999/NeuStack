@@ -1,6 +1,6 @@
 #include "neustack/telemetry/metrics_registry.hpp"
 
-void neustack::telemetry::register_builtin_metrics(GlobalMetrics &gm, SecurityMetrics *sm) {
+void neustack::telemetry::register_builtin_metrics(GlobalMetrics &gm, const SecurityMetrics *sm) {
     auto& reg = MetricsRegistry::instance();
 
     // ─── 包统计 (桥接 GlobalMetrics atomic counters) ───

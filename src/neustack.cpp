@@ -148,7 +148,7 @@ struct NeuStack::Impl {
         }
 
         // 9. Telemetry 指标注册
-        SecurityMetrics* sm = (firewall && firewall->ai())
+        const SecurityMetrics* sm = (firewall && firewall->ai())
             ? &firewall->ai()->metrics() : nullptr;
         telemetry::register_builtin_metrics(global_metrics(), sm);
         LOG_INFO(APP, "Telemetry registry initialized (%zu metrics)",

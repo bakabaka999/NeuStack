@@ -240,7 +240,7 @@ private:
  *   - bridge_gauge 的回调捕获 GlobalMetrics 引用，每次导出时调用
  *   - 这种方式零开销：数据面完全不受影响
  */
-void register_builtin_metrics(GlobalMetrics &gm, SecurityMetrics *sm);
+void register_builtin_metrics(GlobalMetrics &gm, const SecurityMetrics *sm);
 
 } // namespace neustack::telemetry
 
