@@ -60,6 +60,9 @@ neustack_add_test(test_firewall_ai  unit/firewall/test_firewall_ai.cpp)
 # --- 安全模型测试 (security/) ---
 neustack_add_test(test_security_model unit/ai/test_security_model.cpp)
 
+# --- Telemetry测试（telemetry/）---
+neustack_add_test(test_metrics_registry unit/telemetry/test_metrics_registry.cpp)
+
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)
 target_link_libraries(test_tcp_handshake PRIVATE neustack_lib)
@@ -109,6 +112,10 @@ add_test(NAME "Benchmark: HTTP test" COMMAND bench_http)
 add_executable(bench_memory_pool benchmark/bench_memory_pool.cpp)
 target_link_libraries(bench_memory_pool PRIVATE neustack_lib)
 add_test(NAME "Benchmark: Memory pool test" COMMAND bench_memory_pool)
+
+add_executable(bench_metrics_hotpath benchmark/bench_metrics_hotpath.cpp)
+target_link_libraries(bench_metrics_hotpath PRIVATE neustack_lib)
+add_test(NAME "Benchmark: Metrics hotpath" COMMAND bench_metrics_hotpath)
 
 # --- AI 智能平面相关测试 ---
 # 仅在 NEUSTACK_ENABLE_AI 选项开启时编译

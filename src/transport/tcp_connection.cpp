@@ -4,6 +4,7 @@
 #include "neustack/transport/tcp_reno.hpp"
 #include "neustack/transport/tcp_cubic.hpp"
 #include "neustack/transport/tcp_orca.hpp"
+#include "neustack/telemetry/metrics_registry.hpp"
 
 using namespace neustack;
 
@@ -1151,6 +1152,12 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
 void TCPConnectionManager::update_rtt(TCB *tcb, uint32_t rtt_us) {
     // ─── AI 指标采集: 保存瞬时 RTT ───
     tcb->last_rtt_us = rtt_us;
+
+    // ─── Telemetry: feed RTT histogram ───
+    if (auto* hist = telemetry::MetricsRegistry::instance()
+            .find_histogram("neustack_tcp_rtt_us")) {
+        hist->observe(static_cast<double>(rtt_us));
+    }
 
     // ─── AI 指标采集: 跟踪最小 RTT ───
     // 只在 ESTABLISHED 状态后才更新 min_rtt
