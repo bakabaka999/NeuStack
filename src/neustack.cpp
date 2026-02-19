@@ -1,4 +1,5 @@
 #include "neustack/neustack.hpp"
+#include "neustack/telemetry/metrics_registry.hpp"
 
 #ifdef NEUSTACK_AI_ENABLED
 #include "neustack/ai/intelligence_plane.hpp"
@@ -145,6 +146,13 @@ struct NeuStack::Impl {
             LOG_INFO(APP, "Security collection: %s (label=%d)",
                      sec_path.c_str(), config.security_label);
         }
+
+        // 9. Telemetry 指标注册
+        SecurityMetrics* sm = (firewall && firewall->ai())
+            ? &firewall->ai()->metrics() : nullptr;
+        telemetry::register_builtin_metrics(global_metrics(), sm);
+        LOG_INFO(APP, "Telemetry registry initialized (%zu metrics)",
+                 telemetry::MetricsRegistry::instance().size());
 
         return true;
     }

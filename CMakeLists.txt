@@ -100,6 +100,11 @@ set(METRICS_SOURCES
     src/metrics/ai_features.cpp
 )
 
+# Telemetry sources (v1.3: observability)
+set(TELEMETRY_SOURCES
+    src/telemetry/metrics_registry.cpp
+)
+
 set(FIREWALL_SOURCES
     src/firewall/firewall_engine.cpp
     src/firewall/firewall_ai.cpp
@@ -157,6 +162,7 @@ add_library(neustack_lib STATIC
     ${TRANSPORT_SOURCES}
     ${APP_SOURCES}
     ${METRICS_SOURCES}
+    ${TELEMETRY_SOURCES}
     ${FIREWALL_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
