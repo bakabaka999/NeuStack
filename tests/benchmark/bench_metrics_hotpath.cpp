@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <thread>
 #include <vector>
+#include <cinttypes>
 
 using namespace neustack::telemetry;
 
@@ -28,7 +29,7 @@ BenchResult run_bench(const char* name, uint64_t ops, Fn fn) {
 }
 
 void print_result(const BenchResult& r) {
-    printf("  %-45s  %8.1f ns/op  (%lu ops)\n", r.name, r.ns_per_op, r.ops);
+    printf("  %-45s  %8.1f ns/op  (%" PRIu64 " ops)\n", r.name, r.ns_per_op, r.ops);
 }
 
 int main() {
@@ -156,7 +157,7 @@ int main() {
         auto end = std::chrono::high_resolution_clock::now();
 
         double ns = std::chrono::duration<double, std::nano>(end - start).count();
-        printf("  %-45s  %8.1f ns/op  (%d threads x %lu ops)\n",
+        printf("  %-45s  %8.1f ns/op  (%d threads x %" PRIu64 " ops)\n",
                "Counter::increment() [4 threads contended]",
                ns / (THREADS * OPS_PER_THREAD), THREADS, OPS_PER_THREAD);
     }

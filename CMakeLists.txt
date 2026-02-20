@@ -103,6 +103,7 @@ set(METRICS_SOURCES
 # Telemetry sources (v1.3: observability)
 set(TELEMETRY_SOURCES
     src/telemetry/metrics_registry.cpp
+    src/telemetry/json_exporter.cpp
 )
 
 set(FIREWALL_SOURCES
