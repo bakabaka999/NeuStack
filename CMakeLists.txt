@@ -104,6 +104,7 @@ set(METRICS_SOURCES
 set(TELEMETRY_SOURCES
     src/telemetry/metrics_registry.cpp
     src/telemetry/json_exporter.cpp
+    src/telemetry/prometheus_exporter.cpp
 )
 
 set(FIREWALL_SOURCES
