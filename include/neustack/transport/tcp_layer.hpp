@@ -163,6 +163,11 @@ public:
      */
     MetricsBuffer<TCPSample, 1024>& metrics_buffer() { return _metrics_buf; }
 
+    /**
+     * @brief 获取连接管理器引用 (Telemetry API 用)
+     */
+    TCPConnectionManager& connection_manager() { return _tcp_mgr; }
+
 private:
     friend class TCPStreamConnection;  // 允许访问 _tcp_mgr
 

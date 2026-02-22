@@ -351,6 +351,18 @@ bool TCPConnectionManager::is_port_in_use(uint16_t port) const {
     return false;
 }
 
+void TCPConnectionManager::for_each_connection(ConnectionVisitor visitor) const {
+    for (const auto& [key, tcb] : _connections) {
+        if (tcb->state != TCPState::CLOSED) {
+            visitor(*tcb);
+        }
+    }
+}
+
+size_t TCPConnectionManager::connection_count() const {
+    return _connections.size();
+}
+
 TCB *TCPConnectionManager::find_tcb(const TCPTuple &t_tuple) {
     auto it = _connections.find(t_tuple);
     if (it != _connections.end()) {
