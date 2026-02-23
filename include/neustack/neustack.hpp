@@ -30,6 +30,9 @@
 #include "neustack/metrics/metric_exporter.hpp"
 #include "neustack/metrics/security_exporter.hpp"
 
+// ─── Telemetry API ───
+#include "neustack/telemetry/telemetry_api.hpp"
+
 namespace neustack {
 
 struct StackConfig {
@@ -106,6 +109,14 @@ public:
     SampleExporter  *sample_exporter();    // 未配置采集时返回 nullptr
     MetricsExporter *metrics_exporter();   // 未配置采集时返回 nullptr
     SecurityExporter *security_exporter(); // 未配置采集时返回 nullptr
+
+    // ─── Telemetry API ───
+    telemetry::TelemetryAPI &telemetry();
+    const telemetry::TelemetryAPI &telemetry() const;
+
+    // 便捷方法 (等同于 telemetry().to_json() / to_prometheus())
+    std::string status_json(bool pretty = false);
+    std::string status_prometheus();
 
     // ─── AI 智能面 ───
     bool ai_enabled() const;

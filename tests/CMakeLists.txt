@@ -62,6 +62,9 @@ neustack_add_test(test_security_model unit/ai/test_security_model.cpp)
 
 # --- Telemetry测试（telemetry/）---
 neustack_add_test(test_metrics_registry unit/telemetry/test_metrics_registry.cpp)
+neustack_add_test(test_prometheus_exporter unit/telemetry/test_prometheus_exporter.cpp)
+neustack_add_test(test_json_exporter unit/telemetry/test_json_exporter.cpp)
+neustack_add_test(test_telemetry_api unit/telemetry/test_telemetry_api.cpp)
 
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)

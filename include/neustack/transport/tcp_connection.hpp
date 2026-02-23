@@ -48,6 +48,18 @@ public:
     // 检查本地端口是否已被使用
     bool is_port_in_use(uint16_t port) const;
 
+    // ─── Telemetry 遍历接口 (v1.3) ───
+    
+    /**
+     * 遍历所有活跃连接 (v1.3 Telemetry)
+     * ⚠️ 仅在协议栈单线程上下文中调用
+     */
+    using ConnectionVisitor = std::function<void(const TCB&)>;
+    void for_each_connection(ConnectionVisitor visitor) const;
+
+    /** 获取当前活跃连接数 */
+    size_t connection_count() const;
+
 public:
     // ─── 主动操作 (应用层调用) ───
 
