@@ -24,11 +24,12 @@ macro(neustack_add_test name source)
 endmacro()
 
 # --- 基础通用组件测试 (common/) ---
-neustack_add_test(test_checksum    unit/common/test_checksum.cpp)
-neustack_add_test(test_ip_addr     unit/common/test_ip_addr.cpp)
-neustack_add_test(test_ring_buffer unit/common/test_ring_buffer.cpp)
-neustack_add_test(test_spsc_queue  unit/common/test_spsc_queue.cpp)
-neustack_add_test(test_memory_pool unit/common/test_memory_pool.cpp)
+neustack_add_test(test_checksum     unit/common/test_checksum.cpp)
+neustack_add_test(test_ip_addr      unit/common/test_ip_addr.cpp)
+neustack_add_test(test_ring_buffer  unit/common/test_ring_buffer.cpp)
+neustack_add_test(test_spsc_queue   unit/common/test_spsc_queue.cpp)
+neustack_add_test(test_memory_pool  unit/common/test_memory_pool.cpp)
+neustack_add_test(test_json_builder unit/common/test_json_builder.cpp)
 
 # --- 传输层测试 (transport/) ---
 neustack_add_test(test_tcp_segment unit/transport/test_tcp_segment.cpp)
@@ -61,10 +62,11 @@ neustack_add_test(test_firewall_ai  unit/firewall/test_firewall_ai.cpp)
 neustack_add_test(test_security_model unit/ai/test_security_model.cpp)
 
 # --- Telemetry测试（telemetry/）---
-neustack_add_test(test_metrics_registry unit/telemetry/test_metrics_registry.cpp)
+neustack_add_test(test_metrics_registry    unit/telemetry/test_metrics_registry.cpp)
 neustack_add_test(test_prometheus_exporter unit/telemetry/test_prometheus_exporter.cpp)
-neustack_add_test(test_json_exporter unit/telemetry/test_json_exporter.cpp)
-neustack_add_test(test_telemetry_api unit/telemetry/test_telemetry_api.cpp)
+neustack_add_test(test_json_exporter       unit/telemetry/test_json_exporter.cpp)
+neustack_add_test(test_telemetry_api       unit/telemetry/test_telemetry_api.cpp)
+neustack_add_test(test_http_endpoints      unit/telemetry/test_http_endpoints.cpp)
 
 # --- 集成测试（不需要 ONNX）---
 add_executable(test_tcp_handshake integration/test_tcp_handshake.cpp)

@@ -67,6 +67,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 set(COMMON_SOURCES
     src/common/checksum.cpp
     src/common/ip_addr.cpp
+    src/common/json_builder.cpp
 )
 
 # Network layer sources
@@ -106,6 +107,7 @@ set(TELEMETRY_SOURCES
     src/telemetry/json_exporter.cpp
     src/telemetry/prometheus_exporter.cpp
     src/telemetry/telemetry_api.cpp
+    src/telemetry/http_endpoints.cpp
 )
 
 set(FIREWALL_SOURCES
