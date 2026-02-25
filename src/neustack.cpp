@@ -1,5 +1,6 @@
 #include "neustack/neustack.hpp"
 #include "neustack/telemetry/metrics_registry.hpp"
+#include "neustack/telemetry/http_endpoints.hpp"
 
 #ifdef NEUSTACK_AI_ENABLED
 #include "neustack/ai/intelligence_plane.hpp"
@@ -175,6 +176,10 @@ struct NeuStack::Impl {
             agent_ptr,
             telemetry::MetricsRegistry::instance(),
             start_time);
+
+        // 11. 注册 Telemetry HTTP 端点
+        telemetry::register_http_endpoints(*http_server, *telemetry_api);
+        LOG_INFO(APP, "Telemetry HTTP endpoints registered");
 
         return true;
     }
