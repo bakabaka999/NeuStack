@@ -1,17 +1,30 @@
 /**
- * @file ping_example.cpp
- * @brief NeuStack 使用示例 - ICMP Ping
+ * @file    ping_example.cpp
+ * @brief   NeuStack example — ICMP ping with RTT measurement
  *
- * 编译后以 root 运行：sudo ./ping_example
- * 另一个终端（配置网卡路由并测试外网 ping）：
- *   sudo ifconfig utun9 192.168.100.1 192.168.100.2 up
- *   sudo ./scripts/nat/setup_nat.sh --dev utun9
+ * Demonstrates:
+ *   - Sending ICMP Echo Requests
+ *   - Receiving Echo Replies via callback
+ *   - RTT measurement
+ *
+ * Build & run:
+ *   cmake --build build --target ping_example
+ *   sudo ./build/examples/ping_example
+ *
+ * Setup (once per boot, in another terminal):
+ *   sudo ./scripts/nat/setup_nat.sh --dev <utunX>   # use device printed at startup
+ *
+ * Then press Enter in this terminal to start pinging.
  */
+
 #include "neustack/neustack.hpp"
-#include <iostream>
+
+#include <atomic>
 #include <chrono>
-#include <unordered_map>
+#include <cstdio>
 #include <mutex>
+#include <thread>
+#include <unordered_map>
 
 using namespace neustack;
 using namespace std::chrono;
@@ -21,52 +34,81 @@ int main() {
     cfg.local_ip = "192.168.100.2";
 
     auto stack = NeuStack::create(cfg);
+    if (!stack) return 1;
 
     if (!stack->icmp()) {
-        std::cerr << "ICMP not enabled in the stack!\n";
+        std::printf("[!] ICMP not enabled\n");
         return 1;
     }
 
-    uint32_t target_ip = ip_from_string("8.8.8.8");
-    uint16_t ping_id = 1234;
-    
-    std::mutex mtx;
-    std::unordered_map<uint16_t, steady_clock::time_point> sent_times;
+    // ── Ping state ────────────────────────────────────────────────────────────
+    constexpr int      PROBES  = 4;
+    constexpr uint16_t PING_ID = 0x4E53;   // 'N','S'
 
-    // 注册 ICMP Echo Reply 的回调函数
+    std::mutex                                       sent_mtx;
+    std::unordered_map<uint16_t, steady_clock::time_point> sent_times;
+    std::atomic<int> recv_count{0};
+    std::atomic<bool> done{false};
+
+    uint32_t target = ip_from_string("8.8.8.8");
+
+    // ── Reply callback ────────────────────────────────────────────────────────
     stack->icmp()->set_echo_reply_callback(
-        [&](uint32_t src, uint16_t id, uint16_t seq, uint32_t) {
-            std::lock_guard<std::mutex> lock(mtx);
-            auto it = sent_times.find(seq);
-            if (it != sent_times.end()) {
-                auto now = steady_clock::now();
-                auto rtt = duration_cast<milliseconds>(now - it->second).count();
-                std::cout << "Reply from " << ip_to_string(src) 
-                          << ": seq=" << seq << " time=" << rtt << " ms\n";
+        [&](uint32_t src, uint16_t /*id*/, uint16_t seq, uint32_t) {
+            steady_clock::time_point sent;
+            {
+                std::lock_guard<std::mutex> lk(sent_mtx);
+                auto it = sent_times.find(seq);
+                if (it == sent_times.end()) return;
+                sent = it->second;
                 sent_times.erase(it);
             }
+            double rtt_ms = duration<double, std::milli>(steady_clock::now() - sent).count();
+            std::printf("  reply from %s  seq=%-3u  rtt=%.3f ms\n",
+                        ip_to_string(src).c_str(), seq, rtt_ms);
+            if (recv_count.fetch_add(1) + 1 == PROBES)
+                done = true;
         });
 
-    std::cout << "PING " << ip_to_string(target_ip) << "...\n";
+    // ── Wait for NAT setup ────────────────────────────────────────────────────
+    std::printf("\nDevice: %s\n", stack->device().get_name().c_str());
+    std::printf("Run in another terminal:\n");
+    std::printf("  sudo ./scripts/nat/setup_nat.sh --dev %s\n\n",
+                stack->device().get_name().c_str());
+    std::printf("Press Enter when NAT is ready...");
+    std::fflush(stdout);
+    std::getchar();
 
-    // 启动一个后台线程来发送 Ping 请求（因为 stack->run() 会阻塞主线程）
-    std::thread ping_thread([&]() {
-        for (uint16_t seq = 1; seq <= 4; ++seq) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            
+    // ── Send probes in background thread ─────────────────────────────────────
+    std::printf("\nPING %s — %d packets\n", ip_to_string(target).c_str(), PROBES);
+
+    std::thread sender([&] {
+        for (uint16_t seq = 1; seq <= PROBES; ++seq) {
             {
-                std::lock_guard<std::mutex> lock(mtx);
+                std::lock_guard<std::mutex> lk(sent_mtx);
                 sent_times[seq] = steady_clock::now();
             }
-
-            const char payload[] = "NeuStack Ping";
-            stack->icmp()->send_echo_request(target_ip, ping_id, seq, 
-                                             reinterpret_cast<const uint8_t*>(payload), 
-                                             sizeof(payload) - 1);
+            const char payload[] = "NeuStack";
+            stack->icmp()->send_echo_request(target, PING_ID, seq,
+                reinterpret_cast<const uint8_t *>(payload), sizeof(payload) - 1);
+            std::printf("  → seq=%-3u sent\n", seq);
+            std::this_thread::sleep_for(seconds(1));
         }
+        // Allow 2s for last reply before stopping
+        std::this_thread::sleep_for(seconds(2));
+        done = true;
     });
 
-    stack->run(); // 阻塞运行，处理网络事件
-    ping_thread.join();
+    // ── Run event loop until done ─────────────────────────────────────────────
+    stack->run();   // interrupted by done flag — but run() blocks on signal...
+
+    // run() blocks until Ctrl+C; use stop() from sender thread instead
+    sender.join();
+
+    int sent = PROBES;
+    int recv = recv_count.load();
+    std::printf("\n--- %s ---  %d sent, %d received, %d%% loss\n",
+                ip_to_string(target).c_str(), sent, recv,
+                (sent - recv) * 100 / sent);
     return 0;
 }

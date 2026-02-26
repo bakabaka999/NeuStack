@@ -1,52 +1,64 @@
 /**
- * @file telemetry_example.cpp
- * @brief NeuStack 使用示例 - Prometheus Metrics 与 Telemetry API
+ * @file    telemetry_example.cpp
+ * @brief   NeuStack example — Prometheus metrics and Telemetry API
  *
- * 编译后以 root 运行：sudo ./telemetry_example
- * 另一个终端：
- *   sudo ifconfig utun9 192.168.100.1 192.168.100.2 up
- *   curl http://192.168.100.2/api/v1/stats
+ * Demonstrates:
+ *   - Exposing live stack metrics in JSON and Prometheus formats
+ *   - Auto-registered telemetry endpoints (/api/v1/... and /metrics)
+ *   - Registering a custom HTTP route alongside built-in endpoints
+ *
+ * Build & run:
+ *   cmake --build build --target telemetry_example
+ *   sudo ./build/examples/telemetry_example
+ *
+ * Setup (once per boot, in another terminal):
+ *   sudo ./scripts/nat/setup_nat.sh --dev <utunX>
+ *
+ * Test:
+ *   curl http://192.168.100.2/api/v1/stats   | python3 -m json.tool
  *   curl http://192.168.100.2/metrics
+ *   curl http://192.168.100.2/
+ *
+ * Auto-registered endpoints (no extra code needed):
+ *   /api/v1/health
+ *   /api/v1/stats
+ *   /api/v1/stats/traffic
+ *   /api/v1/stats/tcp
+ *   /api/v1/stats/security
+ *   /api/v1/connections
+ *   /metrics              — Prometheus exposition format
  */
+
 #include "neustack/neustack.hpp"
-#include <iostream>
+
+#include <cstdio>
 
 using namespace neustack;
 
 int main() {
     StackConfig cfg;
     cfg.local_ip = "192.168.100.2";
+
     auto stack = NeuStack::create(cfg);
+    if (!stack) return 1;
 
-    auto& server = stack->http_server();
+    auto &srv = stack->http_server();
 
-    // 1. 提供标准的业务 API
-    server.get("/api/hello", [](const HttpRequest&) {
-        return HttpResponse().set_body("Hello! Check /metrics for telemetry data.\n");
-    });
-
-    // 2. 导出 JSON 格式的 Telemetry 统计信息
-    server.get("/api/v1/stats", [&stack](const HttpRequest&) {
-        return HttpResponse()
-            .content_type("application/json")
-            .set_body(stack->status_json(true));
-    });
-
-    // 3. 导出 Prometheus 格式的 Metrics
-    server.get("/metrics", [&stack](const HttpRequest&) {
-        std::string metrics_data = stack->status_prometheus();
-        
+    // Custom root endpoint alongside the built-in telemetry ones.
+    srv.get("/", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("text/plain")
-            .set_body(metrics_data);
+            .set_body("NeuStack is running.\n"
+                      "  GET /api/v1/stats  — JSON snapshot\n"
+                      "  GET /metrics       — Prometheus\n");
     });
 
-    server.listen(80);
+    srv.listen(80);
 
-    std::cout << "Telemetry Server Started.\n";
-    std::cout << "Try:\n";
-    std::cout << "  curl http://192.168.100.2/api/v1/stats\n";
-    std::cout << "  curl http://192.168.100.2/metrics\n";
+    std::printf("Telemetry server on http://%s\n", cfg.local_ip.c_str());
+    std::printf("  GET /              — info page\n");
+    std::printf("  GET /api/v1/stats  — JSON telemetry snapshot\n");
+    std::printf("  GET /metrics       — Prometheus exposition format\n");
 
     stack->run();
 }

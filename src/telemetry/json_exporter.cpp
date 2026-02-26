@@ -40,7 +40,7 @@ double JsonExporter::estimate_percentile(const Histogram::Snapshot& snap, double
 
     size_t i = 0;
     for (; i < snap.bucket_counts.size(); ++i) {
-        if (static_cast<double>(snap.bucket_counts[i]) >= rank) break;
+        if (static_cast<double>(snap.bucket_counts[i]) > rank) break;
     }
 
     double lower = 0.0;

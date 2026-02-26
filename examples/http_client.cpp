@@ -1,14 +1,24 @@
 /**
- * @file http_client.cpp
- * @brief NeuStack 使用示例 - 异步 HTTP Client
+ * @file    http_client.cpp
+ * @brief   NeuStack example — Async HTTP client
  *
- * 编译后以 root 运行：sudo ./http_client
- * 另一个终端（需要配置 NAT 以访问公网）：
- *   sudo ifconfig utun9 192.168.100.1 192.168.100.2 up
- *   sudo ./scripts/nat/setup_nat.sh --dev utun9
+ * Demonstrates:
+ *   - Issuing an outbound HTTP GET request
+ *   - Handling the async response (status, headers, body)
+ *
+ * Build & run:
+ *   cmake --build build --target http_client
+ *   sudo ./build/examples/http_client
+ *
+ * Setup (once per boot, in another terminal):
+ *   sudo ./scripts/nat/setup_nat.sh --dev <utunX>
+ *
+ * Press Ctrl+C to exit after the response is printed.
  */
+
 #include "neustack/neustack.hpp"
-#include <iostream>
+
+#include <cstdio>
 #include <thread>
 
 using namespace neustack;
@@ -18,35 +28,29 @@ int main() {
     cfg.local_ip = "192.168.100.2";
 
     auto stack = NeuStack::create(cfg);
+    if (!stack) return 1;
 
-    std::thread([&]() {
-        // 等待协议栈初始化完成
+    // Fire the request after the stack has started (1-second head-start).
+    std::thread([&] {
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
-        // 假设你要访问 1.1.1.1 的 HTTP 服务 (Cloudflare)
-        uint32_t target_ip = ip_from_string("1.1.1.1");
-        
-        std::cout << "Sending HTTP GET request to http://1.1.1.1/\n";
+        uint32_t dst = ip_from_string("1.1.1.1");
+        std::printf("GET http://1.1.1.1/\n");
 
-        stack->http_client().get(target_ip, 80, "/", [](const HttpResponse& resp, int err) {
+        stack->http_client().get(dst, 80, "/", [](const HttpResponse &resp, int err) {
             if (err != 0) {
-                std::cerr << "HTTP GET failed with error code: " << err << "\n";
+                std::printf("[!] HTTP GET failed (err=%d)\n", err);
                 return;
             }
-
-            std::cout << "\n--- HTTP Response ---\n";
-            std::cout << "Status: " << static_cast<int>(resp.status) << " " 
-                      << http_status_text(resp.status) << "\n";
-            
-            for (const auto& [k, vals] : resp.headers) {
-                for (const auto& v : vals) {
-                    std::cout << k << ": " << v << "\n";
-                }
-            }
-            
-            std::cout << "\nBody:\n" << resp.body << "\n";
-            std::cout << "---------------------\n";
-            std::cout << "Press Ctrl+C to exit.\n";
+            std::printf("\n--- Response ---\n");
+            std::printf("Status : %d %s\n",
+                        static_cast<int>(resp.status),
+                        http_status_text(resp.status));
+            for (const auto &[k, vals] : resp.headers)
+                for (const auto &v : vals)
+                    std::printf("%s: %s\n", k.c_str(), v.c_str());
+            std::printf("\n%s\n", resp.body.c_str());
+            std::printf("Press Ctrl+C to exit.\n");
         });
     }).detach();
 

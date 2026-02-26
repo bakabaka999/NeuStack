@@ -1,26 +1,34 @@
 /**
- * @file minimal.cpp
- * @brief NeuStack 最简使用示例 - HTTP Echo 服务器
+ * @file    minimal.cpp
+ * @brief   Minimal NeuStack example — HTTP "Hello World"
  *
- * 编译后以 root 运行：sudo ./minimal
- * 另一个终端：
- *   sudo ifconfig utun9 192.168.100.1 192.168.100.2 up
+ * Build & run:
+ *   cmake --build build --target minimal
+ *   sudo ./build/examples/minimal
+ *
+ * Setup (once per boot, in another terminal):
+ *   sudo ./scripts/nat/setup_nat.sh --dev <utunX>   # replace with device printed at startup
+ *
+ * Test:
  *   curl http://192.168.100.2/
  */
+
 #include "neustack/neustack.hpp"
 
 using namespace neustack;
 
 int main() {
-    auto stack = NeuStack::create(); // 默认配置：192.168.100.2
+    // Create stack with default config (IP: 192.168.100.2)
+    auto stack = NeuStack::create();
+    if (!stack) return 1;
 
-    // 注册一个 HTTP 路由
-    stack->http_server().get("/", [](const HttpRequest &) { 
+    // Register a single HTTP route
+    stack->http_server().get("/", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("text/plain")
-            .set_body("Hello from NeuStack!\n"); 
+            .set_body("Hello from NeuStack!\n");
     });
     stack->http_server().listen(80);
 
-    stack->run(); // 阻塞运行，Ctrl+C 退出
+    stack->run();   // Blocks until Ctrl+C
 }
