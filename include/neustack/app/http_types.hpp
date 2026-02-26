@@ -46,6 +46,7 @@ enum class HttpStatus {
     Forbidden = 403,
     NotFound = 404,
     MethodNotAllowed = 405,
+    TooManyRequests = 429,
     InternalServerError = 500,
     NotImplemented = 501,
     ServiceUnavailable = 503
@@ -56,6 +57,8 @@ struct HttpRequest {
     HttpMethod method = HttpMethod::UNKNOWN;
     std::string path;
     std::string version;
+    std::string raw_query;
+    std::unordered_map<std::string, std::string> query_params;
     std::unordered_map<std::string, std::vector<std::string>> headers;
     std::string body;
 
@@ -78,6 +81,12 @@ struct HttpRequest {
     // 添加 header（支持同名多值）
     void add_header(const std::string &key, const std::string &value) {
         headers[key].push_back(value);
+    }
+
+    // 查询参数
+    std::string query_param(const std::string& key) const {
+        auto it = query_params.find(key);
+        return it != query_params.end() ? it->second : "";
     }
 
     // 报文序列化为字节流

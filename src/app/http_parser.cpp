@@ -104,6 +104,36 @@ size_t HttpRequestParser::feed(const uint8_t *data, size_t len) {
     return len;
 }
 
+// 解决 query 参数解析的辅助函数
+static std::unordered_map<std::string, std::string> parse_query_string(const std::string& query) {
+    std::unordered_map<std::string, std::string> params;
+    size_t pos = 0;
+    while (pos <= query.size()) {
+        auto amp = query.find('&', pos);
+        if (amp == std::string::npos) amp = query.size();
+        std::string pair = query.substr(pos, amp - pos);
+        pos = amp + 1;
+        if (pair.empty()) continue;
+        auto eq = pair.find('=');
+        if (eq != std::string::npos)
+            params[pair.substr(0, eq)] = pair.substr(eq + 1);
+        else
+            params[pair] = "";
+    }
+    return params;
+}
+
+static void split_path_query(HttpRequest& req, const std::string& uri) {
+    auto q = uri.find('?');
+    if (q != std::string::npos) {
+        req.path      = uri.substr(0, q);
+        req.raw_query = uri.substr(q + 1);
+        req.query_params = parse_query_string(req.raw_query);
+    } else {
+        req.path = uri;
+    }
+}
+
 bool HttpRequestParser::parse_request_line() {
     auto pos = _buffer.find("\r\n");
     if (pos == std::string::npos) {
@@ -124,7 +154,7 @@ bool HttpRequestParser::parse_request_line() {
     }
 
     _request.method = parse_http_method(line.substr(0, sp1));
-    _request.path = line.substr(sp1 + 1, sp2 - sp1 - 1);
+    split_path_query(_request, line.substr(sp1 + 1, sp2 - sp1 - 1));
     _request.version = line.substr(sp2 + 1);
 
     _state = State::Headers;

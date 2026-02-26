@@ -122,12 +122,15 @@ void ICMPHandler::handle_echo_reply(const IPv4Packet &pkt) {
     auto *echo = reinterpret_cast<const ICMPEcho *>(hdr + 1);
     (void)hdr;
 
-    LOG_INFO(ICMP, "Echo Reply from %s, id=%u, seq=%u",
-             ip_to_string(pkt.src_addr).c_str(),
-             ntohs(echo->identifier),
-             ntohs(echo->sequence));
+    uint16_t id  = ntohs(echo->identifier);
+    uint16_t seq = ntohs(echo->sequence);
 
-    // TODO: 通知等待 ping 回复的应用
+    LOG_DEBUG(ICMP, "Echo Reply from %s, id=%u, seq=%u",
+             ip_to_string(pkt.src_addr).c_str(), id, seq);
+
+    if (_reply_cb) {
+        _reply_cb(pkt.src_addr, id, seq, 0);
+    }
 }
 
 void ICMPHandler::send_dest_unreachable(ICMPUnreachCode code, const IPv4Packet &original_pkt) {

@@ -67,6 +67,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 set(COMMON_SOURCES
     src/common/checksum.cpp
     src/common/ip_addr.cpp
+    src/common/json_builder.cpp
 )
 
 # Network layer sources
@@ -106,6 +107,7 @@ set(TELEMETRY_SOURCES
     src/telemetry/json_exporter.cpp
     src/telemetry/prometheus_exporter.cpp
     src/telemetry/telemetry_api.cpp
+    src/telemetry/http_endpoints.cpp
 )
 
 set(FIREWALL_SOURCES
@@ -274,3 +276,11 @@ message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
 message(STATUS "==================================================")
 message(STATUS "")
+
+# ============================================================================
+# Tools
+# ============================================================================
+option(NEUSTACK_BUILD_TOOLS "Build CLI tools" ON)
+if(NEUSTACK_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
