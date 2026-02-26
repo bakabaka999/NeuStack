@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdarg>
 #include <cinttypes>
 #include <chrono>
 #include <atomic>
@@ -467,45 +468,72 @@ static void setup_http_server(NeuStack &stack) {
 }
 
 // ============================================================================
+// Box UI Helper
+// ============================================================================
+
+static void print_box_line(const char* fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    int len = std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    size_t visible_len = 0;
+    bool in_ansi = false;
+    for (int i = 0; i < len; ++i) {
+        if (buf[i] == '\033') { in_ansi = true; }
+        else if (in_ansi) {
+            if (buf[i] == 'm') in_ansi = false;
+        } else {
+            // Check for UTF-8 continuation bytes
+            if ((buf[i] & 0xC0) != 0x80) visible_len++;
+        }
+    }
+    int pad = 71 - static_cast<int>(visible_len);
+    if (pad < 0) pad = 0;
+    std::printf("  │ %s%*s│\n", buf, pad, "");
+}
+
+// ============================================================================
 // Help
 // ============================================================================
 
 static void print_help() {
     std::printf("\n" C_BOLD C_WHITE "  ┌─ Commands ─────────────────────────────────────────────────────────────┐\n" C_RESET);
 
-    std::printf(C_BOLD C_GRAY   "  │ " C_BCYAN  "Network\n" C_RESET);
-    std::printf(C_GRAY          "  │  " C_WHITE  "ping <ip>"       C_RESET "              Send ICMP echo (4 probes)\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "dns <hostname>"  C_RESET "         DNS A-record lookup\n");
-    std::printf(C_GRAY          "  │\n");
+    print_box_line(C_BOLD C_GRAY " " C_BCYAN "Network" C_RESET);
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "ping <ip>", "Send ICMP echo (4 probes)");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "dns <hostname>", "DNS A-record lookup");
+    print_box_line("");
 
-    std::printf(C_BOLD C_GRAY   "  │ " C_BCYAN  "HTTP Client\n" C_RESET);
-    std::printf(C_GRAY          "  │  " C_WHITE  "get <ip> <path>" C_RESET "        HTTP GET  (port 80)\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "post <ip> <path> <body>" C_RESET " HTTP POST (port 80)\n");
-    std::printf(C_GRAY          "  │\n");
+    print_box_line(C_BOLD C_GRAY " " C_BCYAN "HTTP Client" C_RESET);
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "get <ip> <path>", "HTTP GET  (port 80)");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "post <ip> <path> <body>", "HTTP POST (port 80)");
+    print_box_line("");
 
-    std::printf(C_BOLD C_GRAY   "  │ " C_BCYAN  "TCP\n" C_RESET);
-    std::printf(C_GRAY          "  │  " C_WHITE  "nc <ip> <port>"  C_RESET "         Open TCP connection, send line\n");
-    std::printf(C_GRAY          "  │\n");
+    print_box_line(C_BOLD C_GRAY " " C_BCYAN "TCP" C_RESET);
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "nc <ip> <port>", "Open TCP connection, send line");
+    print_box_line("");
 
-    std::printf(C_BOLD C_GRAY   "  │ " C_BCYAN  "Telemetry\n" C_RESET);
-    std::printf(C_GRAY          "  │  " C_WHITE  "stats"           C_RESET "                  Traffic + TCP summary\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "conns"           C_RESET "                  Active TCP connections\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "json"            C_RESET "                   Full status (pretty JSON)\n");
-    std::printf(C_GRAY          "  │\n");
+    print_box_line(C_BOLD C_GRAY " " C_BCYAN "Telemetry" C_RESET);
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "stats", "Traffic + TCP summary");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "conns", "Active TCP connections");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "json", "Full status (pretty JSON)");
+    print_box_line("");
 
-    std::printf(C_BOLD C_GRAY   "  │ " C_BCYAN  "Firewall\n" C_RESET);
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw"              C_RESET "                     Show firewall stats\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw shadow on|off" C_RESET "       Toggle shadow mode\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw bl add|del <ip>" C_RESET "     Blacklist IP\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw wl add|del <ip>" C_RESET "     Whitelist IP\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw rule add <id> <port> [tcp|udp]" C_RESET "\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw rule del <id>" C_RESET "       Remove rule\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw rule list"    C_RESET "           List all rules\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw rate <pps>"   C_RESET "          Rate limit (0=off)\n");
-    std::printf(C_GRAY          "  │  " C_WHITE  "fw threshold <v>" C_RESET "       AI anomaly threshold\n");
-    std::printf(C_GRAY          "  │\n");
+    print_box_line(C_BOLD C_GRAY " " C_BCYAN "Firewall" C_RESET);
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw", "Show firewall stats");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw shadow on|off", "Toggle shadow mode");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw bl add|del <ip>", "Blacklist IP");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw wl add|del <ip>", "Whitelist IP");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET, "fw rule add <id> <port> [tcp|udp]");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw rule del <id>", "Remove rule");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw rule list", "List all rules");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw rate <pps>", "Rate limit (0=off)");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "fw threshold <v>", "AI anomaly threshold");
+    print_box_line("");
 
-    std::printf(C_BOLD C_GRAY   "  │ " C_WHITE   "h" C_RESET " help   " C_WHITE "q" C_RESET " quit\n");
+    print_box_line(C_BOLD C_GRAY " " C_WHITE "h" C_RESET " help   " C_WHITE "q" C_RESET " quit");
     std::printf(C_BOLD C_WHITE  "  └────────────────────────────────────────────────────────────────────────┘\n" C_RESET);
     std::printf("\n");
 }
@@ -733,23 +761,17 @@ static void cmd_stats(NeuStack &stack) {
 
     std::printf("\n" C_BOLD C_WHITE
         "  ┌─ Traffic ──────────────────────────────────────────────────────────────┐\n" C_RESET);
-    std::printf("  │  " C_CYAN "RX" C_RESET "  %10" PRIu64 " pkts  %10" PRIu64 " bytes"
-                "   " C_DIM "%.1f pps  %.1f B/s\n" C_RESET,
-                t.packets_rx, t.bytes_rx, t.pps_rx, t.bps_rx);
-    std::printf("  │  " C_YELLOW "TX" C_RESET "  %10" PRIu64 " pkts  %10" PRIu64 " bytes"
-                "   " C_DIM "%.1f pps  %.1f B/s\n" C_RESET,
-                t.packets_tx, t.bytes_tx, t.pps_tx, t.bps_tx);
+    print_box_line(" " C_CYAN "RX" C_RESET "  %10" PRIu64 " pkts  %10" PRIu64 " bytes   " C_DIM "%.1f pps  %.1f B/s" C_RESET,
+                   t.packets_rx, t.bytes_rx, t.pps_rx, t.bps_rx);
+    print_box_line(" " C_YELLOW "TX" C_RESET "  %10" PRIu64 " pkts  %10" PRIu64 " bytes   " C_DIM "%.1f pps  %.1f B/s" C_RESET,
+                   t.packets_tx, t.bytes_tx, t.pps_tx, t.bps_tx);
     std::printf(C_BOLD C_WHITE
         "  ├─ TCP ──────────────────────────────────────────────────────────────────┤\n" C_RESET);
-    std::printf("  │  active=%-6u  established=%-8" PRIu64
-                "  resets=%-6" PRIu64 "  retransmits=%" PRIu64 "\n",
-                tcp.active_connections, tcp.total_established,
-                tcp.total_reset, tcp.total_retransmits);
-    std::printf("  │  RTT  min=%.1fms  p50=%.1fms  p99=%.1fms  max=%.1fms  samples=%" PRIu64 "\n",
-                tcp.rtt.min_us / 1000.0, tcp.rtt.p50_us / 1000.0,
-                tcp.rtt.p99_us / 1000.0, tcp.rtt.max_us / 1000.0,
-                tcp.rtt.samples);
-    std::printf("  │  avg_cwnd=%.1f\n", tcp.avg_cwnd);
+    print_box_line(" active=%-6u  established=%-8" PRIu64 "  resets=%-6" PRIu64 "  retransmits=%" PRIu64,
+                   tcp.active_connections, tcp.total_established, tcp.total_reset, tcp.total_retransmits);
+    print_box_line(" RTT  min=%.1fms  p50=%.1fms  p99=%.1fms  max=%.1fms  samples=%" PRIu64,
+                   tcp.rtt.min_us / 1000.0, tcp.rtt.p50_us / 1000.0, tcp.rtt.p99_us / 1000.0, tcp.rtt.max_us / 1000.0, tcp.rtt.samples);
+    print_box_line(" avg_cwnd=%.1f", tcp.avg_cwnd);
     std::printf(C_BOLD C_WHITE
         "  └────────────────────────────────────────────────────────────────────────┘\n" C_RESET "\n");
 }
@@ -760,17 +782,14 @@ static void cmd_conns(NeuStack &stack) {
         "  ┌─ Active Connections (%-3zu) ───────────────────────────────────────────┐\n" C_RESET,
         conns.size());
     if (conns.empty()) {
-        std::printf("  │  " C_DIM "(none)\n" C_RESET);
+        print_box_line(C_DIM " (none)" C_RESET);
     } else {
-        std::printf(C_DIM "  │  %-21s %-21s %-14s %s\n" C_RESET,
-                    "Local", "Remote", "State", "RTT");
+        print_box_line(C_DIM " %-21s %-21s %-14s %s" C_RESET, "Local", "Remote", "State", "RTT");
         for (const auto &c : conns) {
             std::string local  = ip_to_string(c.local_ip)  + ":" + std::to_string(c.local_port);
             std::string remote = ip_to_string(c.remote_ip) + ":" + std::to_string(c.remote_port);
-            std::printf("  │  " C_WHITE "%-21s" C_RESET " %-21s " C_BGREEN "%-14s" C_RESET
-                        " %.2fms\n",
-                        local.c_str(), remote.c_str(), c.state.c_str(),
-                        static_cast<double>(c.srtt_us) / 1000.0);
+            print_box_line(" " C_WHITE "%-21s" C_RESET " %-21s " C_BGREEN "%-14s" C_RESET " %.2fms",
+                           local.c_str(), remote.c_str(), c.state.c_str(), static_cast<double>(c.srtt_us) / 1000.0);
         }
     }
     std::printf(C_BOLD C_WHITE
@@ -785,31 +804,24 @@ static void cmd_fw_stats(NeuStack &stack) {
     std::printf("\n" C_BOLD C_WHITE
         "  ┌─ Firewall ─────────────────────────────────────────────────────────────┐\n" C_RESET);
     if (!stack.firewall_enabled()) {
-        std::printf("  │  " C_GRAY "disabled\n" C_RESET);
+        print_box_line(C_GRAY " disabled" C_RESET);
     } else {
         auto fw = stack.firewall_stats();
         const char *sm = stack.firewall_shadow_mode() ? C_YELLOW "SHADOW" : C_BGREEN "ENFORCE";
-        std::printf("  │  mode=%-20s" C_RESET "  ai=%s\n",
-                    sm, stack.firewall_ai_enabled() ? C_BGREEN "on" C_RESET : C_GRAY "off" C_RESET);
-        std::printf("  │  inspected=%-10" PRIu64 " passed=%-10" PRIu64
-                    " dropped=%-8" PRIu64 " alerted=%" PRIu64 "\n",
-                    fw.packets_inspected, fw.packets_passed,
-                    fw.packets_dropped, fw.packets_alerted);
+        print_box_line(" mode=%-20s" C_RESET "  ai=%s",
+                       sm, stack.firewall_ai_enabled() ? C_BGREEN "on" C_RESET : C_GRAY "off" C_RESET);
+        print_box_line(" inspected=%-10" PRIu64 " passed=%-10" PRIu64 " dropped=%-8" PRIu64 " alerted=%" PRIu64,
+                       fw.packets_inspected, fw.packets_passed, fw.packets_dropped, fw.packets_alerted);
         if (stack.firewall_ai_enabled()) {
             auto ai = stack.firewall_ai_stats();
-            std::printf("  │  " C_CYAN "AI" C_RESET
-                        "  inferences=%-8" PRIu64 " anomalies=%-6" PRIu64
-                        " score=%.4f\n",
-                        ai.inferences_total, ai.anomalies_detected,
-                        ai.last_anomaly_score);
+            print_box_line(" " C_CYAN "AI" C_RESET " inferences=%-8" PRIu64 " anomalies=%-6" PRIu64 " score=%.4f",
+                           ai.inferences_total, ai.anomalies_detected, ai.last_anomaly_score);
         }
         auto *rules = stack.firewall_rules();
         if (rules) {
             auto &st = rules->stats();
-            std::printf("  │  rules=%zu  wl_hits=%" PRIu64 "  bl_hits=%" PRIu64
-                        "  rate_drops=%" PRIu64 "\n",
-                        rules->rule_count(), st.whitelist_hits,
-                        st.blacklist_hits, st.rate_limit_drops);
+            print_box_line(" rules=%zu  wl_hits=%" PRIu64 "  bl_hits=%" PRIu64 "  rate_drops=%" PRIu64,
+                           rules->rule_count(), st.whitelist_hits, st.blacklist_hits, st.rate_limit_drops);
         }
     }
     std::printf(C_BOLD C_WHITE
