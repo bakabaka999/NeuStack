@@ -276,3 +276,11 @@ message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
 message(STATUS "==================================================")
 message(STATUS "")
+
+# ============================================================================
+# Tools
+# ============================================================================
+option(NEUSTACK_BUILD_TOOLS "Build CLI tools" ON)
+if(NEUSTACK_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
