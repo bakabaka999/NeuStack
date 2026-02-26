@@ -471,7 +471,7 @@ static void setup_http_server(NeuStack &stack) {
 // ============================================================================
 
 static void print_help() {
-    std::printf("\n" C_BOLD C_WHITE "  ┌─ Commands ────────────────────────────────────────────────┐\n" C_RESET);
+    std::printf("\n" C_BOLD C_WHITE "  ┌─ Commands ─────────────────────────────────────────────────────────────┐\n" C_RESET);
 
     std::printf(C_BOLD C_GRAY   "  │ " C_BCYAN  "Network\n" C_RESET);
     std::printf(C_GRAY          "  │  " C_WHITE  "ping <ip>"       C_RESET "              Send ICMP echo (4 probes)\n");
@@ -506,7 +506,7 @@ static void print_help() {
     std::printf(C_GRAY          "  │\n");
 
     std::printf(C_BOLD C_GRAY   "  │ " C_WHITE   "h" C_RESET " help   " C_WHITE "q" C_RESET " quit\n");
-    std::printf(C_BOLD C_WHITE  "  └───────────────────────────────────────────────────────────┘\n" C_RESET);
+    std::printf(C_BOLD C_WHITE  "  └────────────────────────────────────────────────────────────────────────┘\n" C_RESET);
     std::printf("\n");
 }
 
@@ -732,7 +732,7 @@ static void cmd_stats(NeuStack &stack) {
     auto tcp = stack.telemetry().tcp_stats();
 
     std::printf("\n" C_BOLD C_WHITE
-        "  ┌─ Traffic ─────────────────────────────────────┐\n" C_RESET);
+        "  ┌─ Traffic ──────────────────────────────────────────────────────────────┐\n" C_RESET);
     std::printf("  │  " C_CYAN "RX" C_RESET "  %10" PRIu64 " pkts  %10" PRIu64 " bytes"
                 "   " C_DIM "%.1f pps  %.1f B/s\n" C_RESET,
                 t.packets_rx, t.bytes_rx, t.pps_rx, t.bps_rx);
@@ -740,7 +740,7 @@ static void cmd_stats(NeuStack &stack) {
                 "   " C_DIM "%.1f pps  %.1f B/s\n" C_RESET,
                 t.packets_tx, t.bytes_tx, t.pps_tx, t.bps_tx);
     std::printf(C_BOLD C_WHITE
-        "  ├─ TCP ────────────────────────────────────────┤\n" C_RESET);
+        "  ├─ TCP ──────────────────────────────────────────────────────────────────┤\n" C_RESET);
     std::printf("  │  active=%-6u  established=%-8" PRIu64
                 "  resets=%-6" PRIu64 "  retransmits=%" PRIu64 "\n",
                 tcp.active_connections, tcp.total_established,
@@ -751,13 +751,13 @@ static void cmd_stats(NeuStack &stack) {
                 tcp.rtt.samples);
     std::printf("  │  avg_cwnd=%.1f\n", tcp.avg_cwnd);
     std::printf(C_BOLD C_WHITE
-        "  └───────────────────────────────────────────────┘\n" C_RESET "\n");
+        "  └────────────────────────────────────────────────────────────────────────┘\n" C_RESET "\n");
 }
 
 static void cmd_conns(NeuStack &stack) {
     auto conns = stack.telemetry().connections();
     std::printf("\n" C_BOLD C_WHITE
-        "  ┌─ Active Connections (%zu) ─────────────────────┐\n" C_RESET,
+        "  ┌─ Active Connections (%-3zu) ───────────────────────────────────────────┐\n" C_RESET,
         conns.size());
     if (conns.empty()) {
         std::printf("  │  " C_DIM "(none)\n" C_RESET);
@@ -774,7 +774,7 @@ static void cmd_conns(NeuStack &stack) {
         }
     }
     std::printf(C_BOLD C_WHITE
-        "  └───────────────────────────────────────────────┘\n" C_RESET "\n");
+        "  └────────────────────────────────────────────────────────────────────────┘\n" C_RESET "\n");
 }
 
 static void cmd_json(NeuStack &stack) {
@@ -783,7 +783,7 @@ static void cmd_json(NeuStack &stack) {
 
 static void cmd_fw_stats(NeuStack &stack) {
     std::printf("\n" C_BOLD C_WHITE
-        "  ┌─ Firewall ─────────────────────────────────────┐\n" C_RESET);
+        "  ┌─ Firewall ─────────────────────────────────────────────────────────────┐\n" C_RESET);
     if (!stack.firewall_enabled()) {
         std::printf("  │  " C_GRAY "disabled\n" C_RESET);
     } else {
@@ -813,7 +813,7 @@ static void cmd_fw_stats(NeuStack &stack) {
         }
     }
     std::printf(C_BOLD C_WHITE
-        "  └───────────────────────────────────────────────┘\n" C_RESET "\n");
+        "  └────────────────────────────────────────────────────────────────────────┘\n" C_RESET "\n");
 }
 
 static void handle_fw_subcommand(const std::string &sub, NeuStack &stack) {
