@@ -70,12 +70,12 @@ SECURITY_PATTERNS = [
 ANOMALY_AGGREGATE_WINDOW = 10
 
 # ─── Security 归一化参数（与 C++ SecurityFeatureExtractor 严格一致）───
-SECURITY_MAX_PPS = 10000.0
-SECURITY_MAX_BPS = 100000000.0   # 100 MB/s
-SECURITY_MAX_SYN_RATE = 1000.0
-SECURITY_MAX_RST_RATE = 500.0
-SECURITY_MAX_CONN_RATE = 500.0
-SECURITY_SYN_RATIO_MIDPOINT = 5.0  # sigmoid 中点
+SECURITY_MAX_PPS = 1500.0
+SECURITY_MAX_BPS = 5000000.0     # 5 MB/s
+SECURITY_MAX_SYN_RATE = 200.0
+SECURITY_MAX_RST_RATE = 20.0
+SECURITY_MAX_CONN_RATE = 200.0
+SECURITY_SYN_RATIO_MIDPOINT = 50.0  # sigmoid 中点
 SECURITY_MAX_PKT_SIZE = 1500.0
 
 
@@ -558,10 +558,17 @@ def generate_security_dataset(rows: List[Dict]) -> Dict:
 
     for row in rows:
         feat = compute_security_features(row)
-        # 过滤完全空闲的行 (所有速率为 0)
-        if row['pps'] == 0 and row['bps'] == 0:
-            skipped += 1
-            continue
+        if row['label'] == 0:
+            # 正常流量: 过滤完全空闲的行
+            if row['pps'] == 0 and row['bps'] == 0:
+                skipped += 1
+                continue
+        else:
+            # 攻击流量: 必须有明显攻击特征，否则是采集间隙的空窗期数据
+            # 要求 syn_rate>0 或 rst_rate>0 或 pps>50
+            if row['syn_rate'] == 0 and row['rst_rate'] == 0 and row['pps'] <= 50:
+                skipped += 1
+                continue
         features.append(feat)
         labels.append(row['label'])
 

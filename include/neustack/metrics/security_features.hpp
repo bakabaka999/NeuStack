@@ -67,14 +67,14 @@ public:
         double syn_ratio_critical;
         
         NormalizationParams()
-            : max_pps(10000.0)
-            , max_bps(100000000.0)
-            , max_syn_rate(1000.0)
-            , max_rst_rate(500.0)
-            , max_conn_rate(500.0)
+            : max_pps(1500.0)
+            , max_bps(5000000.0)
+            , max_syn_rate(200.0)
+            , max_rst_rate(20.0)
+            , max_conn_rate(200.0)
             , max_active_conn(10000.0)
-            , syn_ratio_warning(5.0)
-            , syn_ratio_critical(10.0)
+            , syn_ratio_warning(50.0)
+            , syn_ratio_critical(200.0)
         {}
     };
 

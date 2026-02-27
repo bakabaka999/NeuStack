@@ -111,7 +111,7 @@ cleanup() {
         SRC="$OUTPUT_DIR/$f"
         if [ -f "$SRC" ]; then
             BASE="${f%.csv}"
-            DST="$OUTPUT_DIR/${BASE}_bwvar_${TIMESTAMP}.csv"
+            DST="$OUTPUT_DIR/${BASE}_server_tc_${TIMESTAMP}.csv"
             mv "$SRC" "$DST"
             LINES=$(wc -l < "$DST")
             echo "  $DST ($LINES lines)"

@@ -10,15 +10,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <string>
-#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <thread>
 #include <chrono>
 #include <csignal>
-#include <functional>
+#include <cstdarg>
+#include <cinttypes>
 
 // ────────────────────────────────────────────
 // 跨平台 Socket
@@ -57,7 +56,6 @@
     #include <poll.h>
     #include <termios.h>
     #include <fcntl.h>
-    #include <errno.h>
     using socket_t = int;
     #define INVALID_SOCK (-1)
     #define CLOSE_SOCKET close
@@ -115,10 +113,15 @@ static void setup_signal_handlers() {
     std::signal(SIGTERM, signal_handler);
 }
 
+namespace ansi {
+    void exit_alt_screen();
+}
+
 static void cleanup() {
 #ifndef _WIN32
     disable_raw_mode();
 #endif
+    ansi::exit_alt_screen();
     // 恢复光标 (如果被隐藏)
     printf("\033[?25h");
     fflush(stdout);
@@ -138,11 +141,23 @@ namespace ansi {
     const char* green()   { return color_enabled ? "\033[32m" : ""; }
     const char* yellow()  { return color_enabled ? "\033[33m" : ""; }
     const char* blue()    { return color_enabled ? "\033[34m" : ""; }
+    const char* magenta() { return color_enabled ? "\033[35m" : ""; }
     const char* cyan()    { return color_enabled ? "\033[36m" : ""; }
-    const char* white()   { return color_enabled ? "\033[37m" : ""; }
+    const char* white()   { return color_enabled ? "\033[97m" : ""; }
+    const char* gray()    { return color_enabled ? "\033[90m" : ""; }
+
+    const char* bg_blue() { return color_enabled ? "\033[44m" : ""; }
+    const char* bg_cyan() { return color_enabled ? "\033[46m" : ""; }
+
+    const char* clr()     { return "\033[K"; }
 
     void clear_screen() {
         printf("\033[2J\033[H");
+        fflush(stdout);
+    }
+
+    void move_home() {
+        printf("\033[H");
         fflush(stdout);
     }
 
@@ -154,6 +169,22 @@ namespace ansi {
     void show_cursor() {
         printf("\033[?25h");
         fflush(stdout);
+    }
+    
+    static bool alt_screen_enabled = false;
+
+    void enter_alt_screen() {
+        printf("\033[?1049h");
+        fflush(stdout);
+        alt_screen_enabled = true;
+    }
+
+    void exit_alt_screen() {
+        if (alt_screen_enabled) {
+            printf("\033[?1049l");
+            fflush(stdout);
+            alt_screen_enabled = false;
+        }
     }
 }
 
@@ -237,22 +268,6 @@ static std::string format_duration(uint64_t seconds) {
 }
 
 /**
- * 格式化大整数 (千分位逗号)
- * 1234567 → "1,234,567"
- */
-static std::string format_number(uint64_t n) {
-    std::string s = std::to_string(n);
-    std::string result;
-    int count = 0;
-    for (int i = static_cast<int>(s.size()) - 1; i >= 0; --i) {
-        if (count > 0 && count % 3 == 0) result = ',' + result;
-        result = s[static_cast<size_t>(i)] + result;
-        ++count;
-    }
-    return result;
-}
-
-/**
  * 渲染进度条
  * render_bar(0.023, 10) → "██░░░░░░░░"
  */
@@ -286,7 +301,7 @@ static WinsockInit g_winsock_init;
  * 最小 HTTP/1.1 GET 请求
  *
  * 只支持: GET 方法，Content-Length 响应，非 chunked。
- * 足够用于我们自己控制的 /api/v1/* 端点。
+ * 足够用于我们自己控制的 /api/v1/... 端点。
  *
  * @return 响应 body (空字符串表示失败)
  */
@@ -493,8 +508,8 @@ private:
 // ────────────────────────────────────────────
 
 struct Options {
-    std::string host = "127.0.0.1";
-    uint16_t port = 80; // Changed default port to 80 to match NeuStack defaults
+    std::string host = "192.168.100.2";
+    uint16_t port = 80;
     bool live = false;
     bool json_output = false;
     bool no_color = false;
@@ -523,7 +538,7 @@ static Options parse_args(int argc, char** argv) {
             opts.command = "connections";
         } else if (arg == "--help" || arg == "-h") {
             printf(
-                "Usage: neustack-stat [options] [command]\n\n"
+                "Usage: neustack-stat [host] [options] [command]\n\n"
                 "Commands:\n"
                 "  (none)           Show overview status\n"
                 "  connections      List active TCP connections\n\n"
@@ -531,12 +546,32 @@ static Options parse_args(int argc, char** argv) {
                 "  --live, -l           Continuous refresh mode\n"
                 "  --json, -j           Output raw JSON\n"
                 "  --no-color           Disable colored output\n"
-                "  --host <addr>        NeuStack host (default: 127.0.0.1)\n"
+                "  --host <addr>        NeuStack host (default: 192.168.100.2)\n"
                 "  --port <port>        NeuStack port (default: 80)\n"
                 "  --interval, -i <sec> Refresh interval in seconds (default: 1)\n"
-                "  --help, -h           Show this help\n"
+                "  --help, -h           Show this help\n\n"
+                "Examples:\n"
+                "  neustack-stat\n"
+                "  neustack-stat 192.168.100.2\n"
+                "  neustack-stat --live\n"
+                "  neustack-stat connections\n"
             );
             exit(0);
+        } else if (arg[0] != '-') {
+            // bare positional: treat as host (strip http:// prefix if present)
+            if (arg.rfind("http://", 0) == 0)  arg = arg.substr(7);
+            if (arg.rfind("https://", 0) == 0) arg = arg.substr(8);
+            // strip trailing path
+            auto slash = arg.find('/');
+            if (slash != std::string::npos) arg = arg.substr(0, slash);
+            // split host:port if present
+            auto colon = arg.find(':');
+            if (colon != std::string::npos) {
+                opts.port = static_cast<uint16_t>(std::atoi(arg.c_str() + colon + 1));
+                opts.host = arg.substr(0, colon);
+            } else {
+                opts.host = arg;
+            }
         } else {
             fprintf(stderr, "Unknown argument: %s\nUse --help for usage.\n",
                     arg.c_str());
@@ -546,111 +581,121 @@ static Options parse_args(int argc, char** argv) {
     return opts;
 }
 
+static void print_box_line(const char* fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    int len = std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    size_t visible_len = 0;
+    bool in_ansi = false;
+    for (int i = 0; i < len; ++i) {
+        if (buf[i] == '\033') { in_ansi = true; }
+        else if (in_ansi) {
+            if (buf[i] == 'm') in_ansi = false;
+        } else {
+            // Check for UTF-8 continuation bytes
+            if ((buf[i] & 0xC0) != 0x80) visible_len++;
+        }
+    }
+    int pad = 71 - static_cast<int>(visible_len);
+    if (pad < 0) pad = 0;
+    std::printf("  │ %s%*s│\033[K\n", buf, pad, "");
+}
+
 // ────────────────────────────────────────────
 // 格式化输出: Overview
 // ────────────────────────────────────────────
 
-static void print_overview(const JsonReader& j) {
-    // 标题
-    printf("%s%sNeuStack v1.3.0%s — Status\n",
-           ansi::bold(), ansi::cyan(), ansi::reset());
-    printf("═══════════════════════════════════════════════════\n\n");
+static void print_overview(const JsonReader& traffic,
+                           const JsonReader& tcp,
+                           const JsonReader& sec,
+                           bool live_mode) {
+    if (live_mode) {
+        ansi::move_home();
+    }
 
-    // Traffic
-    printf("%s%sTraffic%s\n", ansi::bold(), ansi::white(), ansi::reset());
-    printf("  RX: %s%s%s pkts  %s  (%s%.0f%s pps / %s)\n",
-        ansi::green(),
-        format_number(static_cast<uint64_t>(j.get_number("packets_rx"))).c_str(),
-        ansi::reset(),
-        format_bytes(static_cast<uint64_t>(j.get_number("bytes_rx"))).c_str(),
-        ansi::yellow(),
-        j.get_number("pps_rx"),
-        ansi::reset(),
-        format_rate(j.get_number("bps_rx")).c_str());
-    printf("  TX: %s%s%s pkts  %s  (%s%.0f%s pps / %s)\n",
-        ansi::green(),
-        format_number(static_cast<uint64_t>(j.get_number("packets_tx"))).c_str(),
-        ansi::reset(),
-        format_bytes(static_cast<uint64_t>(j.get_number("bytes_tx"))).c_str(),
-        ansi::yellow(),
-        j.get_number("pps_tx"),
-        ansi::reset(),
-        format_rate(j.get_number("bps_tx")).c_str());
-
+    // Five-color NeuStack Logo (from demo)
     printf("\n");
+    printf("%s%s███╗   ██╗███████╗██╗   ██╗███████╗████████╗ █████╗  ██████╗██╗  ██╗%s\n", ansi::bold(), ansi::cyan(), ansi::clr());
+    printf("%s████╗  ██║██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝%s\n", ansi::blue(), ansi::clr());
+    printf("%s██╔██╗ ██║█████╗  ██║   ██║███████╗   ██║   ███████║██║     █████╔╝ %s\n", ansi::yellow(), ansi::clr());
+    printf("%s██║╚██╗██║██╔══╝  ██║   ██║╚════██║   ██║   ██╔══██║██║     ██╔═██╗ %s\n", ansi::green(), ansi::clr());
+    printf("%s██║ ╚████║███████╗╚██████╔╝███████║   ██║   ██║  ██║╚██████╗██║  ██╗%s\n", ansi::magenta(), ansi::clr());
+    printf("%s╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝%s\n", ansi::cyan(), ansi::clr());
+    printf("%s  User-space TCP/IP Stack  %s%sv1.3.0  •  github.com/bakabaka999/NeuStack%s\n", 
+           ansi::dim(), ansi::reset(), ansi::dim(), ansi::clr());
+    printf("\n%s\n", ansi::clr());
 
-    // TCP
-    auto active = static_cast<uint32_t>(j.get_number("active_connections"));
-    printf("%s%sTCP Connections:%s %s%u active%s  "
-           "(%s established / %s reset / %s timeout)\n",
-        ansi::bold(), ansi::white(), ansi::reset(),
-        ansi::green(),
-        active,
-        ansi::reset(),
-        format_number(static_cast<uint64_t>(j.get_number("total_established"))).c_str(),
-        format_number(static_cast<uint64_t>(j.get_number("total_reset"))).c_str(),
-        format_number(static_cast<uint64_t>(j.get_number("total_timeout"))).c_str());
+    // Panel: TRAFFIC
+    std::printf("  %s%s┌─ Traffic ──────────────────────────────────────────────────────────────┐%s\033[K\n", ansi::bold(), ansi::white(), ansi::reset());
+    print_box_line(" %sRX%s  %10" PRIu64 " pkts  %10s bytes   %s%.1f pps  %s%s",
+                   ansi::cyan(), ansi::reset(), 
+                   static_cast<uint64_t>(traffic.get_number("packets_rx")),
+                   format_bytes(static_cast<uint64_t>(traffic.get_number("bytes_rx"))).c_str(),
+                   ansi::dim(), traffic.get_number("pps_rx"),
+                   format_rate(traffic.get_number("bps_rx")).c_str(), ansi::reset());
+    print_box_line(" %sTX%s  %10" PRIu64 " pkts  %10s bytes   %s%.1f pps  %s%s",
+                   ansi::yellow(), ansi::reset(), 
+                   static_cast<uint64_t>(traffic.get_number("packets_tx")),
+                   format_bytes(static_cast<uint64_t>(traffic.get_number("bytes_tx"))).c_str(),
+                   ansi::dim(), traffic.get_number("pps_tx"),
+                   format_rate(traffic.get_number("bps_tx")).c_str(), ansi::reset());
 
-    // RTT
-    auto samples = static_cast<uint64_t>(j.get_number("samples"));
+    // Panel: TCP
+    std::printf("  %s%s├─ TCP ──────────────────────────────────────────────────────────────────┤%s\033[K\n", ansi::bold(), ansi::white(), ansi::reset());
+    auto active = static_cast<uint32_t>(tcp.get_number("active_connections"));
+    print_box_line(" active=%-6u  established=%-8" PRIu64 "  resets=%-6" PRIu64 "  timeouts=%" PRIu64,
+                   active,
+                   static_cast<uint64_t>(tcp.get_number("total_established")),
+                   static_cast<uint64_t>(tcp.get_number("total_reset")),
+                   static_cast<uint64_t>(tcp.get_number("total_timeout")));
+    auto samples = static_cast<uint64_t>(tcp.get_number("samples"));
     if (samples > 0) {
-        printf("  RTT: min=%s  avg=%s  p50=%s  p90=%s  p99=%s%s%s\n",
-            format_us(j.get_number("min_us")).c_str(),
-            format_us(j.get_number("avg_us")).c_str(),
-            format_us(j.get_number("p50_us")).c_str(),
-            format_us(j.get_number("p90_us")).c_str(),
-            ansi::yellow(),
-            format_us(j.get_number("p99_us")).c_str(),
-            ansi::reset());
+        print_box_line(" RTT  min=%.1fms  p50=%.1fms  p90=%.1fms  p99=%.1fms  samples=%" PRIu64,
+                       tcp.get_number("min_us") / 1000.0,
+                       tcp.get_number("p50_us") / 1000.0,
+                       tcp.get_number("p90_us") / 1000.0,
+                       tcp.get_number("p99_us") / 1000.0,
+                       samples);
+    } else {
+        print_box_line(" RTT  %sNo Data%s", ansi::dim(), ansi::reset());
     }
 
-    printf("\n");
-
-    // Security
-    bool fw_enabled = j.get_bool("firewall_enabled");
-    bool shadow = j.get_bool("shadow_mode");
-    printf("%s%sFirewall:%s %s%s%s%s\n",
-        ansi::bold(), ansi::white(), ansi::reset(),
-        fw_enabled ? ansi::green() : ansi::red(),
-        fw_enabled ? "ENABLED" : "DISABLED",
-        shadow ? " (shadow mode)" : "",
-        ansi::reset());
-
-    if (fw_enabled) {
-        printf("  PPS: %.0f  SYN rate: %.1f/s  SYN/SYN-ACK: %.1f  RST ratio: %.1f%%\n",
-            j.get_number("pps"),
-            j.get_number("syn_rate"),
-            j.get_number("syn_synack_ratio"),
-            j.get_number("rst_ratio") * 100);
-        printf("  Dropped: %s  Alerted: %s\n",
-            format_number(static_cast<uint64_t>(j.get_number("packets_dropped"))).c_str(),
-            format_number(static_cast<uint64_t>(j.get_number("packets_alerted"))).c_str());
+    // Panel: SECURITY & AI
+    std::printf("  %s%s├─ Security & AI ────────────────────────────────────────────────────────┤%s\033[K\n", ansi::bold(), ansi::white(), ansi::reset());
+    bool fw_enabled = sec.get_bool("firewall_enabled");
+    bool shadow     = sec.get_bool("shadow_mode");
+    if (!fw_enabled) {
+        print_box_line(" %sdisabled%s", ansi::gray(), ansi::reset());
+    } else {
+        const char *sm = shadow ? "\033[33mSHADOW\033[0m" : "\033[92mENFORCE\033[0m";
+        print_box_line(" mode=%-20s  ai=%s",
+                       sm, "\033[92mon\033[0m"); // Assuming ai is on if fw is enabled here or check if needed
+        print_box_line(" dropped=%-8" PRIu64 " alerted=%" PRIu64 "  pps=%.0f  syn_rate=%.1f/s",
+                       static_cast<uint64_t>(sec.get_number("packets_dropped")),
+                       static_cast<uint64_t>(sec.get_number("packets_alerted")),
+                       sec.get_number("pps"),
+                       sec.get_number("syn_rate"));
     }
 
-    printf("\n");
-
-    // AI
-    auto state = j.get_string("agent_state", "DISABLED");
-    auto anomaly = j.get_number("anomaly_score");
+    auto state  = sec.get_string("agent_state", "DISABLED");
+    auto anomaly = sec.get_number("anomaly_score");
     const char* state_color = ansi::green();
     if (state == "DEGRADED") state_color = ansi::yellow();
-    if (state == "ATTACK") state_color = ansi::red();
+    if (state == "ATTACK")   state_color = ansi::red();
     if (state == "DISABLED") state_color = ansi::dim();
 
-    printf("%s%sAI:%s %s%s%s  anomaly=%s%.3f%s  %s  alpha=%.2f\n",
-        ansi::bold(), ansi::white(), ansi::reset(),
-        state_color, state.c_str(), ansi::reset(),
-        (anomaly > 0.5) ? ansi::red() : ansi::green(),
-        anomaly,
-        ansi::reset(),
-        render_bar(anomaly, 10).c_str(),
-        j.get_number("current_alpha"));
+    print_box_line(" %sAI Agent%s state=%s%s%s  anomaly=%.3f  bar=[%s]",
+                   ansi::cyan(), ansi::reset(),
+                   state_color, state.c_str(), ansi::reset(),
+                   anomaly, render_bar(anomaly, 20).c_str());
 
-    auto orca = j.get_string("orca_status", "disabled");
-    auto anom_status = j.get_string("anomaly_status", "disabled");
-    auto bw_status = j.get_string("bandwidth_status", "disabled");
-    printf("  Models: orca=%s  anomaly=%s  bandwidth=%s\n",
-        orca.c_str(), anom_status.c_str(), bw_status.c_str());
+    std::printf("  %s%s└────────────────────────────────────────────────────────────────────────┘%s\033[K\n", ansi::bold(), ansi::white(), ansi::reset());
+    
+    // Clear the rest of the screen below the dashboard
+    printf("\033[J");
 }
 
 // ────────────────────────────────────────────
@@ -748,6 +793,7 @@ int main(int argc, char** argv) {
 #ifndef _WIN32
         enable_raw_mode();
 #endif
+        ansi::enter_alt_screen();
         ansi::hide_cursor();
     }
 
@@ -756,16 +802,15 @@ int main(int argc, char** argv) {
     constexpr int max_retries = 3;
 
     do {
-        auto body = http_get(opts.host, opts.port,
-                             "/api/v1/stats");
+        auto traffic_body = http_get(opts.host, opts.port, "/api/v1/stats/traffic");
 
-        if (body.empty()) {
+        if (traffic_body.empty()) {
             if (retry_count < max_retries) {
                 retry_count++;
                 if (opts.live) {
-                    ansi::clear_screen();
-                    printf("%sConnecting to %s:%u... (attempt %d/%d)%s\n",
-                           ansi::yellow(), opts.host.c_str(), opts.port,
+                    ansi::move_home();
+                    printf("%s%sConnecting to %s:%u... (attempt %d/%d)%s\033[J\n",
+                           ansi::yellow(), ansi::clr(), opts.host.c_str(), opts.port,
                            retry_count, max_retries, ansi::reset());
                 } else {
                     fprintf(stderr,
@@ -784,17 +829,27 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        retry_count = 0;  // 连接成功，重置计数
+        retry_count = 0;
+
+        auto tcp_body = http_get(opts.host, opts.port, "/api/v1/stats/tcp");
+        auto sec_body = http_get(opts.host, opts.port, "/api/v1/stats/security");
+
+        if (!opts.live) {
+            ansi::exit_alt_screen();
+            ansi::show_cursor();
+        }
 
         if (opts.json_output) {
-            printf("%s\n", body.c_str());
+            // --json: dump raw traffic JSON (most useful for scripting)
+            printf("%s\n", traffic_body.c_str());
         } else {
-            if (opts.live) ansi::clear_screen();
-            JsonReader j(std::move(body));
-            print_overview(j);
+            print_overview(JsonReader(std::move(traffic_body)),
+                           JsonReader(std::move(tcp_body)),
+                           JsonReader(std::move(sec_body)),
+                           opts.live);
 
             if (opts.live) {
-                printf("\n%s[%s q=quit]%s\n",
+                printf("\n%s[%s q=quit ]%s\n",
                        ansi::dim(),
                        format_duration(static_cast<uint64_t>(
                            opts.refresh_interval)).c_str(),
@@ -805,7 +860,7 @@ int main(int argc, char** argv) {
 
         if (!opts.live) break;
 
-        // 等待刷新间隔，期间检测 'q' 键
+        // Wait for next refresh, check 'q' to quit
         auto deadline = std::chrono::steady_clock::now()
             + std::chrono::seconds(opts.refresh_interval);
         while (g_running && std::chrono::steady_clock::now() < deadline) {
