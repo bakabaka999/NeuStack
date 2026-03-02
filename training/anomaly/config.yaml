@@ -1,15 +1,15 @@
 model:
   type: "simple"  # "simple" 或 "lstm"
   input_dim: 8
-  hidden_dims: [32, 16]
-  latent_dim: 8
+  hidden_dims: [64, 32]
+  latent_dim: 6    # 瓶颈层: 8→6, 足够保留正常模式多样性
 
 training:
-  epochs: 100
-  batch_size: 64
-  learning_rate: 0.001
-  weight_decay: 0.0001
-  early_stopping_patience: 10
+  epochs: 300
+  batch_size: 32
+  learning_rate: 0.0005
+  weight_decay: 0.00001
+  early_stopping_patience: 30
 
 data:
   train_samples: 8000

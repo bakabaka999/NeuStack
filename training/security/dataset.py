@@ -69,8 +69,8 @@ class SyntheticSecurityDataset(Dataset):
         基于 SecurityMetrics 在正常网络活动下的期望值:
         - pps: 低~中 (少量包)
         - bps: 与 pps 正相关
-        - syn/rst: 很低 (正常连接建立)
-        - syn_ratio: ~1.0 (SYN ≈ SYN-ACK), sigmoid(1.0, midpoint=5) ≈ 0.018
+        - syn/rst rate: 很低 (正常连接建立)
+        - syn_ratio: syn_rate/pps ≈ 0.001-0.01 (SYN 占总包极小比例)
         - new_conn_rate: 很低
         - avg_pkt_size: 中等 (混合大小包)
         - rst_ratio: ~0 (几乎没有 RST)
@@ -80,24 +80,33 @@ class SyntheticSecurityDataset(Dataset):
             np.random.lognormal(-3.5, 1.0, n).clip(0, 1),  # bps_norm: log 归一化后偏左
             np.random.exponential(0.01, n).clip(0, 1),      # syn_rate_norm: 极低
             np.random.exponential(0.005, n).clip(0, 1),     # rst_rate_norm: 极低
-            np.random.normal(0.018, 0.008, n).clip(0, 1),   # syn_ratio_norm: sigmoid(~1)
+            np.random.exponential(0.005, n).clip(0, 1),     # syn_ratio_norm: syn/pps, 极低
             np.random.exponential(0.01, n).clip(0, 1),      # new_conn_rate_norm: 极低
             np.random.normal(0.5, 0.15, n).clip(0, 1),      # avg_pkt_size_norm: 中等
             np.random.exponential(0.005, n).clip(0, 1),      # rst_ratio_norm: ~0
         ])
 
     def _generate_anomaly(self, n: int) -> np.ndarray:
-        """生成多种攻击类型的异常数据"""
+        """
+        生成多种攻击类型的异常数据
+
+        5 种攻击与 traffic_security.sh 一致:
+          1. SYN Flood       - 高 SYN, 高 syn_ratio, 高 new_conn_rate
+          2. Port Scan       - 高 SYN, 高 RST, 高 rst_ratio
+          3. Connection Flood - 极高 pps, 高 bps, 大量并发
+          4. Slowloris       - 高 new_conn_rate, 极低流量
+          5. Request Flood   - 高 pps, 小 avg_pkt_size
+        """
         n_per_type = max(1, n // 5)
         anomalies = []
 
-        # 1. SYN Flood: 高 SYN, 高 syn_ratio, 高 new_conn_rate
+        # 1. SYN Flood: 高 SYN, 高 syn_ratio (SYN fraction), 高 new_conn_rate
         syn_flood = np.column_stack([
             np.random.uniform(0.3, 0.7, n_per_type),    # pps: 中高
             np.random.uniform(0.1, 0.3, n_per_type),    # bps: 中 (SYN 小包)
             np.random.uniform(0.5, 1.0, n_per_type),    # syn_rate: 很高
             np.random.uniform(0.0, 0.05, n_per_type),   # rst_rate: 低
-            np.random.uniform(0.7, 1.0, n_per_type),    # syn_ratio: 极高 (SYN >> SYN-ACK)
+            np.random.uniform(0.3, 0.9, n_per_type),    # syn_ratio: SYN/pps 高 (大部分包是 SYN)
             np.random.uniform(0.5, 1.0, n_per_type),    # new_conn_rate: 很高
             np.random.uniform(0.02, 0.08, n_per_type),  # avg_pkt_size: 小 (SYN 包)
             np.random.uniform(0.0, 0.03, n_per_type),   # rst_ratio: 低
@@ -117,20 +126,20 @@ class SyntheticSecurityDataset(Dataset):
         ])
         anomalies.append(port_scan)
 
-        # 3. DDoS Flood: 极高 pps + bps
-        ddos = np.column_stack([
-            np.random.uniform(0.7, 1.0, n_per_type),    # pps: 极高
-            np.random.uniform(0.6, 1.0, n_per_type),    # bps: 极高
-            np.random.uniform(0.05, 0.2, n_per_type),   # syn_rate: 正常~略高
-            np.random.uniform(0.0, 0.05, n_per_type),   # rst_rate: 低
-            np.random.uniform(0.01, 0.05, n_per_type),  # syn_ratio: 正常
-            np.random.uniform(0.05, 0.15, n_per_type),  # new_conn_rate: 正常
-            np.random.uniform(0.4, 0.8, n_per_type),    # avg_pkt_size: 中~大
-            np.random.uniform(0.0, 0.03, n_per_type),   # rst_ratio: 低
+        # 3. Connection Flood: 极高 pps + 高 bps + 高 new_conn_rate
+        conn_flood = np.column_stack([
+            np.random.uniform(0.6, 1.0, n_per_type),    # pps: 极高
+            np.random.uniform(0.4, 0.8, n_per_type),    # bps: 高
+            np.random.uniform(0.3, 0.7, n_per_type),    # syn_rate: 高 (大量新连接)
+            np.random.uniform(0.0, 0.1, n_per_type),    # rst_rate: 低~中
+            np.random.uniform(0.5, 0.9, n_per_type),    # syn_ratio: 高
+            np.random.uniform(0.4, 0.9, n_per_type),    # new_conn_rate: 很高
+            np.random.uniform(0.05, 0.15, n_per_type),  # avg_pkt_size: 偏小
+            np.random.uniform(0.0, 0.05, n_per_type),   # rst_ratio: 低
         ])
-        anomalies.append(ddos)
+        anomalies.append(conn_flood)
 
-        # 4. Slowloris: 高 new_conn_rate, 低流量
+        # 4. Slowloris: 高 new_conn_rate, 极低流量
         slowloris = np.column_stack([
             np.random.uniform(0.01, 0.05, n_per_type),  # pps: 极低
             np.random.uniform(0.005, 0.02, n_per_type), # bps: 极低
@@ -143,18 +152,18 @@ class SyntheticSecurityDataset(Dataset):
         ])
         anomalies.append(slowloris)
 
-        # 5. Amplification: 低 pps_in 但高 bps_out
-        amplification = np.column_stack([
-            np.random.uniform(0.05, 0.15, n_per_type),  # pps: 低
-            np.random.uniform(0.5, 0.9, n_per_type),    # bps: 高 (大包)
-            np.random.uniform(0.01, 0.05, n_per_type),  # syn_rate: 低
-            np.random.uniform(0.0, 0.03, n_per_type),   # rst_rate: 低
-            np.random.uniform(0.01, 0.05, n_per_type),  # syn_ratio: 正常
-            np.random.uniform(0.01, 0.05, n_per_type),  # new_conn_rate: 低
-            np.random.uniform(0.8, 1.0, n_per_type),    # avg_pkt_size: 极大
-            np.random.uniform(0.0, 0.02, n_per_type),   # rst_ratio: 低
+        # 5. Request Flood: 极高 pps, 小 avg_pkt_size
+        req_flood = np.column_stack([
+            np.random.uniform(0.5, 1.0, n_per_type),    # pps: 极高
+            np.random.uniform(0.1, 0.3, n_per_type),    # bps: 中 (小请求)
+            np.random.uniform(0.2, 0.5, n_per_type),    # syn_rate: 中
+            np.random.uniform(0.0, 0.05, n_per_type),   # rst_rate: 低
+            np.random.uniform(0.3, 0.7, n_per_type),    # syn_ratio: 中高
+            np.random.uniform(0.2, 0.5, n_per_type),    # new_conn_rate: 中
+            np.random.uniform(0.02, 0.06, n_per_type),  # avg_pkt_size: 小
+            np.random.uniform(0.0, 0.03, n_per_type),   # rst_ratio: 低
         ])
-        anomalies.append(amplification)
+        anomalies.append(req_flood)
 
         # 补足余数
         all_anomalies = np.vstack(anomalies)
@@ -213,6 +222,69 @@ def create_dataloaders(
     return train_loader, val_loader
 
 
+def _augment_security_normal(normal_data: np.ndarray, seed: int = 42, n_aug: int = 500) -> np.ndarray:
+    """
+    增强正常流量数据，覆盖采集数据中缺失的高速流量场景。
+
+    采集数据正常流量 pps_norm max=0.18 (max_pps=20000 下),
+    但实际部署环境可达 pps=15000+ (pps_norm=0.75)。
+    autoencoder 没见过高 pps + 低 syn_rate 的组合，会误报。
+
+    Features (ISecurityModel::Input, with max_pps=20000, max_bps=20000000):
+      pps_norm, bps_norm, syn_rate_norm, rst_rate_norm,
+      syn_ratio_norm, new_conn_rate_norm, avg_pkt_size_norm, rst_ratio_norm
+    """
+    rng = np.random.RandomState(seed)
+    augmented = []
+
+    # 场景 1: 高速正常流量 (大文件传输、流媒体)
+    # pps=5000-18000, syn_rate 极低, 大包
+    n1 = n_aug // 3
+    pps_values = rng.uniform(0.25, 0.9, n1)  # pps/20000
+    aug1 = np.column_stack([
+        pps_values,                                # pps_norm: high
+        rng.uniform(0.6, 1.0, n1),                # bps_norm: high (log scale)
+        rng.exponential(0.005, n1),                 # syn_rate_norm: near zero
+        rng.exponential(0.003, n1),                 # rst_rate_norm: near zero
+        rng.exponential(0.003, n1),                 # syn_ratio_norm: syn/pps, near zero
+        rng.exponential(0.005, n1),                  # new_conn_rate_norm: near zero
+        rng.uniform(0.3, 0.7, n1),                  # avg_pkt_size_norm: medium-large
+        rng.exponential(0.003, n1),                  # rst_ratio_norm: near zero
+    ]).clip(0, 1).astype(np.float32)
+    augmented.append(aug1)
+
+    # 场景 2: 中速正常流量 (网页浏览、API 调用)
+    n2 = n_aug // 3
+    aug2 = np.column_stack([
+        rng.uniform(0.05, 0.5, n2),               # pps_norm: moderate
+        rng.uniform(0.3, 0.8, n2),                 # bps_norm: moderate
+        rng.exponential(0.01, n2),                  # syn_rate_norm: low
+        rng.exponential(0.005, n2),                 # rst_rate_norm: very low
+        rng.exponential(0.005, n2),                 # syn_ratio_norm: syn/pps, near zero
+        rng.exponential(0.01, n2),                   # new_conn_rate_norm: low
+        rng.uniform(0.2, 0.6, n2),                  # avg_pkt_size_norm: mixed
+        rng.exponential(0.005, n2),                  # rst_ratio_norm: near zero
+    ]).clip(0, 1).astype(np.float32)
+    augmented.append(aug2)
+
+    # 场景 3: 对真实数据加噪声 + 扩展 pps 范围
+    n3 = n_aug // 3
+    if len(normal_data) > 0:
+        indices = rng.choice(len(normal_data), n3, replace=True)
+        noisy = normal_data[indices].copy()
+        # 提升 pps 和 bps 到更高范围
+        noisy[:, 0] = rng.uniform(0.1, 0.8, n3)   # pps_norm
+        noisy[:, 1] = rng.uniform(0.4, 0.95, n3)   # bps_norm
+        # 保持 syn/rst 特征不变（已经是正常值）
+        noise = rng.normal(0, 0.01, noisy.shape)
+        noise[:, 0] = 0  # already adjusted
+        noise[:, 1] = 0  # already adjusted
+        noisy = (noisy + noise).clip(0, 1).astype(np.float32)
+        augmented.append(noisy)
+
+    return np.vstack(augmented) if augmented else np.empty((0, 8), dtype=np.float32)
+
+
 def create_dataloaders_from_npz(
     npz_path: str,
     train_ratio: float = 0.8,
@@ -254,6 +326,13 @@ def create_dataloaders_from_npz(
 
     train_inputs = normal_inputs[perm[:split]]
     train_labels = np.zeros(split, dtype=np.int64)
+
+    # 增强训练数据：填补高速正常流量覆盖不足
+    aug_data = _augment_security_normal(train_inputs, seed=seed + 100)
+    if len(aug_data) > 0:
+        print(f"    Augmented normal samples: {len(aug_data)}")
+        train_inputs = np.vstack([train_inputs, aug_data])
+        train_labels = np.zeros(len(train_inputs), dtype=np.int64)
 
     val_inputs = normal_inputs[perm[split:]]
     val_labels = np.zeros(n_normal - split, dtype=np.int64)

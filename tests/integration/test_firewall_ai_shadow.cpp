@@ -278,10 +278,10 @@ static void test_feature_extraction() {
     attack.pps = 5000.0;
     attack.syn_rate = 4000.0;  // 很高的 SYN 速率
     attack.rst_rate = 100.0;
-    attack.syn_to_synack_ratio = 50.0;  // 异常高
-    
+    attack.syn_to_synack_ratio = 200.0;  // 异常高 → sigmoid(200, 50) ≈ 1.0
+
     auto attack_features = extractor.extract(attack, 1000);
-    
+
     check(attack_features.syn_rate_norm > features.syn_rate_norm,
           "Attack has higher syn_rate_norm");
     check(attack_features.tx_rx_ratio_norm > 0.9f,
