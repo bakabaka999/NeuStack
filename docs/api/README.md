@@ -9,6 +9,7 @@ This directory contains the API reference documentation for NeuStack.
 | [Firewall](firewall.md) | Firewall engine API (rule engine, AI anomaly detection, Shadow Mode) |
 | [AI Training](ai-training.md) | AI model training guide |
 | [AI Inference](ai-inference.md) | AI inference engine & NetworkAgent decision layer |
+| [Telemetry](telemetry.md) | Telemetry framework, HTTP endpoints, Prometheus export, CLI tool |
 | [Integration](integration.md) | How to use NeuStack as a library in your project |
 | [NeuStack Core](core.md) | Core API (protocol stack / HTTP / DNS) |
 
@@ -43,6 +44,18 @@ TCPLayer            // TCP layer
 IPv4Layer           // IP layer
 ```
 
+### Telemetry & Observability
+
+```cpp
+#include "neustack/telemetry/telemetry_api.hpp"
+
+// Main classes
+TelemetryAPI        // Real-time query interface
+MetricsRegistry     // Metric registration center
+JsonExporter        // JSON serialization
+PrometheusExporter  // Prometheus exposition format
+```
+
 ### NeuStack Facade API (Firewall)
 
 ```cpp
@@ -75,4 +88,5 @@ SecurityAnomalyModel   // Deep Autoencoder security anomaly detection (firewall 
 
 - **v1.0**: Base protocol stack + AI congestion control
 - **v1.1**: Performance optimization + test hardening
-- **v1.2**: AI firewall + security training pipeline + E2E test suite (current)
+- **v1.2**: AI firewall + security training pipeline + E2E test suite
+- **v1.3**: Telemetry framework + HTTP metrics endpoints + CLI monitoring tool + AI model hardening (current)

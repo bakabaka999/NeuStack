@@ -515,14 +515,14 @@ struct Input {
     float bps_norm;             // 字节速率（归一化）
     float syn_rate_norm;        // SYN 速率（归一化）
     float rst_rate_norm;        // RST 速率（归一化）
-    float syn_ratio_norm;       // SYN/SYN-ACK 比率（归一化）
+    float syn_ratio_norm;       // SYN 占比 (syn_rate/pps)
     float new_conn_rate_norm;   // 新连接速率（归一化）
     float avg_pkt_size_norm;    // 平均包大小（归一化）
     float rst_ratio_norm;       // RST/总包 比率（归一化）
 };
 ```
 
-Normalization method: `value / max_value`, where `max_value` is defined in `SecurityFeatureExtractor` (e.g., `max_pps = 10000`). The Python training side and C++ inference side use the same normalization parameters.
+Normalization method: `value / max_value`, where `max_value` is defined in `SecurityFeatureExtractor` (e.g., `max_pps = 20000`). The Python training side and C++ inference side use the same normalization parameters.
 
 ### ISecurityModel::Output
 

@@ -2,7 +2,7 @@
 
 All notable changes to NeuStack will be documented in this file.
 
-## [1.3.0] - 2025-03-10
+## [1.3.0] - 2026-03-10
 
 ### Added
 
@@ -47,7 +47,7 @@ All notable changes to NeuStack will be documented in this file.
 
 ---
 
-## [1.2.0] - 2025-02-15
+## [1.2.0] - 2026-02-15
 
 ### Added
 
@@ -102,7 +102,7 @@ All notable changes to NeuStack will be documented in this file.
 
 ---
 
-## [1.1.0] - 2025-02-08
+## [1.1.0] - 2026-02-08
 
 ### Added
 - `FixedPool<T>` for zero-allocation object management (#2)
@@ -115,7 +115,7 @@ All notable changes to NeuStack will be documented in this file.
 
 ---
 
-## [1.0.0] - 2025-02-05
+## [1.0.0] - 2026-02-05
 
 ### Added
 - Complete user-space TCP/IP stack (IPv4, ICMP, UDP, TCP, HTTP 1.1, DNS)

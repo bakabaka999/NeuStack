@@ -48,6 +48,7 @@ NeuStack 是一个**完全从零实现**的用户态 TCP/IP 协议栈，具备 A
 | **拥塞控制** | Reno · CUBIC · **Orca (SAC 强化学习)** |
 | **AI 智能面** | 带宽预测 (LSTM) · 异常检测 (Autoencoder) · 智能拥塞控制 (SAC) · 安全异常检测 (Deep AE) |
 | **防火墙** | 黑白名单 · 端口封禁 · 令牌桶限速 · AI Shadow Mode · 自动升降级 · 安全数据导出 |
+| **可观测性** | MetricsRegistry (Counter/Gauge/Histogram) · JSON & Prometheus 导出 · 7 个 HTTP 端点 · `neustack-stat` 实时监控终端 |
 | **NetworkAgent** | 4 状态决策层，协调 4 个模型，策略性 clamp / 回退 / 连接控制 |
 | **跨平台** | macOS (utun) · Linux (TUN/TAP) · Windows (Wintun) |
 | **零分配设计** | FixedPool 内存池，热路径无 new/delete |
@@ -58,6 +59,9 @@ NeuStack 是一个**完全从零实现**的用户态 TCP/IP 协议栈，具备 A
 ┌─────────────────────────────────────────────────────────────┐
 │                    应用层 (Application)                       │
 │              HTTP Server/Client  ·  DNS Client                │
+├─────────────────────────────────────────────────────────────┤
+│                  可观测性 (Telemetry)                          │
+│  MetricsRegistry · JSON/Prometheus 导出 · HTTP 端点            │
 ├─────────────────────────────────────────────────────────────┤
 │                    传输层 (Transport)                         │
 │          TCP (Reno / CUBIC / Orca)  ·  UDP                    │
@@ -169,6 +173,7 @@ int main() {
 | [Firewall Guide](docs/api/firewall.md) | 防火墙配置指南 |
 | [AI Training](docs/api/ai-training.md) | AI 模型训练流程 |
 | [AI Inference](docs/api/ai-inference.md) | AI 推理 & NetworkAgent API |
+| [Telemetry](docs/api/telemetry.md) | 可观测性框架、HTTP 端点、CLI 工具 |
 | [集成指南](docs/api/integration.md) | 将 NeuStack 作为库集成到你的项目 |
 | [Integration](docs/api/integration.md) | 将 NeuStack 作为第三方库集成到你的项目 |
 | [Project Whitepaper](docs/project_whitepaper.md) | 项目白皮书 (设计细节) |
@@ -288,9 +293,9 @@ ctest -R "Benchmark"    # 基准测试
 
 | 类别 | 覆盖 |
 |------|------|
-| **单元测试** | 校验和、TCP/IP 解析、拥塞控制、HTTP 解析、防火墙规则引擎、限速器、安全模型 |
+| **单元测试** | 校验和、TCP/IP 解析、拥塞控制、HTTP 解析、防火墙规则引擎、限速器、安全模型、遥测注册表、JSON/Prometheus 导出器 |
 | **集成测试** | TCP 握手、HTTP 往返、防火墙数据包过滤、AI Shadow Mode、防火墙 E2E (16 场景/91 断言) |
-| **基准测试** | 校验和吞吐、队列性能、TCP 吞吐、内存池性能 |
+| **基准测试** | 校验和吞吐、队列性能、TCP 吞吐、内存池性能、指标热路径 |
 
 ## 项目结构
 
@@ -304,8 +309,10 @@ NeuStack/
 │   ├── app/                   #   应用层 (HTTP, DNS)
 │   ├── firewall/              #   防火墙引擎
 │   ├── metrics/               #   指标采集
+│   ├── telemetry/             #   可观测性
 │   └── ai/                    #   AI 推理
 ├── src/                       # 源代码实现
+├── tools/                     # CLI 工具 (neustack-stat)
 ├── tests/                     # 测试代码
 ├── training/                  # Python 训练代码
 │   ├── orca/                  #   SAC 强化学习

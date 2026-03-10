@@ -247,14 +247,14 @@ Autoencoder reconstruction error detection. Normal traffic has low reconstructio
 AnomalyDetector detector("models/anomaly_detector.onnx", 0.5f);
 
 IAnomalyModel::Input input {
-    .packets_rx_norm       = 0.3f,
-    .packets_tx_norm       = 0.4f,
-    .bytes_tx_norm         = 0.5f,
-    .syn_rate_norm         = 0.1f,
-    .rst_rate_norm         = 0.05f,
-    .conn_established_norm = 0.6f,
-    .tx_rx_ratio_norm      = 0.8f,
-    .active_conn_norm      = 0.2f,
+    .log_pkt_rate       = 0.7f,
+    .bytes_per_pkt      = 0.6f,
+    .syn_ratio          = 0.01f,
+    .rst_ratio          = 0.005f,
+    .conn_completion    = 0.9f,
+    .tx_rx_ratio        = 0.4f,
+    .log_active_conn    = 0.35f,
+    .log_conn_reset     = 0.1f,
 };
 
 auto result = detector.infer(input);
@@ -269,14 +269,14 @@ detector.set_threshold(0.8f);
 
 | Input Features (8-dim) | Description |
 |------------------------|-------------|
-| `packets_rx_norm` | Received packet rate |
-| `packets_tx_norm` | Sent packet rate |
-| `bytes_tx_norm` | Sent byte rate |
-| `syn_rate_norm` | SYN packet rate |
-| `rst_rate_norm` | RST packet rate |
-| `conn_established_norm` | Established connection count |
-| `tx_rx_ratio_norm` | Send/receive ratio |
-| `active_conn_norm` | Active connection count |
+| `log_pkt_rate` | Total packet rate (log-compressed) |
+| `bytes_per_pkt` | Average packet size / 1500 |
+| `syn_ratio` | SYN fraction of received packets |
+| `rst_ratio` | RST fraction of received packets |
+| `conn_completion` | Connection completion rate (established / SYN) |
+| `tx_rx_ratio` | Send/receive packet ratio |
+| `log_active_conn` | Active connection count (log-compressed) |
+| `log_conn_reset` | Connection reset count (log-compressed) |
 
 ### SecurityAnomalyModel — Security Anomaly Detection
 
@@ -295,7 +295,7 @@ ISecurityModel::Input input {
     .bps_norm           = 0.4f,   // 字节速率
     .syn_rate_norm      = 0.8f,   // SYN 速率（高 = 可疑）
     .rst_rate_norm      = 0.1f,   // RST 速率
-    .syn_ratio_norm     = 0.9f,   // SYN/SYN-ACK 比率
+    .syn_ratio_norm     = 0.9f,   // SYN 占比（高 = 可疑）
     .new_conn_rate_norm = 0.7f,   // 新连接速率
     .avg_pkt_size_norm  = 0.2f,   // 平均包大小
     .rst_ratio_norm     = 0.05f,  // RST/总包 比率
@@ -319,7 +319,7 @@ float current = sec_model.get_threshold();
 | `bps_norm` | Byte rate (bytes/s) |
 | `syn_rate_norm` | SYN packet rate |
 | `rst_rate_norm` | RST packet rate |
-| `syn_ratio_norm` | SYN / SYN-ACK ratio (high value = SYN flood indicator) |
+| `syn_ratio_norm` | SYN fraction (syn_rate / pps, high = SYN flood indicator) |
 | `new_conn_rate_norm` | New connection establishment rate |
 | `avg_pkt_size_norm` | Average packet size |
 | `rst_ratio_norm` | RST / total packet ratio |

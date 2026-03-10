@@ -48,6 +48,7 @@ NeuStack is a **fully from-scratch** user-space TCP/IP stack with AI-driven cong
 | **Congestion Control** | Reno · CUBIC · **Orca (SAC Reinforcement Learning)** |
 | **AI Intelligence Plane** | Bandwidth Prediction (LSTM) · Anomaly Detection (Autoencoder) · Smart Congestion Control (SAC) · Security Anomaly Detection (Deep AE) |
 | **Firewall** | Blacklist/Whitelist · Port Blocking · Token Bucket Rate Limiting · AI Shadow Mode · Auto Escalation/De-escalation · Security Data Export |
+| **Telemetry & Observability** | MetricsRegistry (Counter/Gauge/Histogram) · JSON & Prometheus exporters · 7 HTTP endpoints · `neustack-stat` live CLI dashboard |
 | **NetworkAgent** | 4-state decision layer coordinating 4 models with policy-based clamp / fallback / connection control |
 | **Cross-Platform** | macOS (utun) · Linux (TUN/TAP) · Windows (Wintun) |
 | **Zero-Allocation Design** | FixedPool memory pool, no new/delete on hot paths |
@@ -58,6 +59,9 @@ NeuStack is a **fully from-scratch** user-space TCP/IP stack with AI-driven cong
 ┌─────────────────────────────────────────────────────────────┐
 │                    Application Layer                         │
 │              HTTP Server/Client  ·  DNS Client                │
+├─────────────────────────────────────────────────────────────┤
+│                  Telemetry & Observability                    │
+│  MetricsRegistry · JSON/Prometheus Export · HTTP Endpoints    │
 ├─────────────────────────────────────────────────────────────┤
 │                    Transport Layer                            │
 │          TCP (Reno / CUBIC / Orca)  ·  UDP                    │
@@ -169,6 +173,7 @@ int main() {
 | [Firewall Guide](docs/api/firewall.md) | Firewall configuration guide |
 | [AI Training](docs/api/ai-training.md) | AI model training guide |
 | [AI Inference](docs/api/ai-inference.md) | AI inference & NetworkAgent API |
+| [Telemetry](docs/api/telemetry.md) | Telemetry framework, HTTP endpoints, CLI tool |
 | [Integration Guide](docs/api/integration.md) | Use NeuStack as a library in your project |
 | [Project Whitepaper](docs/project_whitepaper.md) | Project whitepaper (design details) |
 | [Changelog](CHANGELOG.md) | Version history |
@@ -287,9 +292,9 @@ ctest -R "Benchmark"    # Benchmarks
 
 | Category | Coverage |
 |----------|----------|
-| **Unit Tests** | Checksum, TCP/IP parsing, congestion control, HTTP parsing, firewall rule engine, rate limiter, security model |
+| **Unit Tests** | Checksum, TCP/IP parsing, congestion control, HTTP parsing, firewall rule engine, rate limiter, security model, telemetry registry, JSON/Prometheus exporters |
 | **Integration Tests** | TCP handshake, HTTP roundtrip, firewall packet filtering, AI Shadow Mode, Firewall E2E (16 cases / 91 assertions) |
-| **Benchmarks** | Checksum throughput, queue performance, TCP throughput, memory pool performance |
+| **Benchmarks** | Checksum throughput, queue performance, TCP throughput, memory pool performance, metrics hotpath |
 
 ## Project Structure
 
@@ -303,8 +308,10 @@ NeuStack/
 │   ├── app/                   #   Application layer (HTTP, DNS)
 │   ├── firewall/              #   Firewall engine
 │   ├── metrics/               #   Metrics collection
+│   ├── telemetry/             #   Telemetry & observability
 │   └── ai/                    #   AI inference
 ├── src/                       # Source implementations
+├── tools/                     # CLI tools (neustack-stat)
 ├── tests/                     # Test code
 ├── training/                  # Python training code
 │   ├── orca/                  #   SAC reinforcement learning
