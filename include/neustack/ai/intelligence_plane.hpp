@@ -92,6 +92,7 @@ private:
     // 历史数据 (用于带宽预测)
     std::vector<TCPSample> _sample_history;
     GlobalMetrics::Snapshot _prev_snapshot;
+    GlobalMetrics::Snapshot _anomaly_prev_snapshot;  // anomaly 独立快照，避免 1ms delta 过小
 
     // 带宽预测结果缓存 (raw bytes/s, 供 Orca 归一化使用)
     float _cached_predicted_bw = 0.0f;

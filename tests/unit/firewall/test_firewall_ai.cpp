@@ -78,15 +78,15 @@ TEST_CASE("SecurityFeatureExtractor: Normalization", "[firewall][ai][features]")
     
     SECTION("Default params") {
         SecurityMetrics::Snapshot snap{};
-        snap.pps = 5000.0;        // 50% of max (10000)
-        snap.syn_rate = 500.0;    // 50% of max (1000)
-        snap.rst_rate = 250.0;    // 50% of max (500)
+        snap.pps = 5000.0;        // 25% of max (20000)
+        snap.syn_rate = 500.0;    // 100% of max (500)
+        snap.rst_rate = 50.0;     // 50% of max (100)
         snap.bps = 50000000.0;    // 50 MB/s
         snap.new_conn_rate = 100.0;
         snap.syn_to_synack_ratio = 1.0;  // 正常值
-        
+
         auto features = extractor.extract(snap, 5000);
-        
+
         // 检查归一化结果在合理范围
         CHECK(features.packets_rx_norm >= 0.0f);
         CHECK(features.packets_rx_norm <= 1.0f);
@@ -95,23 +95,24 @@ TEST_CASE("SecurityFeatureExtractor: Normalization", "[firewall][ai][features]")
         CHECK(features.rst_rate_norm >= 0.0f);
         CHECK(features.rst_rate_norm <= 1.0f);
     }
-    
+
     SECTION("High SYN ratio (potential attack)") {
         SecurityMetrics::Snapshot snap{};
-        snap.syn_to_synack_ratio = 10.0;  // 异常高，可能是 SYN Flood
-        
+        snap.pps = 1000.0;
+        snap.syn_to_synack_ratio = 100.0;  // 异常高，可能是 SYN Flood
+
         auto features = extractor.extract(snap, 0);
-        
-        // SYN 比率应该被归一化到较高值（sigmoid）
+
+        // SYN/SYN-ACK 比率经 sigmoid(100, 50) 应该接近 1.0
         CHECK(features.tx_rx_ratio_norm > 0.7f);
     }
-    
+
     SECTION("Clamping") {
         SecurityMetrics::Snapshot snap{};
-        snap.pps = 100000.0;  // 超过 max (10000)
-        
+        snap.pps = 100000.0;  // 超过 max (20000)
+
         auto features = extractor.extract(snap, 0);
-        
+
         // 应该被裁剪到 1.0
         CHECK(features.packets_rx_norm == 1.0f);
     }

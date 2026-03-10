@@ -1005,6 +1005,9 @@ int main(int argc, char *argv[]) {
     if (cfg.security_collect && sc.data_output_dir.empty())
         sc.data_output_dir = cfg.output_dir;
 
+    sc.enable_firewall      = true;
+    sc.firewall_shadow_mode = true;   // alert-only by default, use 'fw shadow off' to enforce
+
     auto stack = NeuStack::create(sc);
     if (!stack) { LOG_FATAL(APP, "Failed to create stack"); return EXIT_FAILURE; }
 

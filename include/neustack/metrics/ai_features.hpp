@@ -22,16 +22,16 @@ struct OrcaFeatures {
     static constexpr size_t dim() { return 7; }
 };
 
-// 异常检测特征（8维，匹配 Python 训练归一化）
+// 异常检测特征（8维，ratio-based volume-invariant features）
 struct AnomalyFeatures {
-    float packets_rx_norm;       // packets_rx / 20000, clip[0,1]
-    float packets_tx_norm;       // packets_tx / 20000, clip[0,1]
-    float bytes_tx_norm;         // bytes_tx / 30000000, clip[0,1]
-    float syn_rate_norm;         // syn_received / 100, clip[0,1]
-    float rst_rate_norm;         // rst_received / 100, clip[0,1]
-    float conn_established_norm; // conn_established / 100, clip[0,1]
-    float tx_rx_ratio_norm;      // (packets_tx/packets_rx) / 10, clip[0,1]
-    float active_conn_norm;      // active_connections / 100, clip[0,1]
+    float log_pkt_rate;      // log1p(pkt_rx+pkt_tx) / log1p(40000), clip[0,1]
+    float bytes_per_pkt;     // bytes_tx / max(pkt_tx,1) / 1500, clip[0,1]
+    float syn_ratio;         // syn_received / max(pkt_rx,1), clip[0,1]
+    float rst_ratio;         // rst_received / max(pkt_rx,1), clip[0,1]
+    float conn_completion;   // conn_est / max(syn,1), clip[0,1]; syn=0 → 1.0
+    float tx_rx_ratio;       // pkt_tx / max(pkt_rx,1) / 2, clip[0,1]
+    float log_active_conn;   // log1p(active_conn) / log1p(1000), clip[0,1]
+    float log_conn_reset;    // log1p(conn_reset) / log1p(100), clip[0,1]
 
     static AnomalyFeatures from_delta(
         const GlobalMetrics::Snapshot::Delta &delta,

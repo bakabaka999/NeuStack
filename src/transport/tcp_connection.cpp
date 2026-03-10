@@ -223,6 +223,18 @@ int TCPConnectionManager::close(TCB *tcb) {
             delete_tcb(tcb);
             break;
 
+        case TCPState::FIN_WAIT_1:
+        case TCPState::FIN_WAIT_2:
+        case TCPState::CLOSING:
+        case TCPState::LAST_ACK:
+        case TCPState::TIME_WAIT:
+            // Already closing — ignore redundant close() call.
+            break;
+
+        case TCPState::CLOSED:
+            // Already closed — nothing to do.
+            break;
+
         default:
             LOG_WARN(TCP, "close() called in unexpected state %s", tcp_state_name(tcb->state));
             break;

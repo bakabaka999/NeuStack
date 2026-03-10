@@ -56,14 +56,14 @@ public:
 class IAnomalyModel : public AIModel {
 public:
     struct Input {
-        float packets_rx_norm;
-        float packets_tx_norm;
-        float bytes_tx_norm;
-        float syn_rate_norm;
-        float rst_rate_norm;
-        float conn_established_norm;
-        float tx_rx_ratio_norm;
-        float active_conn_norm;
+        float log_pkt_rate;
+        float bytes_per_pkt;
+        float syn_ratio;
+        float rst_ratio;
+        float conn_completion;
+        float tx_rx_ratio;
+        float log_active_conn;
+        float log_conn_reset;
     };
 
     struct Output {

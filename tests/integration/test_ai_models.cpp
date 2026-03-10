@@ -302,16 +302,16 @@ bool test_anomaly_model() {
     // Scenario A: Normal traffic
     float normal_error = 0.0f;
     {
-        // 8-dim input matching Python training normalization
+        // 8-dim ratio-based input matching Python training normalization
         IAnomalyModel::Input input{
-            .packets_rx_norm = 0.05f,         // ~1000 packets/s / 20000
-            .packets_tx_norm = 0.05f,         // ~1000 packets/s / 20000
-            .bytes_tx_norm = 0.05f,           // ~1.5 MB/s / 30 MB
-            .syn_rate_norm = 0.02f,           // ~2 SYN/s / 100
-            .rst_rate_norm = 0.0f,            // no RSTs
-            .conn_established_norm = 0.02f,   // ~2 new conn/s / 100
-            .tx_rx_ratio_norm = 0.1f,         // tx/rx ~= 1, / 10
-            .active_conn_norm = 0.05f         // ~5 connections / 100
+            .log_pkt_rate = 0.5f,        // moderate packet rate
+            .bytes_per_pkt = 0.6f,       // typical ~900B packets
+            .syn_ratio = 0.005f,         // very low SYN fraction
+            .rst_ratio = 0.002f,         // very low RST fraction
+            .conn_completion = 0.95f,    // most connections complete
+            .tx_rx_ratio = 0.45f,        // roughly balanced
+            .log_active_conn = 0.35f,    // moderate connections
+            .log_conn_reset = 0.01f         // very few resets
         };
 
         auto result = model.infer(input);
@@ -327,14 +327,14 @@ bool test_anomaly_model() {
     float anomaly_error = 0.0f;
     {
         IAnomalyModel::Input input{
-            .packets_rx_norm = 0.9f,          // ~18000 packets/s / 20000
-            .packets_tx_norm = 0.02f,         // very few tx (overwhelmed)
-            .bytes_tx_norm = 0.001f,          // barely sending
-            .syn_rate_norm = 0.9f,            // ~90 SYN/s / 100 (flood!)
-            .rst_rate_norm = 0.8f,            // ~80 RST/s / 100
-            .conn_established_norm = 0.01f,   // very few actually established
-            .tx_rx_ratio_norm = 0.002f,       // tx << rx
-            .active_conn_norm = 0.95f         // ~95 half-open connections / 100
+            .log_pkt_rate = 0.5f,        // moderate packet rate
+            .bytes_per_pkt = 0.03f,      // tiny SYN packets (~40B)
+            .syn_ratio = 0.6f,           // high SYN fraction (flood!)
+            .rst_ratio = 0.01f,          // low RST
+            .conn_completion = 0.05f,    // almost no connections complete
+            .tx_rx_ratio = 0.2f,         // asymmetric (receiving flood)
+            .log_active_conn = 0.7f,     // elevated half-open connections
+            .log_conn_reset = 0.01f         // low resets
         };
 
         auto result = model.infer(input);

