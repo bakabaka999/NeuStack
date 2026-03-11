@@ -1,208 +1,175 @@
 #!/bin/bash
 # scripts/collect_all.sh
 #
-# NeuStack 完整数据采集指南
+# NeuStack 完整数据采集指南 (1 Mac + 1 Linux 服务器)
 #
-# 需要采集 8 组数据用于训练四个 AI 模型:
+# 采集 6 步，训练 4 个模型:
 #
-# ┌─────────────────────────────────────────────────────────────────┐
-# │  数据集          │ 用途              │ 采集方式                 │
-# ├─────────────────────────────────────────────────────────────────┤
-# │  1. 本机正常      │ Orca/BW 基线      │ Mac 本地 TUN             │
-# │  2. 本机+TC      │ Orca/BW 拥塞      │ Mac 本地 + 网络模拟       │
-# │  3. 服务器正常    │ Orca/BW 真实网络  │ Linux 服务器             │
-# │  4. 服务器+TC    │ Orca/BW 极端条件  │ Linux 服务器 + tc        │
-# │  5. Anomaly短连接 │ Anomaly 正常模式  │ 短连接流量模式           │
-# │  6. Anomaly混合   │ Anomaly 正常模式  │ 混合连接流量模式          │
-# │  7. Security正常  │ Security 基线     │ 防火墙 + 正常 HTTP       │
-# │  8. Security攻击  │ Security 异常     │ 防火墙 + 模拟攻击        │
-# └─────────────────────────────────────────────────────────────────┘
+# ┌──────┬──────────────────────┬────────────┬────────────────────────┐
+# │ 步骤 │ 采集内容             │ 训练模型   │ 采集环境               │
+# ├──────┼──────────────────────┼────────────┼────────────────────────┤
+# │  1   │ Mac 本地正常流量     │ Orca/BW    │ Mac 两个终端           │
+# │  2   │ Mac 本地 + 网络模拟  │ Orca/BW    │ Mac 两个终端           │
+# │  3   │ 服务器正常流量       │ Orca/BW    │ Linux + Mac            │
+# │  4   │ 服务器 + 带宽变化    │ Orca/BW    │ Linux + Mac            │
+# │  5   │ Anomaly 流量模式     │ Anomaly    │ Mac 两个终端 (2 轮)    │
+# │  6   │ Security 正常+攻击   │ Security   │ Mac 两个终端 (2 轮)    │
+# └──────┴──────────────────────┴────────────┴────────────────────────┘
 #
-# 模型与数据对应:
-#   - Orca (拥塞控制):     使用 1-4 组的 tcp_samples.csv
-#   - Bandwidth (带宽预测): 使用 1-4 组的 tcp_samples.csv
-#   - Anomaly (异常检测):   使用 1-6 组的 global_metrics.csv
-#   - Security (安全检测):  使用 7-8 组的 security_data.csv
+# 产出文件 (collected_data/ 目录下):
+#   Orca/BW:   tcp_samples_{local_normal,local_tc,server_normal,server_tc}_*.csv
+#   Anomaly:   global_metrics_{local_normal,local_tc,...,local_anomaly_short,local_anomaly_mix}_*.csv
+#   Security:  security_data_{normal,attack}_*.csv
+#
+# 前置条件:
+#   1. Mac 已编译: cmake -B build && cmake --build build
+#   2. Linux 已编译 (同上)
+#   3. Linux 服务器 Mac 可 SSH 访问
+#   4. Linux 安装了 socat: sudo apt install socat
 
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-cat << 'EOF'
+cat << 'GUIDE'
 ╔══════════════════════════════════════════════════════════════════╗
-║           NeuStack 完整数据采集指南                              ║
+║         NeuStack 完整数据采集 (1 Mac + 1 Linux)                  ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-建议采集顺序和时长:
-  1. 本机正常     ~15分钟  (基线数据)
-  2. 本机+TC     ~30分钟  (8种网络条件)
-  3. 服务器正常   ~15分钟  (真实网络)
-  4. 服务器+TC   ~30分钟  (10种网络条件)
-  5. Anomaly短连接 ~15分钟  (短连接模式)
-  6. Anomaly混合  ~15分钟  (混合模式)
-  7. Security正常 ~10分钟  (防火墙正常基线)
-  8. Security攻击 ~10分钟  (模拟攻击)
+前置准备:
+  Mac:    cd /path/to/NeuStack && cmake -B build && cmake --build build
+  Linux:  同上, 另外 sudo apt install socat
 
-总计: ~2.5小时
+将 YOUR_SERVER_IP 替换为你的 Linux 服务器公网/内网 IP。
 
 ══════════════════════════════════════════════════════════════════
+【步骤 1/6】Mac 本地正常流量                            ~15 分钟
+             → tcp_samples_local_normal_*.csv (Orca/BW 训练)
+══════════════════════════════════════════════════════════════════
 
-【场景 1】本机正常采集 (Mac)
-
-  终端 1 - 启动 NeuStack:
+  Mac 终端 1:
     sudo bash scripts/mac/collect.sh --hours 0
 
-  终端 2 - 生成流量:
+  Mac 终端 2:
     bash scripts/mac/traffic.sh 192.168.100.2 --duration 15 --mode heavy
 
-  输出: collected_data/tcp_samples_local_*.csv
-        collected_data/global_metrics_local_*.csv
-        collected_data/security_data_local_*.csv
+  流量跑完后在终端 1 按 Ctrl+C 停止。
 
 ══════════════════════════════════════════════════════════════════
+【步骤 2/6】Mac 本地 + 网络模拟 (延迟/丢包/限速)       ~30 分钟
+             → tcp_samples_local_tc_*.csv (Orca/BW 训练)
+══════════════════════════════════════════════════════════════════
 
-【场景 2】本机 + 网络模拟采集 (Mac)
-
-  终端 1 - 启动 NeuStack + 网络模拟:
+  Mac 终端 1:
     sudo bash scripts/mac/collect_local_tc.sh --rounds 3 --phase 60
 
-  终端 2 - 生成流量:
+  Mac 终端 2 (等终端 1 显示 "Ready!" 后):
     bash scripts/mac/traffic.sh 192.168.100.2 --duration 30 --mode heavy
 
-  输出: collected_data/tcp_samples_local_tc_*.csv
-        collected_data/global_metrics_local_tc_*.csv
-        collected_data/security_data_local_tc_*.csv
+  自动结束 (3 轮 × 8 阶段 × 60s = 24 分钟)。
 
 ══════════════════════════════════════════════════════════════════
+【步骤 3/6】Linux 服务器正常流量                        ~15 分钟
+             → tcp_samples_server_normal_*.csv (Orca/BW 训练)
+══════════════════════════════════════════════════════════════════
 
-【场景 3】服务器正常采集 (Linux)
-
-  服务器 - 启动 NeuStack:
+  Linux 服务器:
     sudo bash scripts/linux/collect.sh --hours 0
 
-  客户端 - 生成流量 (Mac 或 Linux 均可):
-    bash scripts/mac/traffic.sh YOUR_SERVER_IP --duration 15 --mode heavy
-    # 或
-    bash scripts/linux/traffic.sh YOUR_SERVER_IP --duration 15 --mode heavy
+  Mac (等服务器显示 "Ready!" 后):
+    bash scripts/mac/traffic.sh YOUR_SERVER_IP --http-port 8080 --duration 15 --mode heavy
 
-  输出: collected_data/tcp_samples_*.csv
-        collected_data/global_metrics_*.csv
-        collected_data/security_data_*.csv
+  流量跑完后在 Linux 按 Ctrl+C 停止。
 
 ══════════════════════════════════════════════════════════════════
+【步骤 4/6】Linux 服务器 + 带宽变化 (tc)               ~30 分钟
+             → tcp_samples_server_tc_*.csv (Orca/BW 训练)
+══════════════════════════════════════════════════════════════════
 
-【场景 4】服务器 + TC 采集 (Linux)
-
-  服务器 - 启动 NeuStack + tc:
+  Linux 服务器:
     sudo bash scripts/linux/collect_bwvar.sh --rounds 3 --phase-duration 60
 
-  客户端 - 生成流量 (Mac 或 Linux 均可):
-    bash scripts/mac/traffic.sh YOUR_SERVER_IP --duration 55 --mode heavy
-    # 或
-    bash scripts/linux/traffic.sh YOUR_SERVER_IP --duration 55 --mode heavy
+  Mac (等服务器显示 "Ready!" 后):
+    bash scripts/mac/traffic.sh YOUR_SERVER_IP --http-port 8080 --duration 35 --mode heavy
 
-  输出: collected_data/tcp_samples_bwvar_*.csv
-        collected_data/global_metrics_bwvar_*.csv
-        collected_data/security_data_bwvar_*.csv
+  自动结束 (3 轮 × 10 阶段 × 60s = 30 分钟)。
 
 ══════════════════════════════════════════════════════════════════
+【步骤 5/6】Anomaly 流量模式 (两轮)                     ~30 分钟
+             → global_metrics_local_anomaly_{short,mix}_*.csv
+══════════════════════════════════════════════════════════════════
 
-【场景 5】Anomaly 短连接采集
+  --- 5a: 短连接模式 (~15 分钟) ---
 
-  启动 NeuStack (本机或服务器均可，下面以本机为例):
-    sudo bash scripts/mac/collect.sh --hours 0
+  Mac 终端 1:
+    sudo bash scripts/mac/collect.sh --hours 0 --suffix local_anomaly_short
 
-  生成短连接流量 (Mac 或 Linux 均可):
+  Mac 终端 2:
     bash scripts/mac/traffic_anomaly.sh 192.168.100.2 --duration 15 --mode short
-    # 或
-    bash scripts/linux/traffic_anomaly.sh 10.0.1.2 --duration 15 --mode short
 
-  输出: collected_data/tcp_samples_local_*.csv
-        collected_data/global_metrics_local_*.csv (主要用于 Anomaly)
-        collected_data/security_data_local_*.csv
+  流量跑完后 Ctrl+C。
 
-══════════════════════════════════════════════════════════════════
+  --- 5b: 混合连接模式 (~15 分钟) ---
 
-【场景 6】Anomaly 混合连接采集
+  Mac 终端 1:
+    sudo bash scripts/mac/collect.sh --hours 0 --suffix local_anomaly_mix
 
-  启动 NeuStack:
-    sudo bash scripts/mac/collect.sh --hours 0
-
-  生成混合流量 (Mac 或 Linux 均可):
+  Mac 终端 2:
     bash scripts/mac/traffic_anomaly.sh 192.168.100.2 --duration 15 --mode mixed
-    # 或
-    bash scripts/linux/traffic_anomaly.sh 10.0.1.2 --duration 15 --mode mixed
 
-  输出: collected_data/tcp_samples_local_*.csv
-        collected_data/global_metrics_local_*.csv (主要用于 Anomaly)
-        collected_data/security_data_local_*.csv
+  流量跑完后 Ctrl+C。
 
 ══════════════════════════════════════════════════════════════════
-
-【场景 7】Security 正常流量采集 (可在本机或服务器)
-
-  === 本机 (Mac) ===
-  终端 1 - 启动 NeuStack + 防火墙:
-    sudo bash scripts/mac/collect_security.sh --phase normal --duration 10
-
-  终端 2 - 生成正常流量:
-    bash scripts/mac/traffic_security.sh 192.168.100.2 --duration 10 --mode normal
-
-  === 服务器 (Linux) ===
-  服务器:
-    sudo bash scripts/linux/collect_security.sh --phase normal --duration 10
-
-  客户端 (Mac 或 Linux):
-    bash scripts/mac/traffic_security.sh YOUR_SERVER_IP --duration 10 --mode normal
-    # 或
-    bash scripts/linux/traffic_security.sh YOUR_SERVER_IP --duration 10 --mode normal
-
-  输出: collected_data/security_data_normal_*.csv (label=0)
-
+【步骤 6/6】Security 正常 + 攻击 (两轮)                ~30 分钟
+             → security_data_{normal,attack}_*.csv
 ══════════════════════════════════════════════════════════════════
 
-【场景 8】Security 攻击流量采集
+  --- 6a: 正常流量 (label=0, ~15 分钟) ---
 
-  === 本机 (Mac) ===
-  终端 1:
-    sudo bash scripts/mac/collect_security.sh --phase attack --duration 10
+  Mac 终端 1:
+    sudo bash scripts/mac/collect_security.sh --phase normal --duration 15
 
-  终端 2:
-    bash scripts/mac/traffic_security.sh 192.168.100.2 --duration 10 --mode attack
+  Mac 终端 2:
+    bash scripts/mac/traffic_security.sh 192.168.100.2 --duration 15 --mode normal
 
-  === 服务器 (Linux) ===
-  服务器:
-    sudo bash scripts/linux/collect_security.sh --phase attack --duration 10
+  等待 15 分钟自动结束。
 
-  客户端 (Mac 或 Linux):
-    bash scripts/mac/traffic_security.sh YOUR_SERVER_IP --duration 10 --mode attack
-    # 或
-    bash scripts/linux/traffic_security.sh YOUR_SERVER_IP --duration 10 --mode attack
+  --- 6b: 攻击流量 (label=1, ~15 分钟) ---
 
-  输出: collected_data/security_data_attack_*.csv (label=1)
+  Mac 终端 1:
+    sudo bash scripts/mac/collect_security.sh --phase attack --duration 15
 
-══════════════════════════════════════════════════════════════════
+  Mac 终端 2:
+    bash scripts/mac/traffic_security.sh 192.168.100.2 --duration 15 --mode attack
 
-【数据合并与训练】
-
-  合并所有 CSV 并生成训练数据集:
-    python scripts/python/csv_to_dataset.py --data-dir collected_data/
-
-  训练模型:
-    cd training/orca && python train.py --data ../real_data/orca_dataset.npz
-    cd training/bandwidth && python train.py --data ../real_data/bandwidth_dataset.npz
-    cd training/anomaly && python train.py --data ../real_data/anomaly_dataset.npz
-    cd training/security && python train.py --data ../real_data/security_dataset.npz
+  等待 15 分钟自动结束。
 
 ══════════════════════════════════════════════════════════════════
+【数据合并 & 训练】
+══════════════════════════════════════════════════════════════════
 
+  # 检查采集结果
+  ls -la collected_data/*.csv
+
+  # 生成训练数据集 (一条命令全部生成)
+  python3 scripts/python/csv_to_dataset.py --data-dir collected_data/
+
+  # 训练各模型
+  cd training/orca     && python train.py --data ../real_data/orca_dataset.npz && cd ../..
+  cd training/bandwidth && python train.py --data ../real_data/bandwidth_dataset.npz && cd ../..
+  cd training/anomaly  && python train.py --data ../real_data/anomaly_dataset.npz && cd ../..
+  cd training/security && python train.py --data ../real_data/security_dataset.npz && cd ../..
+
+  # 导出 ONNX
+  cd training/security && python export_onnx.py && cd ../..
+
+══════════════════════════════════════════════════════════════════
 【注意事项】
+══════════════════════════════════════════════════════════════════
 
-  1. 每个场景的 CSV 会自动带上时间戳，不会覆盖
-  2. csv_to_dataset.py 会自动合并目录下所有匹配的 CSV
-  3. 建议每组至少采集 1000+ 样本 (约 10-15 分钟)
-  4. Anomaly 需要看到多种正常模式，所以需要 5、6 两组额外数据
-  5. Security 需要正常 (label=0) 和攻击 (label=1) 两组
-  6. Security 建议在服务器上采集 (真实网络环境更有代表性)
+  1. 每步的 CSV 带时间戳，不会覆盖，可安全重复运行
+  2. csv_to_dataset.py 自动合并 collected_data/ 下所有匹配的 CSV
+  3. 步骤 1-4 的 security_data 也会被采集（顺带），会作为 label=0 正常数据
+  4. 步骤 5 只用 global_metrics，tcp_samples 是额外收获
+  5. 步骤 6 的攻击强度已大幅提升 (200-500 并发)
+  6. 总采集时间约 2.5 小时
+  7. 如果 Linux 服务器不可用，可以跳过步骤 3-4，
+     本地数据也够训练，只是缺少真实网络环境的多样性
 
-EOF
+GUIDE

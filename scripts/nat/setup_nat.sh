@@ -66,10 +66,23 @@ pfctl -f "$PF_CONF" 2>/dev/null
 pfctl -e 2>/dev/null || true
 echo -e "${GREEN}OK${NC}"
 
-# 5. Route Check (Optional but recommended for point-to-point)
-echo -n "Ensuring route to $STACK_IP... "
-route add -host "$STACK_IP" -interface "$DEV" > /dev/null 2>&1 || true
-echo -e "${GREEN}OK${NC}"
+# 5. Route Check — detect VPN/proxy conflict
+echo -n "Checking route to $STACK_IP... "
+cur_iface=$(route -n get -host "$STACK_IP" 2>/dev/null | awk '/interface:/{print $2}')
+if [[ "$cur_iface" == "$DEV" ]]; then
+    echo -e "${GREEN}OK${NC}"
+elif [[ -n "$cur_iface" ]]; then
+    echo -e "${RED}FAILED${NC}"
+    echo ""
+    echo -e "${RED}[ERROR] Route to $STACK_IP is hijacked by $cur_iface (expected $DEV).${NC}"
+    echo -e "${RED}        A VPN or proxy (Clash, Surge, etc.) is likely intercepting traffic.${NC}"
+    echo -e "${RED}        Please disable your VPN/proxy and re-run this script.${NC}"
+    exit 1
+else
+    route add -host "$STACK_IP" -interface "$DEV" > /dev/null 2>&1 \
+        || { echo -e "${RED}FAILED${NC}"; exit 1; }
+    echo -e "${GREEN}OK${NC}"
+fi
 
 echo -e "--- ${GREEN}Setup Complete${NC} ---"
 echo -e "Host IP:   ${GREEN}$HOST_IP${NC}"

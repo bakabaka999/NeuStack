@@ -103,6 +103,7 @@ TEST_CASE("AnomalyFeatures: Network anomaly detection", "[metrics][ai]") {
     d.syn_received = 5;
     d.rst_received = 2;
     d.conn_established = 3;
+    d.conn_reset = 1;
     uint32_t active = 10;
 
     SECTION("Normal metrics all in [0,1]") {
@@ -115,19 +116,50 @@ TEST_CASE("AnomalyFeatures: Network anomaly detection", "[metrics][ai]") {
             CHECK(val >= 0.0f);
             CHECK(val <= 1.0f);
         }
+
+        // log_pkt_rate = log1p(1800)/log1p(40000) ≈ 0.709
+        CHECK_THAT(features.log_pkt_rate, WithinAbs(0.709, 0.01));
+        // bytes_per_pkt = 1000000/800/1500 ≈ 0.833
+        CHECK_THAT(features.bytes_per_pkt, WithinAbs(0.833, 0.01));
+        // syn_ratio = 5/1000 = 0.005
+        CHECK_THAT(features.syn_ratio, WithinAbs(0.005, 0.001));
+        // rst_ratio = 2/1000 = 0.002
+        CHECK_THAT(features.rst_ratio, WithinAbs(0.002, 0.001));
+        // conn_completion = 3/5 = 0.6
+        CHECK_THAT(features.conn_completion, WithinAbs(0.6, 0.01));
+        // tx_rx_ratio = 800/1000/2 = 0.4
+        CHECK_THAT(features.tx_rx_ratio, WithinAbs(0.4, 0.01));
+        // log_active_conn = log1p(10)/log1p(1000) ≈ 0.347
+        CHECK_THAT(features.log_active_conn, WithinAbs(0.347, 0.01));
+        // log_conn_reset = log1p(1)/log1p(100) ≈ 0.150
+        CHECK_THAT(features.log_conn_reset, WithinAbs(0.150, 0.01));
     }
 
-    SECTION("Extreme values clipped to 1.0") {
-        d.syn_received = 500; // 500/100 = 5.0 → clipped to 1.0
+    SECTION("Extreme syn_ratio clipped to 1.0") {
+        d.syn_received = 5000; // 5000/1000 = 5.0 → clipped to 1.0
         auto features = AnomalyFeatures::from_delta(d, active);
-        CHECK(features.syn_rate_norm == 1.0f);
+        CHECK(features.syn_ratio == 1.0f);
     }
 
     SECTION("packets_rx=0 division safety") {
         d.packets_rx = 0;
         CHECK_NOTHROW(AnomalyFeatures::from_delta(d, active));
         auto features = AnomalyFeatures::from_delta(d, active);
-        CHECK(features.tx_rx_ratio_norm == 0.0f);
+        // With pkt_rx=0: syn_ratio = 5/1 = 1.0 (clipped), tx_rx_ratio = 800/1/2 = 1.0 (clipped)
+        CHECK(features.syn_ratio <= 1.0f);
+        CHECK(features.tx_rx_ratio <= 1.0f);
+    }
+
+    SECTION("syn=0 gives conn_completion=1.0") {
+        d.syn_received = 0;
+        auto features = AnomalyFeatures::from_delta(d, active);
+        CHECK(features.conn_completion == 1.0f);
+    }
+
+    SECTION("conn_reset=0 gives log_conn_reset=0.0") {
+        d.conn_reset = 0;
+        auto features = AnomalyFeatures::from_delta(d, active);
+        CHECK(features.log_conn_reset == 0.0f);
     }
 }
 

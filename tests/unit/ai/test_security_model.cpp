@@ -114,8 +114,10 @@ TEST_CASE("extract_security: direct ISecurityModel::Input output", "[ai][securit
     CHECK(input.syn_rate_norm > 0.0f);
     // rst_rate > 0（有 RST 包）
     CHECK(input.rst_rate_norm > 0.0f);
-    // syn_ratio > 0.5（SYN/SYN-ACK = 50/10 = 5.0，超过 warning 阈值 5.0，sigmoid ≈ 0.5）
-    CHECK(input.syn_ratio_norm >= 0.45f);
+    // syn_ratio > 0（syn_rate/pps > 0，有 SYN 包）
+    // 275 total packets, 50 SYN → syn_fraction = syn_rate/pps ≈ 50/275 ≈ 0.18
+    CHECK(input.syn_ratio_norm > 0.0f);
+    CHECK(input.syn_ratio_norm < 0.5f);  // 不是攻击级别
     // avg_pkt_size > 0
     CHECK(input.avg_pkt_size_norm > 0.0f);
     // rst_ratio > 0

@@ -51,31 +51,44 @@ ORCA_BW_PATTERNS = [
     'tcp_samples_server_tc*.csv',
 ]
 
-# Anomaly 使用的 global_metrics 文件 (全部 6 组)
-ANOMALY_PATTERNS = [
+# Anomaly 正常流量 (训练用, label=0)
+ANOMALY_NORMAL_PATTERNS = [
     'global_metrics_local_normal*.csv',
     'global_metrics_local_tc*.csv',
     'global_metrics_server_normal*.csv',
     'global_metrics_server_tc*.csv',
-    'global_metrics_local_anomaly_short*.csv',
-    'global_metrics_local_anomaly_mix*.csv',
+    'global_metrics_security_normal*.csv',
 ]
 
-# Security 使用的 security_data 文件 (场景 7, 防火墙采集)
+# Anomaly 异常流量 (仅评估用, label=1)
+ANOMALY_ATTACK_PATTERNS = [
+    'global_metrics_local_anomaly_short*.csv',
+    'global_metrics_local_anomaly_mix*.csv',
+    'global_metrics_security_attack*.csv',
+]
+
+# Security 使用的 security_data 文件 (仅场景 6 的专用采集)
+# 排除 anomaly/tc/local_normal 等场景的 security_data，
+# 这些场景的流量模式在 security 特征维度上与攻击重叠
 SECURITY_PATTERNS = [
-    'security_data*.csv',
+    'security_data_normal*.csv',
+    'security_data_attack*.csv',
 ]
 
 # Anomaly 聚合窗口 (将 100ms 采样聚合为 1s)
 ANOMALY_AGGREGATE_WINDOW = 10
 
 # ─── Security 归一化参数（与 C++ SecurityFeatureExtractor 严格一致）───
-SECURITY_MAX_PPS = 10000.0
-SECURITY_MAX_BPS = 100000000.0   # 100 MB/s
-SECURITY_MAX_SYN_RATE = 1000.0
-SECURITY_MAX_RST_RATE = 500.0
-SECURITY_MAX_CONN_RATE = 500.0
-SECURITY_SYN_RATIO_MIDPOINT = 5.0  # sigmoid 中点
+# 目标: 正常流量归一化后 ~0.1-0.3, 攻击流量 ~0.5-1.0
+# 基于实际采集数据:
+#   正常 pps p50=151, max=3551; syn_rate p50=0.7, max~1.4
+#   攻击 pps p50=508, max=3704; syn_rate p50=207, max=3664
+SECURITY_MAX_PPS = 20000.0        # 提高以覆盖高速流量场景 (原 1000.0)
+SECURITY_MAX_BPS = 20000000.0     # 提高以覆盖高速流量 (原 500000.0)
+SECURITY_MAX_SYN_RATE = 500.0     # 正常 ~0, 攻击 p50=0.41
+SECURITY_MAX_RST_RATE = 100.0     # 正常/攻击 rst_rate 无明显差异
+SECURITY_MAX_CONN_RATE = 500.0    # 与 syn_rate 同步
+SECURITY_SYN_RATIO_MIDPOINT = 50.0  # sigmoid 中点
 SECURITY_MAX_PKT_SIZE = 1500.0
 
 
@@ -338,7 +351,15 @@ def compute_anomaly_features(m: Dict) -> np.ndarray:
     """
     从 1 秒聚合的 GlobalMetrics 提取 8 维 AnomalyFeatures
 
-    归一化范围基于 1 秒聚合后的预期值域
+    Ratio-based volume-invariant features (matching C++ AnomalyFeatures::from_delta):
+      0. log_pkt_rate:    log1p(pkt_rx+pkt_tx) / log1p(40000)
+      1. bytes_per_pkt:   bytes_tx / max(pkt_tx,1) / 1500
+      2. syn_ratio:       syn_received / max(pkt_rx,1)
+      3. rst_ratio:       rst_received / max(pkt_rx,1)
+      4. conn_completion: conn_established / max(syn_received,1); syn=0 → 1.0
+      5. tx_rx_ratio:     pkt_tx / max(pkt_rx,1) / 2
+      6. log_active_conn: log1p(active_connections) / log1p(1000)
+      7. log_conn_reset: log1p(conn_reset) / log1p(100)
     """
     packets_rx = m.get('packets_rx', 0)
     packets_tx = m.get('packets_tx', 0)
@@ -346,51 +367,101 @@ def compute_anomaly_features(m: Dict) -> np.ndarray:
     syn_received = m.get('syn_received', 0)
     rst_received = m.get('rst_received', 0)
     conn_established = m.get('conn_established', 0)
+    conn_reset = m.get('conn_reset', 0)
     active_connections = m.get('active_connections', 0)
 
-    total_packets = packets_rx + packets_tx
-    tx_rx_ratio = packets_tx / max(packets_rx, 1) if total_packets > 0 else 0
+    log_pkt_rate = np.log1p(packets_rx + packets_tx) / np.log1p(40000)
+    bytes_per_pkt = bytes_tx / max(packets_tx, 1) / 1500
+    syn_ratio = syn_received / max(packets_rx, 1)
+    rst_ratio = rst_received / max(packets_rx, 1)
+    conn_completion = 1.0 if syn_received == 0 else conn_established / max(syn_received, 1)
+    tx_rx_ratio = packets_tx / max(packets_rx, 1) / 2
+    log_active_conn = np.log1p(active_connections) / np.log1p(1000)
+    log_conn_reset = np.log1p(conn_reset) / np.log1p(100)
 
     return np.array([
-        np.clip(packets_rx / 20000, 0, 1),          # 收包速率 (1s)
-        np.clip(packets_tx / 20000, 0, 1),           # 发包速率 (1s)
-        np.clip(bytes_tx / 30000000, 0, 1),          # 发送字节速率 (1s)
-        np.clip(syn_received / 100, 0, 1),           # SYN 速率 (1s)
-        np.clip(rst_received / 100, 0, 1),           # RST 速率 (1s)
-        np.clip(conn_established / 100, 0, 1),       # 新建连接速率 (1s)
-        np.clip(tx_rx_ratio / 10, 0, 1),             # 发送/接收包比率
-        np.clip(active_connections / 100, 0, 1),     # 活跃连接数
+        np.clip(log_pkt_rate, 0, 1),
+        np.clip(bytes_per_pkt, 0, 1),
+        np.clip(syn_ratio, 0, 1),
+        np.clip(rst_ratio, 0, 1),
+        np.clip(conn_completion, 0, 1),
+        np.clip(tx_rx_ratio, 0, 1),
+        np.clip(log_active_conn, 0, 1),
+        np.clip(log_conn_reset, 0, 1),
     ], dtype=np.float32)
 
 
-def generate_anomaly_dataset(metrics: List[Dict]) -> Dict:
+def generate_anomaly_dataset(normal_metrics: List[Dict],
+                             anomaly_metrics: List[Dict] = None) -> Dict:
     """
     生成异常检测 Autoencoder 训练数据
 
     1. 将 100ms metrics 聚合为 1s 粒度
-    2. 过滤空闲行
+    2. 过滤空闲行和低流量行 (ratio 特征需要足够包数才有统计意义)
     3. 提取 8 维特征
-    """
-    print(f"    Raw metrics rows: {len(metrics)}")
+    4. 正常数据 label=0，异常数据 label=1
 
-    aggregated = aggregate_metrics(metrics)
-    print(f"    After 1s aggregation: {len(aggregated)}")
+    训练时只用 label=0 的数据，label=1 的数据仅用于评估阈值和检测率。
+    """
+    # 低流量过滤阈值: log1p(100)/log1p(40000) ≈ 0.44
+    # 与 C++ intelligence_plane.cpp MIN_LOG_PKT_RATE 保持一致
+    MIN_LOG_PKT_RATE = np.log1p(100) / np.log1p(40000)
+
+    # --- 处理正常数据 ---
+    print(f"    Raw normal metrics rows: {len(normal_metrics)}")
+    normal_agg = aggregate_metrics(normal_metrics)
+    print(f"    After 1s aggregation (normal): {len(normal_agg)}")
 
     features = []
+    labels = []
     skipped = 0
-    for m in aggregated:
+    skipped_low_traffic = 0
+    for m in normal_agg:
         feat = compute_anomaly_features(m)
         if feat.sum() == 0:
             skipped += 1
             continue
+        if feat[0] < MIN_LOG_PKT_RATE:  # feat[0] = log_pkt_rate
+            skipped_low_traffic += 1
+            continue
         features.append(feat)
+        labels.append(0)
 
-    print(f"    After filtering idle: {len(features)} kept, {skipped} skipped")
+    print(f"    Normal kept: {len(features)}, skipped idle: {skipped}, skipped low-traffic: {skipped_low_traffic}")
+
+    # --- 处理异常数据 ---
+    if anomaly_metrics:
+        print(f"    Raw anomaly metrics rows: {len(anomaly_metrics)}")
+        anomaly_agg = aggregate_metrics(anomaly_metrics)
+        print(f"    After 1s aggregation (anomaly): {len(anomaly_agg)}")
+
+        anomaly_skipped = 0
+        anomaly_skipped_low = 0
+        anomaly_kept = 0
+        for m in anomaly_agg:
+            feat = compute_anomaly_features(m)
+            if feat.sum() == 0:
+                anomaly_skipped += 1
+                continue
+            if feat[0] < MIN_LOG_PKT_RATE:
+                anomaly_skipped_low += 1
+                continue
+            features.append(feat)
+            labels.append(1)
+            anomaly_kept += 1
+
+        print(f"    Anomaly kept: {anomaly_kept}, skipped idle: {anomaly_skipped}, skipped low-traffic: {anomaly_skipped_low}")
+
     features = np.array(features, dtype=np.float32)
+    labels = np.array(labels, dtype=np.int32)
+    n_normal = np.sum(labels == 0)
+    n_anomaly = np.sum(labels == 1)
+    print(f"    Total: {len(features)} (normal={n_normal}, anomaly={n_anomaly})")
 
     return {
         'inputs': features,
         'targets': features.copy(),
+        'labels': labels,
     }
 
 
@@ -479,6 +550,9 @@ def merge_security_data(*csv_files) -> List[Dict]:
     all_rows = []
     for csv_file in csv_files:
         rows = []
+        # 根据文件名标记来源: attack CSV 中的 label=0 行需要特殊处理
+        basename = os.path.basename(csv_file).lower()
+        source = 'attack' if 'attack' in basename else 'normal'
         with open(csv_file) as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -499,6 +573,7 @@ def merge_security_data(*csv_files) -> List[Dict]:
                         'avg_pkt_size': float(row['avg_pkt_size']),
                         'rst_ratio': float(row['rst_ratio']),
                         'label': int(row.get('label', 0)),
+                        '_source': source,
                     }
                     rows.append(parsed)
                 except (ValueError, KeyError):
@@ -518,21 +593,25 @@ def compute_security_features(row: Dict) -> np.ndarray:
     从 SecurityExporter CSV 行提取 8 维 ISecurityModel::Input
 
     归一化策略与 C++ SecurityFeatureExtractor::extract_security() 严格一致:
-      pps_norm           = linear(pps, 10000)
-      bps_norm           = log(bps, 1e8)
-      syn_rate_norm      = linear(syn_rate, 1000)
-      rst_rate_norm      = linear(rst_rate, 500)
-      syn_ratio_norm     = sigmoid(syn_ratio, midpoint=5.0)
+      pps_norm           = linear(pps, 20000)
+      bps_norm           = log(bps, 20000000)
+      syn_rate_norm      = linear(syn_rate, 500)
+      rst_rate_norm      = linear(rst_rate, 100)
+      syn_ratio_norm     = clamp(syn_rate / pps, 0, 1)  — SYN fraction, not syn/synack
       new_conn_rate_norm = linear(new_conn_rate, 500)
       avg_pkt_size_norm  = linear(avg_pkt_size, 1500)
       rst_ratio_norm     = clamp(rst_ratio, 0, 1)
     """
+    # syn_fraction: SYN 占总包比例 (比 syn/synack 更鲁棒)
+    pps = row['pps']
+    syn_fraction = row['syn_rate'] / max(pps, 1.0) if pps > 0 else 0.0
+
     return np.array([
         normalize_linear(row['pps'], SECURITY_MAX_PPS),
         normalize_log(row['bps'], SECURITY_MAX_BPS),
         normalize_linear(row['syn_rate'], SECURITY_MAX_SYN_RATE),
         normalize_linear(row['rst_rate'], SECURITY_MAX_RST_RATE),
-        normalize_sigmoid(row['syn_ratio'], SECURITY_SYN_RATIO_MIDPOINT),
+        float(np.clip(syn_fraction, 0.0, 1.0)),
         normalize_linear(row['new_conn_rate'], SECURITY_MAX_CONN_RATE),
         normalize_linear(row['avg_pkt_size'], SECURITY_MAX_PKT_SIZE),
         float(np.clip(row['rst_ratio'], 0.0, 1.0)),
@@ -557,11 +636,24 @@ def generate_security_dataset(rows: List[Dict]) -> Dict:
     skipped = 0
 
     for row in rows:
+        if row['label'] == 0:
+            # 正常流量: 只使用来自 normal CSV 的行
+            # attack CSV 中的 label=0 行是攻击间歇期数据，特征偏高，
+            # 混入训练会让 autoencoder 学到"高 syn_rate 也正常"
+            if row.get('_source', '') == 'attack':
+                skipped += 1
+                continue
+            # 过滤完全空闲的行
+            if row['pps'] == 0 and row['bps'] == 0:
+                skipped += 1
+                continue
+        else:
+            # 攻击流量: 必须有明显攻击特征，否则是采集间隙的空窗期数据
+            # 要求 syn_rate>0 或 rst_rate>0 或 pps>50
+            if row['syn_rate'] == 0 and row['rst_rate'] == 0 and row['pps'] <= 50:
+                skipped += 1
+                continue
         feat = compute_security_features(row)
-        # 过滤完全空闲的行 (所有速率为 0)
-        if row['pps'] == 0 and row['bps'] == 0:
-            skipped += 1
-            continue
         features.append(feat)
         labels.append(row['label'])
 
@@ -673,37 +765,46 @@ def main():
             print(f"    Target range: [{bw_data['targets'].min():.3f}, "
                   f"{bw_data['targets'].max():.3f}]")
 
-    # ─── Anomaly: 全部 6 组的 global_metrics ───
+    # ─── Anomaly: 正常流量训练 + 异常流量评估 ───
     if args.model in ['all', 'anomaly']:
         print("\n" + "-" * 60)
         print("[3/3] Generating Anomaly Detection dataset...")
 
         if args.global_metrics:
             if os.path.isdir(args.global_metrics):
-                gm_files = sorted(glob.glob(os.path.join(args.global_metrics, 'global_metrics*.csv')))
+                normal_gm_files = sorted(glob.glob(os.path.join(args.global_metrics, 'global_metrics*.csv')))
             else:
-                gm_files = [args.global_metrics]
+                normal_gm_files = [args.global_metrics]
+            anomaly_gm_files = []
         else:
-            gm_files = find_files_by_patterns(args.data_dir, ANOMALY_PATTERNS)
+            normal_gm_files = find_files_by_patterns(args.data_dir, ANOMALY_NORMAL_PATTERNS)
+            anomaly_gm_files = find_files_by_patterns(args.data_dir, ANOMALY_ATTACK_PATTERNS)
 
-        if not gm_files:
-            print("  WARNING: No global_metrics files found, skipping anomaly dataset")
+        if not normal_gm_files:
+            print("  WARNING: No normal global_metrics files found, skipping anomaly dataset")
         else:
-            gm_files.sort()
-            metrics = merge_global_metrics(*gm_files)
+            print("  Normal data:")
+            normal_gm_files.sort()
+            normal_metrics = merge_global_metrics(*normal_gm_files)
 
-            if len(metrics) < 10:
+            anomaly_metrics = []
+            if anomaly_gm_files:
+                print("  Anomaly data:")
+                anomaly_gm_files.sort()
+                anomaly_metrics = merge_global_metrics(*anomaly_gm_files)
+
+            if len(normal_metrics) < 10:
                 print("  WARNING: Too few metrics samples for anomaly detection")
             else:
-                anomaly_data = generate_anomaly_dataset(metrics)
+                anomaly_data = generate_anomaly_dataset(normal_metrics, anomaly_metrics or None)
                 anomaly_path = os.path.join(args.output_dir, 'anomaly_dataset.npz')
                 np.savez(anomaly_path, **anomaly_data)
                 print(f"  Saved: {anomaly_path}")
                 print(f"    Samples:     {len(anomaly_data['inputs'])}")
                 print(f"    Feature dim: {anomaly_data['inputs'].shape[1]}")
-                for i, name in enumerate(['pkt_rx', 'pkt_tx', 'bytes_tx',
-                                           'syn_rate', 'rst_rate', 'conn_rate',
-                                           'tx_rx_ratio', 'active_conns']):
+                for i, name in enumerate(['log_pkt_rate', 'bytes_per_pkt', 'syn_ratio',
+                                           'rst_ratio', 'conn_completion', 'tx_rx_ratio',
+                                           'log_active_conn', 'log_conn_reset']):
                     col = anomaly_data['inputs'][:, i]
                     print(f"    {name:12s}: [{col.min():.4f}, {col.max():.4f}] "
                           f"mean={col.mean():.4f} nonzero={np.count_nonzero(col)}")

@@ -32,8 +32,8 @@ data:
 
 threshold:
   # 阈值搜索策略
-  method: "f1_optimal"  # "percentile" 或 "f1_optimal"
-  percentile: 95        # percentile 方法的分位数
+  method: "percentile"    # "percentile" 或 "f1_optimal"
+  percentile: 99          # p99 更稳定，避免被错误标签拉低阈值
 
 output:
   model_dir: "checkpoints"

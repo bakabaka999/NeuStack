@@ -36,6 +36,7 @@ IntelligencePlane::IntelligencePlane(
 
     // 初始化快照
     _prev_snapshot = global_metrics().snapshot();
+    _anomaly_prev_snapshot = _prev_snapshot;
 }
 
 IntelligencePlane::~IntelligencePlane() {
@@ -113,7 +114,6 @@ void IntelligencePlane::run_loop() {
 
         // ─── 2. 读取全局统计快照 ───
         auto snapshot = global_metrics().snapshot();
-        auto delta = snapshot.diff(_prev_snapshot);
         _prev_snapshot = snapshot;
 
 #ifdef NEUSTACK_AI_ENABLED
@@ -129,7 +129,10 @@ void IntelligencePlane::run_loop() {
         // 异常检测（低频）
         if (_anomaly_model && _anomaly_model->is_loaded() &&
             now - _last_anomaly_time >= _config.anomaly_interval) {
-            process_anomaly(delta, snapshot.active_connections);
+            // 用独立快照计算完整 1s 的 delta，而非主循环的 1ms delta
+            auto anomaly_delta = snapshot.diff(_anomaly_prev_snapshot);
+            _anomaly_prev_snapshot = snapshot;
+            process_anomaly(anomaly_delta, snapshot.active_connections);
             _last_anomaly_time = now;
         }
 
@@ -140,7 +143,7 @@ void IntelligencePlane::run_loop() {
             _last_bandwidth_time = now;
         }
 #else
-        (void)delta;  // 避免未使用警告
+        (void)snapshot;
 #endif
 
         // 短暂休眠，避免空转
@@ -192,31 +195,58 @@ void IntelligencePlane::process_anomaly(
     // 使用 AnomalyFeatures 构造正确归一化的 8-dim 输入
     auto features = AnomalyFeatures::from_delta(delta, active_connections);
 
-    // 无流量时跳过推理（全零输入的重构误差无意义）
-    if (features.packets_rx_norm < 0.001f && features.packets_tx_norm < 0.001f) {
+    // 低负载时跳过推理:
+    // - 极低流量时 ratio 特征失去统计意义 (1 SYN / 7 pkts = 14% 是噪声不是攻击)
+    // - 至少需要 ~100 个包/秒 ratio 才有意义
+    // log1p(100)/log1p(40000) ≈ 0.44
+    constexpr float MIN_LOG_PKT_RATE = 0.44f;
+    if (features.log_pkt_rate < MIN_LOG_PKT_RATE) {
+        // 推送 score=0 让 UI 显示空闲状态
+        AIAction action{};
+        action.type = AIAction::Type::ANOMALY_ALERT;
+        action.conn_id = 0;
+        action.anomaly.score = 0.0f;
+        _action_queue.try_push(action);
         return;
     }
 
     IAnomalyModel::Input input{
-        .packets_rx_norm = features.packets_rx_norm,
-        .packets_tx_norm = features.packets_tx_norm,
-        .bytes_tx_norm = features.bytes_tx_norm,
-        .syn_rate_norm = features.syn_rate_norm,
-        .rst_rate_norm = features.rst_rate_norm,
-        .conn_established_norm = features.conn_established_norm,
-        .tx_rx_ratio_norm = features.tx_rx_ratio_norm,
-        .active_conn_norm = features.active_conn_norm
+        .log_pkt_rate = features.log_pkt_rate,
+        .bytes_per_pkt = features.bytes_per_pkt,
+        .syn_ratio = features.syn_ratio,
+        .rst_ratio = features.rst_ratio,
+        .conn_completion = features.conn_completion,
+        .tx_rx_ratio = features.tx_rx_ratio,
+        .log_active_conn = features.log_active_conn,
+        .log_conn_reset = features.log_conn_reset
     };
 
+    LOG_DEBUG(AI, "Anomaly features: lpkt=%.3f bpp=%.3f syn=%.3f rst=%.3f "
+             "comp=%.3f txrx=%.3f lconn=%.3f lreset=%.3f",
+             features.log_pkt_rate, features.bytes_per_pkt,
+             features.syn_ratio, features.rst_ratio,
+             features.conn_completion, features.tx_rx_ratio,
+             features.log_active_conn, features.log_conn_reset);
+
     auto result = _anomaly_model->infer(input);
-    if (result && result->is_anomaly) {
+    if (result) {
+        // 始终推送 anomaly score，让 UI 显示实时重构误差
         AIAction action{};
         action.type = AIAction::Type::ANOMALY_ALERT;
         action.conn_id = 0;  // 全局
         action.anomaly.score = result->reconstruction_error;
 
         _action_queue.try_push(action);
-        LOG_WARN(AI, "Anomaly detected! score=%.4f", result->reconstruction_error);
+
+        if (result->is_anomaly) {
+            LOG_WARN(AI, "Anomaly detected! score=%.4f "
+                     "[lpkt=%.3f bpp=%.3f syn=%.3f rst=%.3f comp=%.3f txrx=%.3f lconn=%.3f lreset=%.3f]",
+                     result->reconstruction_error,
+                     features.log_pkt_rate, features.bytes_per_pkt,
+                     features.syn_ratio, features.rst_ratio,
+                     features.conn_completion, features.tx_rx_ratio,
+                     features.log_active_conn, features.log_conn_reset);
+        }
     }
 #else
     (void)delta;

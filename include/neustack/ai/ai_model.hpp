@@ -48,22 +48,22 @@ public:
 };
 
 /**
- * 异常检测模型 (LSTM-Autoencoder)
+ * 异常检测模型 (Autoencoder)
  *
- * 输入: AnomalyFeatures (5 维)
+ * 输入: AnomalyFeatures (8 维, ratio-based volume-invariant)
  * 输出: 重构误差，超过阈值则为异常
  */
 class IAnomalyModel : public AIModel {
 public:
     struct Input {
-        float packets_rx_norm;
-        float packets_tx_norm;
-        float bytes_tx_norm;
-        float syn_rate_norm;
-        float rst_rate_norm;
-        float conn_established_norm;
-        float tx_rx_ratio_norm;
-        float active_conn_norm;
+        float log_pkt_rate;
+        float bytes_per_pkt;
+        float syn_ratio;
+        float rst_ratio;
+        float conn_completion;
+        float tx_rx_ratio;
+        float log_active_conn;
+        float log_conn_reset;
     };
 
     struct Output {
@@ -118,7 +118,7 @@ public:
         float bps_norm;             // 字节速率
         float syn_rate_norm;        // SYN 速率
         float rst_rate_norm;        // RST 速率
-        float syn_ratio_norm;       // SYN/SYN-ACK 比率
+        float syn_ratio_norm;       // SYN 占比 (syn_rate / pps)
         float new_conn_rate_norm;   // 新连接速率
         float avg_pkt_size_norm;    // 平均包大小
         float rst_ratio_norm;       // RST/总包 比率

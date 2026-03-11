@@ -12,6 +12,7 @@
 #   --hours N        采集时长 (默认: 不限, Ctrl+C 停止)
 #   --output-dir DIR 数据输出目录 (默认: collected_data/)
 #   --ip IP          NeuStack IP (默认: 192.168.100.2)
+#   --suffix NAME    CSV 文件名后缀 (默认: local_normal)
 
 set -e
 
@@ -24,6 +25,7 @@ OUTPUT_DIR="$PROJECT_ROOT/collected_data"
 NEUSTACK_IP="192.168.100.2"
 HOST_IP="192.168.100.1"
 SECURITY_LABEL=0
+SUFFIX="local_normal"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -31,6 +33,7 @@ while [ $# -gt 0 ]; do
         --output-dir)      OUTPUT_DIR="$2"; shift 2;;
         --ip)              NEUSTACK_IP="$2"; shift 2;;
         --security-label)  SECURITY_LABEL="$2"; shift 2;;
+        --suffix)          SUFFIX="$2"; shift 2;;
         *)                 echo "Unknown: $1"; exit 1;;
     esac
 done
@@ -80,7 +83,7 @@ cleanup() {
         SRC="$OUTPUT_DIR/$f"
         if [ -f "$SRC" ]; then
             BASE="${f%.csv}"
-            DST="$OUTPUT_DIR/${BASE}_local_${TIMESTAMP}.csv"
+            DST="$OUTPUT_DIR/${BASE}_${SUFFIX}_${TIMESTAMP}.csv"
             mv "$SRC" "$DST"
             LINES=$(wc -l < "$DST")
             echo "  $DST ($LINES lines)"

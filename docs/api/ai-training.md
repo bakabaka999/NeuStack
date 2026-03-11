@@ -21,7 +21,7 @@ NeuStack includes four AI models:
 |-------|-----------|-----------------|--------|---------|
 | **Orca** | SAC | 7-dim state | α ∈ [-1, 1] | Congestion window adjustment |
 | **Bandwidth Prediction** | LSTM | 30×3 time series | bytes/s | Forward-looking estimation |
-| **Anomaly Detection** | Autoencoder | 5-dim features | Reconstruction error | TCP anomaly detection |
+| **Anomaly Detection** | Autoencoder | 8-dim features | Reconstruction error | TCP anomaly detection |
 | **Security Anomaly Detection** | Autoencoder | 8-dim features | Reconstruction error + confidence | Firewall threat detection |
 
 ### Orca Input Features (7-dim)
@@ -44,14 +44,17 @@ NeuStack includes four AI models:
  loss_rate]     # 丢包率
 ```
 
-### Anomaly Detection Input (5-dim)
+### Anomaly Detection Input (8-dim)
 
 ```
-[syn_rate,       # SYN 包速率
- rst_rate,       # RST 包速率
- new_conn_rate,  # 新连接速率
- packet_rate,    # 总包速率
- avg_pkt_size]   # 平均包大小
+[log_pkt_rate,     # log1p(pkt_rx+pkt_tx) / log1p(40000)
+ bytes_per_pkt,    # bytes_tx / max(pkt_tx,1) / 1500
+ syn_ratio,        # syn_received / max(pkt_rx,1)
+ rst_ratio,        # rst_received / max(pkt_rx,1)
+ conn_completion,  # conn_est / max(syn,1)
+ tx_rx_ratio,      # pkt_tx / max(pkt_rx,1) / 2
+ log_active_conn,  # log1p(active_conn) / log1p(1000)
+ log_conn_reset]   # log1p(conn_reset) / log1p(100)
 ```
 
 ### Security Anomaly Detection Input (8-dim)
@@ -63,7 +66,7 @@ Dedicated to the firewall. Raw data is collected by `SecurityExporter` and norma
  bps_norm,             # 字节速率
  syn_rate_norm,        # SYN 速率（SYN Flood 指标）
  rst_rate_norm,        # RST 速率（端口扫描指标）
- syn_ratio_norm,       # SYN/SYN-ACK 比率
+ syn_ratio_norm,       # SYN 占比 (syn_rate / pps)
  new_conn_rate_norm,   # 新连接速率
  avg_pkt_size_norm,    # 平均包大小（小包攻击指标）
  rst_ratio_norm]       # RST/总包 比率
@@ -229,10 +232,10 @@ python train.py --config config.yaml
 
 ```yaml
 model:
-  input_dim: 5
+  input_dim: 8
   hidden_dims: [32, 16]
   latent_dim: 8
-  
+
 training:
   epochs: 100
   batch_size: 64

@@ -209,7 +209,7 @@ def evaluate_with_synthetic_anomalies(
     """
     合成异常严格评估
 
-    5 种攻击类型: SYN Flood, Port Scan, DDoS, Slowloris, Amplification
+    5 种攻击类型: SYN Flood, Port Scan, Connection Flood, Slowloris, Request Flood
     """
     # 生成合成异常
     anomaly_dataset = SyntheticSecurityDataset(
@@ -241,7 +241,7 @@ def evaluate_with_synthetic_anomalies(
 
     # 按攻击类型分析
     n_per_type = n_anomalies // 5
-    attack_names = ['SYN Flood', 'Port Scan', 'DDoS Flood', 'Slowloris', 'Amplification']
+    attack_names = ['SYN Flood', 'Port Scan', 'Conn Flood', 'Slowloris', 'Req Flood']
 
     type_recalls = {}
     for i, name in enumerate(attack_names):
@@ -286,9 +286,16 @@ def plot_error_distribution(
     normal_errors = errors[labels == 0]
     anomaly_errors = errors[labels == 1]
 
-    plt.hist(normal_errors, bins=60, alpha=0.7, label='Normal', color='steelblue')
+    # 使用统一 bins 范围，让两个直方图可以直观比较
+    all_errs = np.concatenate([normal_errors, anomaly_errors]) if len(anomaly_errors) > 0 else normal_errors
+    bins = np.linspace(0, np.percentile(all_errs, 99.5), 80)
+
+    # 先画 anomaly（红色），再画 normal（蓝色）在上面，确保两者都可见
     if len(anomaly_errors) > 0:
-        plt.hist(anomaly_errors, bins=60, alpha=0.7, label='Anomaly', color='crimson')
+        plt.hist(anomaly_errors, bins=bins, alpha=0.6, label=f'Anomaly (n={len(anomaly_errors)})',
+                 color='crimson', edgecolor='darkred', linewidth=0.5)
+    plt.hist(normal_errors, bins=bins, alpha=0.6, label=f'Normal (n={len(normal_errors)})',
+             color='steelblue', edgecolor='navy', linewidth=0.5)
 
     plt.axvline(x=threshold, color='green', linestyle='--', linewidth=2,
                 label=f'Threshold={threshold:.6f}')

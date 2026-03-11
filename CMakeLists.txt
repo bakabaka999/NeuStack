@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(NeuStack
-    VERSION 1.2.0
+    VERSION 1.3.0
     DESCRIPTION "Cross-platform User-space TCP/IP Stack with AI-powered Congestion Control and Intelligent Firewall"
     LANGUAGES CXX
 )
@@ -67,6 +67,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 set(COMMON_SOURCES
     src/common/checksum.cpp
     src/common/ip_addr.cpp
+    src/common/json_builder.cpp
 )
 
 # Network layer sources
@@ -98,6 +99,15 @@ set(APP_SOURCES
 # Metrics sources (AI feature extraction, always compiled)
 set(METRICS_SOURCES
     src/metrics/ai_features.cpp
+)
+
+# Telemetry sources (v1.3: observability)
+set(TELEMETRY_SOURCES
+    src/telemetry/metrics_registry.cpp
+    src/telemetry/json_exporter.cpp
+    src/telemetry/prometheus_exporter.cpp
+    src/telemetry/telemetry_api.cpp
+    src/telemetry/http_endpoints.cpp
 )
 
 set(FIREWALL_SOURCES
@@ -157,6 +167,7 @@ add_library(neustack_lib STATIC
     ${TRANSPORT_SOURCES}
     ${APP_SOURCES}
     ${METRICS_SOURCES}
+    ${TELEMETRY_SOURCES}
     ${FIREWALL_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
@@ -265,3 +276,11 @@ message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
 message(STATUS "==================================================")
 message(STATUS "")
+
+# ============================================================================
+# Tools
+# ============================================================================
+option(NEUSTACK_BUILD_TOOLS "Build CLI tools" ON)
+if(NEUSTACK_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()

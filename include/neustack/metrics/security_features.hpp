@@ -67,14 +67,14 @@ public:
         double syn_ratio_critical;
         
         NormalizationParams()
-            : max_pps(10000.0)
-            , max_bps(100000000.0)
-            , max_syn_rate(1000.0)
-            , max_rst_rate(500.0)
+            : max_pps(20000.0)
+            , max_bps(20000000.0)
+            , max_syn_rate(500.0)
+            , max_rst_rate(100.0)
             , max_conn_rate(500.0)
             , max_active_conn(10000.0)
-            , syn_ratio_warning(5.0)
-            , syn_ratio_critical(10.0)
+            , syn_ratio_warning(50.0)
+            , syn_ratio_critical(200.0)
         {}
     };
 
@@ -140,13 +140,16 @@ public:
         // 衍生指标
         double avg_pkt_size = (snapshot.pps > 0) ? (snapshot.bps / snapshot.pps) : 0.0;
         double rst_ratio = (snapshot.pps > 0) ? (snapshot.rst_rate / snapshot.pps) : 0.0;
+        // SYN fraction: syn_rate / pps — volume-invariant attack signal
+        // 比 syn_to_synack_ratio 更鲁棒（后者依赖 SYN-ACK 计数，在用户态协议栈中不可靠）
+        double syn_fraction = (snapshot.pps > 0) ? (snapshot.syn_rate / snapshot.pps) : 0.0;
 
         return ISecurityModel::Input{
             .pps_norm           = normalize_linear(snapshot.pps, _params.max_pps),
             .bps_norm           = normalize_log(snapshot.bps, _params.max_bps),
             .syn_rate_norm      = normalize_linear(snapshot.syn_rate, _params.max_syn_rate),
             .rst_rate_norm      = normalize_linear(snapshot.rst_rate, _params.max_rst_rate),
-            .syn_ratio_norm     = normalize_sigmoid(snapshot.syn_to_synack_ratio, _params.syn_ratio_warning),
+            .syn_ratio_norm     = static_cast<float>(std::clamp(syn_fraction, 0.0, 1.0)),
             .new_conn_rate_norm = normalize_linear(snapshot.new_conn_rate, _params.max_conn_rate),
             .avg_pkt_size_norm  = normalize_linear(avg_pkt_size, 1500.0),
             .rst_ratio_norm     = static_cast<float>(std::clamp(rst_ratio, 0.0, 1.0)),

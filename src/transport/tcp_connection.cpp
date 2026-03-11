@@ -4,6 +4,7 @@
 #include "neustack/transport/tcp_reno.hpp"
 #include "neustack/transport/tcp_cubic.hpp"
 #include "neustack/transport/tcp_orca.hpp"
+#include "neustack/telemetry/metrics_registry.hpp"
 
 using namespace neustack;
 
@@ -222,6 +223,18 @@ int TCPConnectionManager::close(TCB *tcb) {
             delete_tcb(tcb);
             break;
 
+        case TCPState::FIN_WAIT_1:
+        case TCPState::FIN_WAIT_2:
+        case TCPState::CLOSING:
+        case TCPState::LAST_ACK:
+        case TCPState::TIME_WAIT:
+            // Already closing — ignore redundant close() call.
+            break;
+
+        case TCPState::CLOSED:
+            // Already closed — nothing to do.
+            break;
+
         default:
             LOG_WARN(TCP, "close() called in unexpected state %s", tcp_state_name(tcb->state));
             break;
@@ -348,6 +361,18 @@ bool TCPConnectionManager::is_port_in_use(uint16_t port) const {
         }
     }
     return false;
+}
+
+void TCPConnectionManager::for_each_connection(ConnectionVisitor visitor) const {
+    for (const auto& [key, tcb] : _connections) {
+        if (tcb->state != TCPState::CLOSED) {
+            visitor(*tcb);
+        }
+    }
+}
+
+size_t TCPConnectionManager::connection_count() const {
+    return _connections.size();
 }
 
 TCB *TCPConnectionManager::find_tcb(const TCPTuple &t_tuple) {
@@ -1151,6 +1176,12 @@ void TCPConnectionManager::process_ack(TCB *tcb, uint32_t ack_num, uint16_t wind
 void TCPConnectionManager::update_rtt(TCB *tcb, uint32_t rtt_us) {
     // ─── AI 指标采集: 保存瞬时 RTT ───
     tcb->last_rtt_us = rtt_us;
+
+    // ─── Telemetry: feed RTT histogram ───
+    if (auto* hist = telemetry::MetricsRegistry::instance()
+            .find_histogram("neustack_tcp_rtt_us")) {
+        hist->observe(static_cast<double>(rtt_us));
+    }
 
     // ─── AI 指标采集: 跟踪最小 RTT ───
     // 只在 ESTABLISHED 状态后才更新 min_rtt

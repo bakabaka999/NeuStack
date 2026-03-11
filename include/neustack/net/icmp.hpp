@@ -6,6 +6,8 @@
 #include "neustack/net/protocol_handler.hpp"
 #include "neustack/net/ipv4.hpp"
 
+#include <functional>
+
 namespace neustack {
 
 // ICMP类型定义
@@ -63,6 +65,9 @@ static_assert(sizeof(ICMPError) == 4, "ICMPError must be 4 bytes");
 
 class ICMPHandler : public IProtocolHandler {
 public:
+    // reply 回调: (src_ip, identifier, sequence, rtt_us)
+    using EchoReplyCallback = std::function<void(uint32_t, uint16_t, uint16_t, uint32_t)>;
+
     explicit ICMPHandler(IPv4Layer &ip_layer) : _ip_layer(ip_layer) {}
 
     // 实现 IProtocolHandler 接口
@@ -89,6 +94,13 @@ public:
     void send_echo_request(uint32_t dst_ip, uint16_t identifier, uint16_t sequence,
                            const uint8_t *data = nullptr, size_t data_len = 0);
 
+    /**
+     * @brief 注册 Echo Reply 回调
+     * @param cb 回调函数 (src_ip, identifier, sequence, rtt_us)
+     *           rtt_us 为 0 表示无法计算（未记录发送时间）
+     */
+    void set_echo_reply_callback(EchoReplyCallback cb) { _reply_cb = std::move(cb); }
+
 private:
     void handle_echo_request(const IPv4Packet &pkt);
     void handle_echo_reply(const IPv4Packet &pkt);
@@ -98,6 +110,7 @@ private:
                     const IPv4Packet &original_pkt);
 
     IPv4Layer &_ip_layer;
+    EchoReplyCallback _reply_cb;
 };
 
 } // namespace neustack

@@ -1,4 +1,6 @@
 #include "neustack/neustack.hpp"
+#include "neustack/telemetry/metrics_registry.hpp"
+#include "neustack/telemetry/http_endpoints.hpp"
 
 #ifdef NEUSTACK_AI_ENABLED
 #include "neustack/ai/intelligence_plane.hpp"
@@ -31,6 +33,10 @@ struct NeuStack::Impl {
     std::unique_ptr<MetricsExporter> metrics_exporter;
     std::unique_ptr<SecurityExporter> security_exporter;
     uint32_t security_tick_count = 0;  // SecurityExporter 每秒 flush 一次
+
+    // Telemetry API
+    std::unique_ptr<telemetry::TelemetryAPI> telemetry_api;
+    std::chrono::steady_clock::time_point start_time;
 
     Impl(const StackConfig &cfg) : config(cfg) {}
 
@@ -146,6 +152,35 @@ struct NeuStack::Impl {
                      sec_path.c_str(), config.security_label);
         }
 
+        // 9. Telemetry 指标注册
+        const SecurityMetrics* sm = (firewall && firewall->ai())
+            ? &firewall->ai()->metrics() : nullptr;
+        telemetry::register_builtin_metrics(global_metrics(), sm);
+        LOG_INFO(APP, "Telemetry registry initialized (%zu metrics)",
+                 telemetry::MetricsRegistry::instance().size());
+
+        // 10. Telemetry API
+        start_time = std::chrono::steady_clock::now();
+        const NetworkAgent* agent_ptr = nullptr;
+#ifdef NEUSTACK_AI_ENABLED
+        if (tcp->ai_enabled()) {
+            agent_ptr = &tcp->agent();
+        }
+#endif
+        const SecurityMetrics* sm_tel = (firewall && firewall->ai())
+            ? &firewall->ai()->metrics() : nullptr;
+        telemetry_api = std::make_unique<telemetry::TelemetryAPI>(
+            global_metrics(), sm_tel,
+            tcp->connection_manager(),
+            firewall.get(),
+            agent_ptr,
+            telemetry::MetricsRegistry::instance(),
+            start_time);
+
+        // 11. 注册 Telemetry HTTP 端点
+        telemetry::register_http_endpoints(*http_server, *telemetry_api);
+        LOG_INFO(APP, "Telemetry HTTP endpoints registered");
+
         return true;
     }
 };
@@ -248,6 +283,14 @@ GlobalMetrics   &NeuStack::metrics()          { return global_metrics(); }
 SampleExporter  *NeuStack::sample_exporter()  { return _impl->sample_exporter.get(); }
 MetricsExporter *NeuStack::metrics_exporter() { return _impl->metrics_exporter.get(); }
 SecurityExporter *NeuStack::security_exporter() { return _impl->security_exporter.get(); }
+
+// ─── Telemetry API ───
+
+telemetry::TelemetryAPI &NeuStack::telemetry() { return *_impl->telemetry_api; }
+const telemetry::TelemetryAPI &NeuStack::telemetry() const { return *_impl->telemetry_api; }
+
+std::string NeuStack::status_json(bool pretty) { return _impl->telemetry_api->to_json(pretty); }
+std::string NeuStack::status_prometheus() { return _impl->telemetry_api->to_prometheus(); }
 
 // ─── AI 智能面 ───
 
