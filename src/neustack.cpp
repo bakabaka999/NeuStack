@@ -300,7 +300,12 @@ bool NeuStack::ai_enabled() const { return _impl->tcp->ai_enabled(); }
 
 void NeuStack::run() {
     _impl->running = true;
+    const bool use_batch = _impl->device->supports_batch();
+    constexpr uint32_t BATCH_SIZE = 64;
+
     uint8_t buf[2048];
+    PacketDesc rx_descs[BATCH_SIZE];
+
     auto last_timer = std::chrono::steady_clock::now();
     auto last_fw_timer = std::chrono::steady_clock::now();
     constexpr auto TIMER_INTERVAL = std::chrono::milliseconds(100);
@@ -309,19 +314,36 @@ void NeuStack::run() {
     LOG_INFO(APP, "NeuStack running on %s", _impl->config.local_ip.c_str());
 
     while (_impl->running) {
-        // 1. 收包
-        ssize_t n = _impl->device->recv(buf, sizeof(buf), 10);
-        if (n > 0) {
-            // 2. 防火墙检查
-            bool pass = true;
-            if (_impl->firewall) {
-                pass = _impl->firewall->inspect(buf, static_cast<size_t>(n));
-            }
+        // 1. 收包阶段
+        uint32_t rx_count = 0;
 
-            // 3. 放行则交给 IPv4 层处理
-            if (pass) {
-                _impl->ip->on_receive(buf, n);
+        if (use_batch) {
+            // AF_XDP 批量路径
+            int events = _impl->device->poll(10);  // 10ms timeout
+            if (events & NetDevice::POLL_RX) {
+                rx_count = _impl->device->recv_batch(rx_descs, BATCH_SIZE);
             }
+        } else {
+            // TUN 兼容路径 — 行为与 v1.3 完全一致
+            ssize_t n = _impl->device->recv(buf, sizeof(buf), 10);
+            if (n > 0) {
+                rx_descs[0] = {buf, static_cast<uint32_t>(n), 0, 0, 0};
+                rx_count = 1;
+            }
+        }
+
+        // 2. 处理阶段
+        for (uint32_t i = 0; i < rx_count; ++i) {
+            bool pass = true;
+            if (_impl->firewall)
+                pass = _impl->firewall->inspect(rx_descs[i].data, rx_descs[i].len);
+            if (pass)
+                _impl->ip->on_receive(rx_descs[i].data, rx_descs[i].len);
+        }
+
+        // 3. 释放阶段 (AF_XDP 需要归还 UMEM frame) 
+        if (use_batch && rx_count > 0) {
+            _impl->device->release_rx(rx_descs, rx_count);
         }
 
         // 4. 应用层轮询
