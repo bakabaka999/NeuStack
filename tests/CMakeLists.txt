@@ -31,6 +31,9 @@ neustack_add_test(test_spsc_queue   unit/common/test_spsc_queue.cpp)
 neustack_add_test(test_memory_pool  unit/common/test_memory_pool.cpp)
 neustack_add_test(test_json_builder unit/common/test_json_builder.cpp)
 
+# --- HAL 层测试 (hal/) ---
+neustack_add_test(test_batch_device unit/hal/test_batch_device.cpp)
+
 # --- 传输层测试 (transport/) ---
 neustack_add_test(test_tcp_segment unit/transport/test_tcp_segment.cpp)
 neustack_add_test(test_tcp_seq     unit/transport/test_tcp_seq.cpp)

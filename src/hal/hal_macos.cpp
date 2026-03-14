@@ -125,7 +125,7 @@ ssize_t MacOSDevice::recv(uint8_t* buf, size_t len, int timeout_ms) {
         pfd.fd = _fd;
         pfd.events = POLLIN;
 
-        int ret = poll(&pfd, 1, timeout_ms);
+        int ret = ::poll(&pfd, 1, timeout_ms);
         if (ret < 0) {
             if (errno == EINTR) {
                 return 0;  // 被信号中断，正常返回
