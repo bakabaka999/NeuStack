@@ -125,6 +125,7 @@ elseif(NEUSTACK_PLATFORM_LINUX)
     set(HAL_SOURCES
         src/hal/device.cpp
         src/hal/hal_linux.cpp
+        src/hal/umem.cpp
     )
 elseif(NEUSTACK_PLATFORM_WINDOWS)
     set(HAL_SOURCES
