@@ -7,8 +7,6 @@
 
 namespace neustack {
 
-// 源文件待实现
-
 class LinuxDevice : public NetDevice {
 public:
     LinuxDevice() = default;

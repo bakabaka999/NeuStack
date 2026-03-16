@@ -207,14 +207,23 @@ endif()
 if(NEUSTACK_BUILD_TESTS)
     enable_testing()
 
-    # Find Catch2 (optional, will skip tests if not found)
+    # Find Catch2: 先找系统安装，找不到自动下载
     find_package(Catch2 3 QUIET)
 
-    if(Catch2_FOUND)
-        add_subdirectory(tests)
-    else()
-        message(STATUS "Catch2 not found, tests will not be built")
+    if(NOT Catch2_FOUND)
+        message(STATUS "Catch2 not found locally, fetching via FetchContent...")
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG        v3.5.2
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(Catch2)
+        list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     endif()
+
+    add_subdirectory(tests)
 endif()
 
 # ============================================================================

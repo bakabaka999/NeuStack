@@ -118,6 +118,18 @@ echo "[3/3] Building NeuStack..."
 BUILD_DIR="$PROJECT_ROOT/build"
 mkdir -p "$BUILD_DIR"
 
+# 清理旧的 CMake 缓存 (避免 generator 切换冲突)
+if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    OLD_GEN=$(grep "^CMAKE_GENERATOR:" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null | cut -d= -f2)
+    if [ $HAS_NINJA -eq 1 ] && [ "$OLD_GEN" != "Ninja" ]; then
+        echo "  Cleaning stale CMake cache (was $OLD_GEN, switching to Ninja)..."
+        rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
+    elif [ $HAS_NINJA -eq 0 ] && [ "$OLD_GEN" = "Ninja" ]; then
+        echo "  Cleaning stale CMake cache (was Ninja, switching to Make)..."
+        rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
+    fi
+fi
+
 # Select generator
 CMAKE_ARGS=(
     -DNEUSTACK_ENABLE_AI=$ENABLE_AI

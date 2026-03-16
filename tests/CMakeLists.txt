@@ -33,6 +33,13 @@ neustack_add_test(test_json_builder unit/common/test_json_builder.cpp)
 
 # --- HAL 层测试 (hal/) ---
 neustack_add_test(test_batch_device unit/hal/test_batch_device.cpp)
+neustack_add_test(test_ethernet     unit/hal/test_ethernet.cpp)
+
+# Linux-only: UMEM 和 XDP Ring (不需要真实内核 XDP，纯逻辑测试)
+if(NEUSTACK_PLATFORM_LINUX)
+    neustack_add_test(test_umem     unit/hal/test_umem.cpp)
+    neustack_add_test(test_xdp_ring unit/hal/test_xdp_ring.cpp)
+endif()
 
 # --- 传输层测试 (transport/) ---
 neustack_add_test(test_tcp_segment unit/transport/test_tcp_segment.cpp)

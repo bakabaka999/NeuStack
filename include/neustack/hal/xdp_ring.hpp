@@ -1,6 +1,8 @@
 #ifndef NEUSTACK_HAL_XDP_RING_HPP
 #define NEUSTACK_HAL_XDP_RING_HPP
 
+#ifdef NEUSTACK_PLATFORM_LINUX
+
 #include <cstdint>
 #include <atomic>
 #include <linux/if_xdp.h>
@@ -130,5 +132,5 @@ private:
 
 } // namespace neustack
 
-
+#endif // NEUSTACK_PLATFORM_LINUX
 #endif // NEUSTACK_HAL_XDP_RING_HPP

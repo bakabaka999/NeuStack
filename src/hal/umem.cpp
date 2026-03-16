@@ -1,3 +1,5 @@
+#ifdef NEUSTACK_PLATFORM_LINUX
+
 #include "neustack/hal/umem.hpp"
 
 #include <sys/mman.h>
@@ -62,3 +64,5 @@ int Umem::register_to_socket(int xsk_fd) {
 
     return 0;
 }
+
+#endif // NEUSTACK_PLATFORM_LINUX

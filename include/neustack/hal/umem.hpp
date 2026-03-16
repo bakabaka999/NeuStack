@@ -1,6 +1,8 @@
 #ifndef NEUSTACK_HAL_UMEM_HPP
 #define NEUSTACK_HAL_UMEM_HPP
 
+#ifdef NEUSTACK_PLATFORM_LINUX
+
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -167,5 +169,5 @@ private:
 
 } // namespace neustack
 
-
+#endif // NEUSTACK_PLATFORM_LINUX
 #endif // NEUSTACK_HAL_UMEM_HPP
