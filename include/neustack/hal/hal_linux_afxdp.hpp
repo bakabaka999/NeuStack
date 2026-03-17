@@ -114,6 +114,7 @@ private:
     // BPF
     int _bpf_prog_fd = -1;
     int _xdp_flags = 0;
+    void* _bpf_obj = nullptr;  // opaque bpf_object* (avoids libbpf header in public API)
 
     Stats _stats = {};
 
@@ -121,8 +122,9 @@ private:
 
     int create_socket();
     int setup_rings();
-    int bind_shto_interface();
+    int bind_to_interface();
     void populate_fill_ring();
+    void refill_fill_ring();
     void reclaim_completion_ring();
 
     // Ring mmap 辅助

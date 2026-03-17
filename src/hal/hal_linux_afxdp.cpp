@@ -18,6 +18,12 @@
 #include <cstring>
 #include <cerrno>
 
+#ifdef NEUSTACK_ENABLE_AF_XDP
+#include <bpf/bpf.h>
+#include <bpf/libbpf.h>
+#include <linux/if_link.h>
+#endif
+
 using namespace neustack;
 
 LinuxAFXDPDevice::LinuxAFXDPDevice(const AFXDPConfig& config)
@@ -75,6 +81,38 @@ int LinuxAFXDPDevice::open() {
         return -1;
     }
 
+    // 5.1 配置 busy polling (低延迟模式)
+    if (_config.busy_poll) {
+        int val = static_cast<int>(_config.busy_poll_budget);
+        if (setsockopt(_xsk_fd, SOL_SOCKET, SO_BUSY_POLL, &val, sizeof(val)) < 0) {
+            LOG_WARN(HAL, "SO_BUSY_POLL failed: %s (need root?)", strerror(errno));
+        } else {
+            LOG_INFO(HAL, "Busy polling enabled (budget=%d)", val);
+        }
+#ifdef SO_PREFER_BUSY_POLL
+        int prefer = 1;
+        setsockopt(_xsk_fd, SOL_SOCKET, SO_PREFER_BUSY_POLL, &prefer, sizeof(prefer));
+#endif
+    }
+
+    // 5.5 加载 BPF/XDP 重定向程序 (socket 必须先绑定才能注册到 XSKMAP)
+    {
+        std::string bpf_path = _config.bpf_prog_path;
+#ifdef NEUSTACK_BPF_OBJECT_DIR
+        if (bpf_path.empty()) {
+            // Use the build-time compiled BPF object
+            bpf_path = std::string(NEUSTACK_BPF_OBJECT_DIR) + "/xdp_redirect.o";
+        }
+#endif
+        if (!bpf_path.empty()) {
+            if (load_bpf_program(bpf_path) != 0) {
+                LOG_WARN(HAL, "BPF program load failed; AF_XDP may not receive packets without an XDP program");
+            }
+        } else {
+            LOG_INFO(HAL, "No BPF program configured — relying on external XDP setup");
+        }
+    }
+
     // 6. 初始填充 Fill Ring
     populate_fill_ring();
 
@@ -86,11 +124,21 @@ int LinuxAFXDPDevice::open() {
 
 int LinuxAFXDPDevice::close() {
     // 卸载 BPF 程序
+#ifdef NEUSTACK_ENABLE_AF_XDP
+    if (_bpf_prog_fd >= 0 && _ifindex > 0) {
+        bpf_xdp_detach(_ifindex, _xdp_flags, nullptr);
+        _bpf_prog_fd = -1;
+    }
+    if (_bpf_obj) {
+        bpf_object__close(static_cast<struct bpf_object*>(_bpf_obj));
+        _bpf_obj = nullptr;
+    }
+#else
     if (_bpf_prog_fd >= 0) {
-        // bpf_xdp_detach(_ifindex, _xdp_flags, nullptr);
         ::close(_bpf_prog_fd);
         _bpf_prog_fd = -1;
     }
+#endif
 
     // munmap 所有 Ring
     if (_fill_ring_mmap) { munmap(_fill_ring_mmap, _fill_ring_mmap_size); _fill_ring_mmap = nullptr; }
@@ -146,9 +194,18 @@ uint32_t LinuxAFXDPDevice::recv_batch(PacketDesc* descs, uint32_t max_count) {
     // 1. 先回收已完成的 TX frame
     reclaim_completion_ring();
 
-    // 2. 从 RX Ring 读取
+    // 2. 主动补充 Fill Ring（水位策略）
+    refill_fill_ring();
+
+    // 3. 从 RX Ring 读取
     uint32_t n = _rx_ring.peek(max_count);
-    if (n == 0) return 0;
+    if (n == 0) {
+        // RX 为空，检查是否需要唤醒内核填充
+        if (_fill_ring.needs_wakeup()) {
+            recvfrom(_xsk_fd, nullptr, 0, MSG_DONTWAIT, nullptr, nullptr);
+        }
+        return 0;
+    }
 
     uint32_t out = 0;
     for (uint32_t i = 0; i < n; ++i) {
@@ -258,10 +315,12 @@ void LinuxAFXDPDevice::release_rx(const PacketDesc* descs, uint32_t count) {
         _umem.free_frame(descs[i].addr);
     }
 
-    // 补充 Fill Ring (如果太空了)
-    if (_fill_ring.reserve(0) == 0 && _umem.available_frames() > 0) {
-        _stats.fill_ring_empty++;
-        populate_fill_ring();
+    // 主动补充 Fill Ring（水位策略）
+    refill_fill_ring();
+
+    // 补充后检查是否需要唤醒内核
+    if (_fill_ring.needs_wakeup()) {
+        recvfrom(_xsk_fd, nullptr, 0, MSG_DONTWAIT, nullptr, nullptr);
     }
 }
 
@@ -418,16 +477,16 @@ int LinuxAFXDPDevice::bind_to_interface() {
 
     // 选择绑定模式
     if (_config.zero_copy) {
-        sxdp.sxdp_flags = XDP_ZEROCOPY;
+        sxdp.sxdp_flags = XDP_ZEROCOPY | XDP_USE_NEED_WAKEUP;
     } else {
-        sxdp.sxdp_flags = XDP_COPY;
+        sxdp.sxdp_flags = XDP_COPY | XDP_USE_NEED_WAKEUP;
     }
 
     if (bind(_xsk_fd, reinterpret_cast<struct sockaddr*>(&sxdp), sizeof(sxdp)) < 0) {
         if (errno == ENOPROTOOPT && _config.zero_copy) {
             // 网卡不支持 zero-copy，回退到 copy 模式
             LOG_WARN(HAL, "Zero-copy not supported, falling back to copy mode");
-            sxdp.sxdp_flags = XDP_COPY;
+            sxdp.sxdp_flags = XDP_COPY | XDP_USE_NEED_WAKEUP;
             if (bind(_xsk_fd, reinterpret_cast<struct sockaddr*>(&sxdp),
                      sizeof(sxdp)) < 0) {
                 LOG_ERROR(HAL, "bind(AF_XDP copy) failed: %s", strerror(errno));
@@ -459,8 +518,35 @@ void LinuxAFXDPDevice::populate_fill_ring() {
     LOG_DEBUG(HAL, "Fill ring populated with %u frames", filled);
 }
 
+void LinuxAFXDPDevice::refill_fill_ring() {
+    // 水位策略：当 Fill Ring 可用空间 > 3/4 时主动补充到 1/2
+    uint32_t avail = _fill_ring.reserve(0);  // 探测可用空间（不占用）
+    uint32_t threshold = _config.fill_ring_size / 4;
+
+    if (avail >= threshold || _umem.available_frames() == 0) {
+        return;  // 水位足够 或 没有空闲 frame
+    }
+
+    _stats.fill_ring_empty++;
+
+    // 补充到 ring_size / 2
+    uint32_t target = _config.fill_ring_size / 2;
+    uint32_t need = target - avail;
+    uint32_t n = _fill_ring.reserve(need);
+
+    uint32_t filled = 0;
+    for (uint32_t i = 0; i < n; ++i) {
+        uint64_t addr = _umem.alloc_frame();
+        if (addr == UmemFrameAllocator::INVALID_ADDR) break;
+        _fill_ring.ring_at(i) = addr;
+        ++filled;
+    }
+
+    _fill_ring.submit(filled);
+}
+
 void LinuxAFXDPDevice::reclaim_completion_ring() {
-    uint32_t n = _comp_ring.peek(64);
+    uint32_t n = _comp_ring.peek(_config.batch_size);
     if (n == 0) return;
 
     for (uint32_t i = 0; i < n; ++i) {
@@ -472,13 +558,92 @@ void LinuxAFXDPDevice::reclaim_completion_ring() {
 }
 
 int LinuxAFXDPDevice::load_bpf_program(const std::string& path) {
-    // TODO: 使用 libbpf 加载 XDP 程序并 attach 到网卡
-    // 1. bpf_object__open(path)
-    // 2. bpf_object__load()
-    // 3. bpf_program__fd() → _bpf_prog_fd
-    // 4. bpf_xdp_attach(_ifindex, _bpf_prog_fd, _xdp_flags, nullptr)
-    LOG_WARN(HAL, "load_bpf_program() not yet implemented: %s", path.c_str());
+#ifdef NEUSTACK_ENABLE_AF_XDP
+    // 1. Open BPF ELF object
+    struct bpf_object* obj = bpf_object__open(path.c_str());
+    if (!obj) {
+        LOG_ERROR(HAL, "bpf_object__open(%s) failed: %s", path.c_str(), strerror(errno));
+        return -1;
+    }
+
+    // 2. Load programs + maps into kernel
+    if (bpf_object__load(obj) != 0) {
+        LOG_ERROR(HAL, "bpf_object__load failed: %s", strerror(errno));
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    // 3. Find the XDP program and get its fd
+    struct bpf_program* prog = bpf_object__find_program_by_name(obj, "xdp_sock_prog");
+    if (!prog) {
+        // Fallback: find first program in the object
+        prog = bpf_object__next_program(obj, nullptr);
+    }
+    if (!prog) {
+        LOG_ERROR(HAL, "No XDP program found in %s", path.c_str());
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    int prog_fd = bpf_program__fd(prog);
+    if (prog_fd < 0) {
+        LOG_ERROR(HAL, "bpf_program__fd failed: %s", strerror(errno));
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    // 4. Attach XDP program to the interface
+    //    Use bpf_set_link_xdp_fd (compatible with libbpf >= 0.5)
+    _xdp_flags = 0;
+    if (_config.force_native_mode) {
+        _xdp_flags = XDP_FLAGS_DRV_MODE;
+    } else {
+        _xdp_flags = XDP_FLAGS_SKB_MODE;
+    }
+
+    if (bpf_xdp_attach(_ifindex, prog_fd, _xdp_flags, nullptr) < 0) {
+        // Retry without mode flag (some older kernels)
+        LOG_WARN(HAL, "XDP attach with flags=%d failed, retrying generic", _xdp_flags);
+        _xdp_flags = 0;
+        if (bpf_xdp_attach(_ifindex, prog_fd, _xdp_flags, nullptr) < 0) {
+            LOG_ERROR(HAL, "bpf_xdp_attach failed: %s", strerror(errno));
+            bpf_object__close(obj);
+            return -1;
+        }
+    }
+
+    // 5. Find xsks_map and register our socket
+    struct bpf_map* map = bpf_object__find_map_by_name(obj, "xsks_map");
+    if (!map) {
+        LOG_ERROR(HAL, "xsks_map not found in BPF object");
+        bpf_xdp_detach(_ifindex, _xdp_flags, nullptr);
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    int map_fd = bpf_map__fd(map);
+    int key = static_cast<int>(_config.queue_id);
+    int xsk_fd = _xsk_fd;
+
+    if (bpf_map_update_elem(map_fd, &key, &xsk_fd, BPF_ANY) != 0) {
+        LOG_ERROR(HAL, "bpf_map_update_elem(xsks_map[%d]) failed: %s",
+                  key, strerror(errno));
+        bpf_xdp_detach(_ifindex, _xdp_flags, nullptr);
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    _bpf_prog_fd = prog_fd;
+    _bpf_obj = obj;
+
+    LOG_INFO(HAL, "BPF/XDP program loaded: %s (prog_fd=%d, queue=%d, flags=0x%x)",
+             path.c_str(), prog_fd, key, _xdp_flags);
+    return 0;
+
+#else
+    LOG_WARN(HAL, "AF_XDP support not compiled in; cannot load BPF program: %s", path.c_str());
     return -1;
+#endif
 }
 
 int LinuxAFXDPDevice::auto_detect_local_mac() {

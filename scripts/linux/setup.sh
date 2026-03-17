@@ -72,6 +72,8 @@ command -v cmake  &>/dev/null || MISSING_PKGS+=(cmake)
 command -v g++    &>/dev/null || MISSING_PKGS+=(g++)
 command -v curl   &>/dev/null || MISSING_PKGS+=(curl)
 command -v socat  &>/dev/null || MISSING_PKGS+=(socat)
+command -v clang  &>/dev/null || MISSING_PKGS+=(clang)
+command -v pkg-config &>/dev/null || MISSING_PKGS+=(pkg-config)
 
 # Ninja: preferred but optional
 HAS_NINJA=0
@@ -85,6 +87,27 @@ fi
 # Catch2: needed for tests
 if ! dpkg -s catch2 &>/dev/null 2>&1; then
     MISSING_PKGS+=(catch2)
+fi
+
+# libbpf + libelf + zlib: needed for AF_XDP / BPF compilation
+if ! pkg-config --exists libbpf 2>/dev/null; then
+    if command -v apt-get &>/dev/null; then
+        MISSING_PKGS+=(libbpf-dev)
+    elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        MISSING_PKGS+=(libbpf-devel)
+    elif command -v pacman &>/dev/null; then
+        MISSING_PKGS+=(libbpf)
+    fi
+fi
+if command -v apt-get &>/dev/null; then
+    dpkg -s libelf-dev  &>/dev/null 2>&1 || MISSING_PKGS+=(libelf-dev)
+    dpkg -s zlib1g-dev  &>/dev/null 2>&1 || MISSING_PKGS+=(zlib1g-dev)
+elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+    rpm -q elfutils-libelf-devel &>/dev/null 2>&1 || MISSING_PKGS+=(elfutils-libelf-devel)
+    rpm -q zlib-devel &>/dev/null 2>&1 || MISSING_PKGS+=(zlib-devel)
+elif command -v pacman &>/dev/null; then
+    pacman -Q libelf &>/dev/null 2>&1 || MISSING_PKGS+=(libelf)
+    pacman -Q zlib   &>/dev/null 2>&1 || MISSING_PKGS+=(zlib)
 fi
 
 if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
@@ -105,6 +128,15 @@ if [ $HAS_NINJA -eq 1 ]; then
     echo "  ✓ ninja"
 else
     echo "  - ninja (not found, will use make)"
+fi
+
+# AF_XDP readiness: need both clang and libbpf
+HAS_AFXDP=0
+if command -v clang &>/dev/null && pkg-config --exists libbpf 2>/dev/null; then
+    HAS_AFXDP=1
+    echo "  ✓ AF_XDP ready (clang + libbpf)"
+else
+    echo "  - AF_XDP not ready (need clang + libbpf)"
 fi
 
 # Check g++ version (need C++20 → g++ >= 10)
@@ -205,9 +237,17 @@ if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
     fi
 fi
 
+# Determine AF_XDP flag
+if [ $HAS_AFXDP -eq 1 ]; then
+    ENABLE_AFXDP=ON
+else
+    ENABLE_AFXDP=OFF
+fi
+
 # Select generator
 CMAKE_ARGS=(
     -DNEUSTACK_ENABLE_AI=$ENABLE_AI
+    -DNEUSTACK_ENABLE_AF_XDP=$ENABLE_AFXDP
     -DCMAKE_BUILD_TYPE=Release
 )
 if [ $HAS_NINJA -eq 1 ]; then
@@ -227,6 +267,7 @@ echo "  ✓ Build Complete!"
 echo "=============================================="
 echo ""
 echo "  AI enabled:  $ENABLE_AI"
+echo "  AF_XDP:      $ENABLE_AFXDP"
 echo "  Binary:      $BUILD_DIR/examples/neustack_demo"
 echo ""
 echo "  Quick start:"

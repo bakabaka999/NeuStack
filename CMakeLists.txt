@@ -14,6 +14,7 @@ option(NEUSTACK_BUILD_EXAMPLES "Build examples" ON)
 option(NEUSTACK_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(NEUSTACK_ENABLE_ASAN "Enable Address Sanitizer" OFF)
 option(NEUSTACK_ENABLE_AI "Enable AI congestion control (requires ONNX Runtime)" OFF)
+option(NEUSTACK_ENABLE_AF_XDP "Enable AF_XDP backend (requires libbpf, Linux only)" OFF)
 
 # ============================================================================
 # C++ Standard
@@ -127,6 +128,9 @@ elseif(NEUSTACK_PLATFORM_LINUX)
         src/hal/hal_linux.cpp
         src/hal/umem.cpp
     )
+    if(NEUSTACK_ENABLE_AF_XDP)
+        list(APPEND HAL_SOURCES src/hal/hal_linux_afxdp.cpp)
+    endif()
 elseif(NEUSTACK_PLATFORM_WINDOWS)
     set(HAL_SOURCES
         src/hal/device.cpp
@@ -159,6 +163,16 @@ if(NEUSTACK_ENABLE_AI)
     endif()
 endif()
 
+# AF_XDP / BPF compilation (Linux only)
+if(NEUSTACK_PLATFORM_LINUX AND NEUSTACK_ENABLE_AF_XDP)
+    include(cmake/BPFCompile.cmake)
+
+    if(NEUSTACK_BPF_SUPPORTED)
+        neustack_add_bpf(xdp_redirect "${CMAKE_SOURCE_DIR}/bpf/xdp_redirect.c")
+        add_custom_target(neustack_bpf ALL DEPENDS bpf_xdp_redirect)
+    endif()
+endif()
+
 # ============================================================================
 # Main Library
 # ============================================================================
@@ -184,6 +198,14 @@ if(NEUSTACK_PLATFORM_MACOS)
     target_link_libraries(neustack_lib PRIVATE "-framework CoreFoundation" "-framework SystemConfiguration")
 elseif(NEUSTACK_PLATFORM_LINUX)
     # Linux doesn't need extra libraries for TUN/TAP
+    if(NEUSTACK_ENABLE_AF_XDP AND NEUSTACK_BPF_SUPPORTED)
+        target_link_libraries(neustack_lib PRIVATE ${LIBBPF_LIBRARY} elf z)
+        target_include_directories(neustack_lib PRIVATE ${LIBBPF_INCLUDE_DIR})
+        target_compile_definitions(neustack_lib PUBLIC NEUSTACK_ENABLE_AF_XDP)
+        target_compile_definitions(neustack_lib PRIVATE
+            NEUSTACK_BPF_OBJECT_DIR="${CMAKE_BINARY_DIR}/bpf")
+        add_dependencies(neustack_lib neustack_bpf)
+    endif()
 elseif(NEUSTACK_PLATFORM_WINDOWS)
     target_link_libraries(neustack_lib PRIVATE ws2_32 iphlpapi)
 endif()
@@ -284,6 +306,12 @@ message(STATUS "Build Tests:      ${NEUSTACK_BUILD_TESTS}")
 message(STATUS "Build Examples:   ${NEUSTACK_BUILD_EXAMPLES}")
 message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
+if(NEUSTACK_PLATFORM_LINUX)
+    message(STATUS "Enable AF_XDP:    ${NEUSTACK_ENABLE_AF_XDP}")
+    if(NEUSTACK_ENABLE_AF_XDP)
+        message(STATUS "  BPF supported:  ${NEUSTACK_BPF_SUPPORTED}")
+    endif()
+endif()
 message(STATUS "==================================================")
 message(STATUS "")
 

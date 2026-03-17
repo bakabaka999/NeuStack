@@ -5,6 +5,9 @@
     #include "neustack/hal/hal_macos.hpp"
 #elif defined(NEUSTACK_PLATFORM_LINUX)
     #include "neustack/hal/hal_linux.hpp"
+    #if defined(NEUSTACK_ENABLE_AF_XDP)
+        #include "neustack/hal/hal_linux_afxdp.hpp"
+    #endif
 #elif defined(NEUSTACK_PLATFORM_WINDOWS)
     #include "neustack/hal/hal_windows.hpp"
 #endif
