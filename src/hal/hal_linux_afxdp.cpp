@@ -711,7 +711,7 @@ int LinuxAFXDPDevice::auto_detect_gateway_mac() {
     bool found = false;
     while (fgets(line, sizeof(line), fp)) {
         char ip[32], hw[32], dev[IFNAMSIZ];
-        int type, flags;
+        unsigned type, flags;
         // IP address  HW type  Flags  HW address  Mask  Device
         if (sscanf(line, "%31s 0x%x 0x%x %31s %*s %s", ip, &type, &flags, hw, dev) == 5) {
             if (strcmp(ip, gw_str) == 0) {

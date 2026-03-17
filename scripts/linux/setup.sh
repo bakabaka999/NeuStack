@@ -65,56 +65,62 @@ check_cmd() {
     fi
 }
 
-MISSING_PKGS=()
+# ── Step A: 基础工具（必须先装，后续检测依赖它们）──
+BASIC_PKGS=()
+command -v cmake      &>/dev/null || BASIC_PKGS+=(cmake)
+command -v g++        &>/dev/null || BASIC_PKGS+=(g++)
+command -v curl       &>/dev/null || BASIC_PKGS+=(curl)
+command -v socat      &>/dev/null || BASIC_PKGS+=(socat)
+command -v clang      &>/dev/null || BASIC_PKGS+=(clang)
+command -v pkg-config &>/dev/null || BASIC_PKGS+=(pkg-config)
+command -v ninja      &>/dev/null || BASIC_PKGS+=(ninja-build)
 
-# Map command → package name (apt style, adjust per distro in install_packages)
-command -v cmake  &>/dev/null || MISSING_PKGS+=(cmake)
-command -v g++    &>/dev/null || MISSING_PKGS+=(g++)
-command -v curl   &>/dev/null || MISSING_PKGS+=(curl)
-command -v socat  &>/dev/null || MISSING_PKGS+=(socat)
-command -v clang  &>/dev/null || MISSING_PKGS+=(clang)
-command -v pkg-config &>/dev/null || MISSING_PKGS+=(pkg-config)
+if [ ${#BASIC_PKGS[@]} -gt 0 ]; then
+    install_packages "${BASIC_PKGS[@]}"
+fi
 
-# Ninja: preferred but optional
-HAS_NINJA=0
-if command -v ninja &> /dev/null; then
-    HAS_NINJA=1
+# ── Step B: 库依赖（pkg-config 现在肯定已就绪）──
+LIB_PKGS=()
+
+# Catch2: 兼容不同 Ubuntu 版本的包名
+if command -v apt-get &>/dev/null; then
+    if ! dpkg -s libcatch2-dev &>/dev/null 2>&1 && ! dpkg -s catch2 &>/dev/null 2>&1; then
+        LIB_PKGS+=(libcatch2-dev)
+    fi
 else
-    # Try to install ninja
-    MISSING_PKGS+=(ninja-build)
+    LIB_PKGS+=(catch2)
 fi
 
-# Catch2: needed for tests
-if ! dpkg -s catch2 &>/dev/null 2>&1; then
-    MISSING_PKGS+=(catch2)
-fi
-
-# libbpf + libelf + zlib: needed for AF_XDP / BPF compilation
+# libbpf + libelf + zlib + linux-libc-dev: AF_XDP / BPF 编译需要
 if ! pkg-config --exists libbpf 2>/dev/null; then
     if command -v apt-get &>/dev/null; then
-        MISSING_PKGS+=(libbpf-dev)
+        LIB_PKGS+=(libbpf-dev)
     elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
-        MISSING_PKGS+=(libbpf-devel)
+        LIB_PKGS+=(libbpf-devel)
     elif command -v pacman &>/dev/null; then
-        MISSING_PKGS+=(libbpf)
+        LIB_PKGS+=(libbpf)
     fi
 fi
 if command -v apt-get &>/dev/null; then
-    dpkg -s libelf-dev  &>/dev/null 2>&1 || MISSING_PKGS+=(libelf-dev)
-    dpkg -s zlib1g-dev  &>/dev/null 2>&1 || MISSING_PKGS+=(zlib1g-dev)
+    dpkg -s libelf-dev    &>/dev/null 2>&1 || LIB_PKGS+=(libelf-dev)
+    dpkg -s zlib1g-dev    &>/dev/null 2>&1 || LIB_PKGS+=(zlib1g-dev)
+    dpkg -s linux-libc-dev &>/dev/null 2>&1 || LIB_PKGS+=(linux-libc-dev)
 elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
-    rpm -q elfutils-libelf-devel &>/dev/null 2>&1 || MISSING_PKGS+=(elfutils-libelf-devel)
-    rpm -q zlib-devel &>/dev/null 2>&1 || MISSING_PKGS+=(zlib-devel)
+    rpm -q elfutils-libelf-devel &>/dev/null 2>&1 || LIB_PKGS+=(elfutils-libelf-devel)
+    rpm -q zlib-devel            &>/dev/null 2>&1 || LIB_PKGS+=(zlib-devel)
+    rpm -q kernel-headers        &>/dev/null 2>&1 || LIB_PKGS+=(kernel-headers)
 elif command -v pacman &>/dev/null; then
-    pacman -Q libelf &>/dev/null 2>&1 || MISSING_PKGS+=(libelf)
-    pacman -Q zlib   &>/dev/null 2>&1 || MISSING_PKGS+=(zlib)
+    pacman -Q libelf       &>/dev/null 2>&1 || LIB_PKGS+=(libelf)
+    pacman -Q zlib         &>/dev/null 2>&1 || LIB_PKGS+=(zlib)
+    pacman -Q linux-headers &>/dev/null 2>&1 || LIB_PKGS+=(linux-headers)
 fi
 
-if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    install_packages "${MISSING_PKGS[@]}"
+if [ ${#LIB_PKGS[@]} -gt 0 ]; then
+    install_packages "${LIB_PKGS[@]}"
 fi
 
-# Re-check ninja after install attempt
+# Re-check ninja after install
+HAS_NINJA=0
 if command -v ninja &> /dev/null; then
     HAS_NINJA=1
 fi
