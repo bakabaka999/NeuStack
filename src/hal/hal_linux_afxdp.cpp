@@ -483,8 +483,9 @@ int LinuxAFXDPDevice::bind_to_interface() {
     }
 
     if (bind(_xsk_fd, reinterpret_cast<struct sockaddr*>(&sxdp), sizeof(sxdp)) < 0) {
-        if (errno == ENOPROTOOPT && _config.zero_copy) {
-            // 网卡不支持 zero-copy，回退到 copy 模式
+        if (_config.zero_copy &&
+            (errno == ENOPROTOOPT || errno == EOPNOTSUPP || errno == ENOTSUP)) {
+            // 网卡不支持 zero-copy（虚拟网卡常见），回退到 copy 模式
             LOG_WARN(HAL, "Zero-copy not supported, falling back to copy mode");
             sxdp.sxdp_flags = XDP_COPY | XDP_USE_NEED_WAKEUP;
             if (bind(_xsk_fd, reinterpret_cast<struct sockaddr*>(&sxdp),
