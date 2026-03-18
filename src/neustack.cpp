@@ -41,8 +41,12 @@ struct NeuStack::Impl {
     Impl(const StackConfig &cfg) : config(cfg) {}
 
     bool initialize() {
-        // 1. HAL 层
-        device = NetDevice::create();
+        // 1. HAL 层 — 根据 device_type 选择后端
+        if (config.device_type == "af_xdp") {
+            device = NetDevice::create("af_xdp", config.device_ifname);
+        } else {
+            device = NetDevice::create();
+        }
         if (!device || device->open() < 0) {
             LOG_FATAL(HAL, "Failed to open device");
             return false;

@@ -119,6 +119,16 @@ if [ ${#LIB_PKGS[@]} -gt 0 ]; then
     install_packages "${LIB_PKGS[@]}"
 fi
 
+# BPF 编译需要 <asm/types.h>，clang -target bpf 不搜索架构特定目录
+# Ubuntu/Debian 上 asm 头文件在 /usr/include/<arch>-linux-gnu/asm，需要软链接
+if [ ! -e /usr/include/asm ]; then
+    ARCH_DIR="/usr/include/$(uname -m)-linux-gnu/asm"
+    if [ -d "$ARCH_DIR" ]; then
+        ln -s "$ARCH_DIR" /usr/include/asm
+        echo "  ✓ Created /usr/include/asm → $ARCH_DIR symlink"
+    fi
+fi
+
 # Re-check ninja after install
 HAS_NINJA=0
 if command -v ninja &> /dev/null; then
