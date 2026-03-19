@@ -38,6 +38,29 @@ ssize_t TCPBuilder::build(uint8_t *buffer, size_t buffer_len) const {
     return static_cast<ssize_t>(total_len);
 }
 
+ssize_t TCPBuilder::build_header_only(uint8_t *buffer, size_t buffer_len) const {
+    constexpr size_t HEADER_LEN = sizeof(TCPHeader);
+
+    if (buffer_len < HEADER_LEN) {
+        LOG_ERROR(TCP, "build_header_only: buffer too small (%zu < %zu)", buffer_len, HEADER_LEN);
+        return -1;
+    }
+
+    auto *hdr = reinterpret_cast<TCPHeader *>(buffer);
+
+    hdr->src_port    = htons(_src_port);
+    hdr->dst_port    = htons(_dst_port);
+    hdr->seq_num     = htonl(_seq);
+    hdr->ack_num     = htonl(_ack);
+    hdr->data_offset = (HEADER_LEN / 4) << 4;
+    hdr->flags       = _flags;
+    hdr->window      = htons(_window);
+    hdr->checksum    = 0;
+    hdr->urgent_ptr  = 0;
+
+    return static_cast<ssize_t>(HEADER_LEN);
+}
+
 void TCPBuilder::fill_checksum(uint8_t *tcp_data, size_t tcp_len,
                                uint32_t src_ip, uint32_t dst_ip) {
     if (tcp_len > 65535) {
