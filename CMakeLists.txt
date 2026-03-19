@@ -14,6 +14,7 @@ option(NEUSTACK_BUILD_EXAMPLES "Build examples" ON)
 option(NEUSTACK_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(NEUSTACK_ENABLE_ASAN "Enable Address Sanitizer" OFF)
 option(NEUSTACK_ENABLE_AI "Enable AI congestion control (requires ONNX Runtime)" OFF)
+option(NEUSTACK_ENABLE_AF_XDP "Enable AF_XDP backend (requires libbpf, Linux only)" OFF)
 
 # ============================================================================
 # C++ Standard
@@ -125,7 +126,11 @@ elseif(NEUSTACK_PLATFORM_LINUX)
     set(HAL_SOURCES
         src/hal/device.cpp
         src/hal/hal_linux.cpp
+        src/hal/umem.cpp
     )
+    if(NEUSTACK_ENABLE_AF_XDP)
+        list(APPEND HAL_SOURCES src/hal/hal_linux_afxdp.cpp)
+    endif()
 elseif(NEUSTACK_PLATFORM_WINDOWS)
     set(HAL_SOURCES
         src/hal/device.cpp
@@ -158,6 +163,16 @@ if(NEUSTACK_ENABLE_AI)
     endif()
 endif()
 
+# AF_XDP / BPF compilation (Linux only)
+if(NEUSTACK_PLATFORM_LINUX AND NEUSTACK_ENABLE_AF_XDP)
+    include(cmake/BPFCompile.cmake)
+
+    if(NEUSTACK_BPF_SUPPORTED)
+        neustack_add_bpf(xdp_redirect "${CMAKE_SOURCE_DIR}/bpf/xdp_redirect.c")
+        add_custom_target(neustack_bpf ALL DEPENDS bpf_xdp_redirect)
+    endif()
+endif()
+
 # ============================================================================
 # Main Library
 # ============================================================================
@@ -183,6 +198,14 @@ if(NEUSTACK_PLATFORM_MACOS)
     target_link_libraries(neustack_lib PRIVATE "-framework CoreFoundation" "-framework SystemConfiguration")
 elseif(NEUSTACK_PLATFORM_LINUX)
     # Linux doesn't need extra libraries for TUN/TAP
+    if(NEUSTACK_ENABLE_AF_XDP AND NEUSTACK_BPF_SUPPORTED)
+        target_link_libraries(neustack_lib PRIVATE ${LIBBPF_LIBRARY} elf z)
+        target_include_directories(neustack_lib PRIVATE ${LIBBPF_INCLUDE_DIR})
+        target_compile_definitions(neustack_lib PUBLIC NEUSTACK_ENABLE_AF_XDP)
+        target_compile_definitions(neustack_lib PRIVATE
+            NEUSTACK_BPF_OBJECT_DIR="${CMAKE_BINARY_DIR}/bpf")
+        add_dependencies(neustack_lib neustack_bpf)
+    endif()
 elseif(NEUSTACK_PLATFORM_WINDOWS)
     target_link_libraries(neustack_lib PRIVATE ws2_32 iphlpapi)
 endif()
@@ -206,14 +229,23 @@ endif()
 if(NEUSTACK_BUILD_TESTS)
     enable_testing()
 
-    # Find Catch2 (optional, will skip tests if not found)
+    # Find Catch2: 先找系统安装，找不到自动下载
     find_package(Catch2 3 QUIET)
 
-    if(Catch2_FOUND)
-        add_subdirectory(tests)
-    else()
-        message(STATUS "Catch2 not found, tests will not be built")
+    if(NOT Catch2_FOUND)
+        message(STATUS "Catch2 not found locally, fetching via FetchContent...")
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG        v3.5.2
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(Catch2)
+        list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     endif()
+
+    add_subdirectory(tests)
 endif()
 
 # ============================================================================
@@ -274,6 +306,12 @@ message(STATUS "Build Tests:      ${NEUSTACK_BUILD_TESTS}")
 message(STATUS "Build Examples:   ${NEUSTACK_BUILD_EXAMPLES}")
 message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
+if(NEUSTACK_PLATFORM_LINUX)
+    message(STATUS "Enable AF_XDP:    ${NEUSTACK_ENABLE_AF_XDP}")
+    if(NEUSTACK_ENABLE_AF_XDP)
+        message(STATUS "  BPF supported:  ${NEUSTACK_BPF_SUPPORTED}")
+    endif()
+endif()
 message(STATUS "==================================================")
 message(STATUS "")
 

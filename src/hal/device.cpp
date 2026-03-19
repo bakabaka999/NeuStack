@@ -5,6 +5,9 @@
     #include "neustack/hal/hal_macos.hpp"
 #elif defined(NEUSTACK_PLATFORM_LINUX)
     #include "neustack/hal/hal_linux.hpp"
+    #if defined(NEUSTACK_ENABLE_AF_XDP)
+        #include "neustack/hal/hal_linux_afxdp.hpp"
+    #endif
 #elif defined(NEUSTACK_PLATFORM_WINDOWS)
     #include "neustack/hal/hal_windows.hpp"
 #endif
@@ -52,10 +55,13 @@ std::unique_ptr<NetDevice> NetDevice::create() {
 #endif
 }
 
-std::unique_ptr<NetDevice> NetDevice::create(const std::string& type) {
+std::unique_ptr<NetDevice> NetDevice::create(const std::string& type,
+                                              const std::string& ifname) {
     if (type == "af_xdp") {
 #if defined(NEUSTACK_PLATFORM_LINUX) && defined(NEUSTACK_ENABLE_AF_XDP)
-        return std::make_unique<LinuxAFXDPDevice>();
+        AFXDPConfig cfg;
+        if (!ifname.empty()) cfg.ifname = ifname;
+        return std::make_unique<LinuxAFXDPDevice>(cfg);
 #else
         LOG_ERROR(HAL, "AF_XDP not available (Linux + NEUSTACK_ENABLE_AF_XDP required)");
         return nullptr;

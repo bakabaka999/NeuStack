@@ -65,28 +65,72 @@ check_cmd() {
     fi
 }
 
-MISSING_PKGS=()
+# ── Step A: 基础工具（必须先装，后续检测依赖它们）──
+BASIC_PKGS=()
+command -v cmake      &>/dev/null || BASIC_PKGS+=(cmake)
+command -v g++        &>/dev/null || BASIC_PKGS+=(g++)
+command -v curl       &>/dev/null || BASIC_PKGS+=(curl)
+command -v socat      &>/dev/null || BASIC_PKGS+=(socat)
+command -v clang      &>/dev/null || BASIC_PKGS+=(clang)
+command -v pkg-config &>/dev/null || BASIC_PKGS+=(pkg-config)
+command -v ninja      &>/dev/null || BASIC_PKGS+=(ninja-build)
 
-# Map command → package name (apt style, adjust per distro in install_packages)
-command -v cmake  &>/dev/null || MISSING_PKGS+=(cmake)
-command -v g++    &>/dev/null || MISSING_PKGS+=(g++)
-command -v curl   &>/dev/null || MISSING_PKGS+=(curl)
-command -v socat  &>/dev/null || MISSING_PKGS+=(socat)
+if [ ${#BASIC_PKGS[@]} -gt 0 ]; then
+    install_packages "${BASIC_PKGS[@]}"
+fi
 
-# Ninja: preferred but optional
-HAS_NINJA=0
-if command -v ninja &> /dev/null; then
-    HAS_NINJA=1
+# ── Step B: 库依赖（pkg-config 现在肯定已就绪）──
+LIB_PKGS=()
+
+# Catch2: 兼容不同 Ubuntu 版本的包名
+if command -v apt-get &>/dev/null; then
+    if ! dpkg -s libcatch2-dev &>/dev/null 2>&1 && ! dpkg -s catch2 &>/dev/null 2>&1; then
+        LIB_PKGS+=(libcatch2-dev)
+    fi
 else
-    # Try to install ninja
-    MISSING_PKGS+=(ninja-build)
+    LIB_PKGS+=(catch2)
 fi
 
-if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    install_packages "${MISSING_PKGS[@]}"
+# libbpf + libelf + zlib + linux-libc-dev: AF_XDP / BPF 编译需要
+if ! pkg-config --exists libbpf 2>/dev/null; then
+    if command -v apt-get &>/dev/null; then
+        LIB_PKGS+=(libbpf-dev)
+    elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        LIB_PKGS+=(libbpf-devel)
+    elif command -v pacman &>/dev/null; then
+        LIB_PKGS+=(libbpf)
+    fi
+fi
+if command -v apt-get &>/dev/null; then
+    dpkg -s libelf-dev    &>/dev/null 2>&1 || LIB_PKGS+=(libelf-dev)
+    dpkg -s zlib1g-dev    &>/dev/null 2>&1 || LIB_PKGS+=(zlib1g-dev)
+    dpkg -s linux-libc-dev &>/dev/null 2>&1 || LIB_PKGS+=(linux-libc-dev)
+elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+    rpm -q elfutils-libelf-devel &>/dev/null 2>&1 || LIB_PKGS+=(elfutils-libelf-devel)
+    rpm -q zlib-devel            &>/dev/null 2>&1 || LIB_PKGS+=(zlib-devel)
+    rpm -q kernel-headers        &>/dev/null 2>&1 || LIB_PKGS+=(kernel-headers)
+elif command -v pacman &>/dev/null; then
+    pacman -Q libelf       &>/dev/null 2>&1 || LIB_PKGS+=(libelf)
+    pacman -Q zlib         &>/dev/null 2>&1 || LIB_PKGS+=(zlib)
+    pacman -Q linux-headers &>/dev/null 2>&1 || LIB_PKGS+=(linux-headers)
 fi
 
-# Re-check ninja after install attempt
+if [ ${#LIB_PKGS[@]} -gt 0 ]; then
+    install_packages "${LIB_PKGS[@]}"
+fi
+
+# BPF 编译需要 <asm/types.h>，clang -target bpf 不搜索架构特定目录
+# Ubuntu/Debian 上 asm 头文件在 /usr/include/<arch>-linux-gnu/asm，需要软链接
+if [ ! -e /usr/include/asm ]; then
+    ARCH_DIR="/usr/include/$(uname -m)-linux-gnu/asm"
+    if [ -d "$ARCH_DIR" ]; then
+        ln -s "$ARCH_DIR" /usr/include/asm
+        echo "  ✓ Created /usr/include/asm → $ARCH_DIR symlink"
+    fi
+fi
+
+# Re-check ninja after install
+HAS_NINJA=0
 if command -v ninja &> /dev/null; then
     HAS_NINJA=1
 fi
@@ -100,6 +144,15 @@ if [ $HAS_NINJA -eq 1 ]; then
     echo "  ✓ ninja"
 else
     echo "  - ninja (not found, will use make)"
+fi
+
+# AF_XDP readiness: need both clang and libbpf
+HAS_AFXDP=0
+if command -v clang &>/dev/null && pkg-config --exists libbpf 2>/dev/null; then
+    HAS_AFXDP=1
+    echo "  ✓ AF_XDP ready (clang + libbpf)"
+else
+    echo "  - AF_XDP not ready (need clang + libbpf)"
 fi
 
 # Check g++ version (need C++20 → g++ >= 10)
@@ -188,9 +241,29 @@ echo "[4/4] Building NeuStack..."
 BUILD_DIR="$PROJECT_ROOT/build"
 mkdir -p "$BUILD_DIR"
 
+# 清理旧的 CMake 缓存 (避免 generator 切换冲突)
+if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    OLD_GEN=$(grep "^CMAKE_GENERATOR:" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null | cut -d= -f2)
+    if [ $HAS_NINJA -eq 1 ] && [ "$OLD_GEN" != "Ninja" ]; then
+        echo "  Cleaning stale CMake cache (was $OLD_GEN, switching to Ninja)..."
+        rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
+    elif [ $HAS_NINJA -eq 0 ] && [ "$OLD_GEN" = "Ninja" ]; then
+        echo "  Cleaning stale CMake cache (was Ninja, switching to Make)..."
+        rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
+    fi
+fi
+
+# Determine AF_XDP flag
+if [ $HAS_AFXDP -eq 1 ]; then
+    ENABLE_AFXDP=ON
+else
+    ENABLE_AFXDP=OFF
+fi
+
 # Select generator
 CMAKE_ARGS=(
     -DNEUSTACK_ENABLE_AI=$ENABLE_AI
+    -DNEUSTACK_ENABLE_AF_XDP=$ENABLE_AFXDP
     -DCMAKE_BUILD_TYPE=Release
 )
 if [ $HAS_NINJA -eq 1 ]; then
@@ -210,6 +283,7 @@ echo "  ✓ Build Complete!"
 echo "=============================================="
 echo ""
 echo "  AI enabled:  $ENABLE_AI"
+echo "  AF_XDP:      $ENABLE_AFXDP"
 echo "  Binary:      $BUILD_DIR/examples/neustack_demo"
 echo ""
 echo "  Quick start:"

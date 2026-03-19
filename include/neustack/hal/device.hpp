@@ -139,7 +139,8 @@ public:
 
     // Factory method (implemented in device.cpp)
     static std::unique_ptr<NetDevice> create();
-    static std::unique_ptr<NetDevice> create(const std::string &type);
+    static std::unique_ptr<NetDevice> create(const std::string &type,
+                                             const std::string &ifname = "");
 
     // Non-copyable
     NetDevice(const NetDevice&) = delete;

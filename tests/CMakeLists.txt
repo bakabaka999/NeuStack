@@ -33,6 +33,28 @@ neustack_add_test(test_json_builder unit/common/test_json_builder.cpp)
 
 # --- HAL 层测试 (hal/) ---
 neustack_add_test(test_batch_device unit/hal/test_batch_device.cpp)
+neustack_add_test(test_ethernet     unit/hal/test_ethernet.cpp)
+
+# Linux-only: UMEM 和 XDP Ring (不需要真实内核 XDP，纯逻辑测试)
+if(NEUSTACK_PLATFORM_LINUX)
+    neustack_add_test(test_umem     unit/hal/test_umem.cpp)
+    neustack_add_test(test_xdp_ring unit/hal/test_xdp_ring.cpp)
+
+    # AF_XDP 配置测试 (需要 AF_XDP 编译)
+    if(NEUSTACK_ENABLE_AF_XDP)
+        neustack_add_test(test_afxdp_config unit/hal/test_afxdp_config.cpp)
+
+        # BPF 对象验证测试 (需要 libbpf + 编译产物)
+        if(NEUSTACK_BPF_SUPPORTED)
+            neustack_add_test(test_bpf_object unit/hal/test_bpf_object.cpp)
+            target_link_libraries(test_bpf_object PRIVATE ${LIBBPF_LIBRARY} elf z)
+            target_include_directories(test_bpf_object PRIVATE ${LIBBPF_INCLUDE_DIR})
+            target_compile_definitions(test_bpf_object PRIVATE
+                NEUSTACK_BPF_OBJECT_DIR="${CMAKE_BINARY_DIR}/bpf")
+            add_dependencies(test_bpf_object neustack_bpf)
+        endif()
+    endif()
+endif()
 
 # --- 传输层测试 (transport/) ---
 neustack_add_test(test_tcp_segment unit/transport/test_tcp_segment.cpp)
