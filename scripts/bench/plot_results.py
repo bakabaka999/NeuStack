@@ -404,15 +404,17 @@ def save_fig(fig, output_dir, name):
 def load_results(input_path: str) -> dict:
     """Load and normalize results from summary.json.
 
-    Handles both single-benchmark stats files and combined summary.json.
-    Returns a flat results dict.
+    Handles three formats:
+      1. Combined summary from benchmark_runner.py (has "benchmarks" key)
+      2. Single benchmark stats file (has "results" key)
+      3. Ablation summary from run_ablation.sh (has "ablation" key)
+    Returns a flat results dict with stat sub-dicts (mean/std/min/max/p50/p95).
     """
     with open(input_path) as f:
         data = json.load(f)
 
     # Combined summary from benchmark_runner.py
     if "benchmarks" in data:
-        # Merge results from all benchmarks
         merged = {}
         for bench_name, bench_data in data["benchmarks"].items():
             if "results" in bench_data:
@@ -423,7 +425,64 @@ def load_results(input_path: str) -> dict:
     if "results" in data:
         return data["results"]
 
+    # Ablation summary: pick the most complete config and compute stats
+    if "ablation" in data:
+        # Find the config with the most data (prefer afxdp_zerocopy or last one)
+        best_config = None
+        best_keys = 0
+        for config_name, config_data in data["ablation"].items():
+            runs = config_data.get("runs", [])
+            if runs and "results" in runs[0]:
+                n_keys = len(runs[0]["results"])
+                if n_keys > best_keys:
+                    best_keys = n_keys
+                    best_config = config_name
+
+        if best_config is None:
+            return data
+
+        runs = data["ablation"][best_config]["runs"]
+        # Compute statistics across runs
+        return _compute_stats_from_runs(runs)
+
     return data
+
+
+def _compute_stats_from_runs(runs: list) -> dict:
+    """Compute mean/std/min/max/p50/p95 from a list of raw benchmark runs."""
+    # Collect all metric values across runs
+    all_metrics = {}  # "section.key" -> [values]
+
+    for run in runs:
+        results = run.get("results", run)
+        for section, metrics in results.items():
+            if not isinstance(metrics, dict):
+                continue
+            for key, val in metrics.items():
+                if isinstance(val, (int, float)):
+                    full_key = f"{section}.{key}"
+                    all_metrics.setdefault(full_key, []).append(val)
+
+    # Build stats dict in the format get_val/get_err expect
+    stats = {}
+    for full_key, values in all_metrics.items():
+        parts = full_key.split(".")
+        section = parts[0]
+        metric = ".".join(parts[1:])
+        arr = np.array(values)
+        if section not in stats:
+            stats[section] = {}
+        stats[section][metric] = {
+            "mean": float(np.mean(arr)),
+            "std": float(np.std(arr)),
+            "min": float(np.min(arr)),
+            "max": float(np.max(arr)),
+            "p50": float(np.median(arr)),
+            "p95": float(np.percentile(arr, 95)),
+            "n": len(values),
+        }
+
+    return stats
 
 
 def main():
