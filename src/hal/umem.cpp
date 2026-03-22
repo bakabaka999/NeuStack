@@ -41,7 +41,13 @@ int Umem::create() {
         return -1;
     }
 
-    // 预热页面（防止缺页中断）
+    // 请求透明大页，减少 TLB miss
+    madvise(_buffer, _buffer_size, MADV_HUGEPAGE);
+
+    // 锁定内存，防止运行时 page fault
+    mlock(_buffer, _buffer_size);
+
+    // 预热页面（防止首次访问的缺页中断）
     memset(_buffer, 0, _buffer_size);
 
     return 0;
