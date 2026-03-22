@@ -82,13 +82,23 @@ fi
 # ── Step B: 库依赖（pkg-config 现在肯定已就绪）──
 LIB_PKGS=()
 
-# Catch2: 兼容不同 Ubuntu 版本的包名
+# Catch2: 包名因发行版/版本而异，且系统版本可能是 v2（太旧）
+# CMake 找不到 Catch2 v3 时会自动通过 FetchContent 下载，所以这里只是尽力安装
 if command -v apt-get &>/dev/null; then
     if ! dpkg -s libcatch2-dev &>/dev/null 2>&1 && ! dpkg -s catch2 &>/dev/null 2>&1; then
-        LIB_PKGS+=(libcatch2-dev)
+        # Ubuntu 22.04+ 用 libcatch2-dev，Debian 12+ 用 catch2，先探测再装
+        if apt-cache show libcatch2-dev &>/dev/null 2>&1; then
+            LIB_PKGS+=(libcatch2-dev)
+        elif apt-cache show catch2 &>/dev/null 2>&1; then
+            LIB_PKGS+=(catch2)
+        else
+            echo "  - Catch2 not in apt repos, CMake will fetch from source"
+        fi
     fi
-else
-    LIB_PKGS+=(catch2)
+elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+    rpm -q catch2-devel &>/dev/null 2>&1 || LIB_PKGS+=(catch2-devel)
+elif command -v pacman &>/dev/null; then
+    pacman -Q catch2 &>/dev/null 2>&1 || LIB_PKGS+=(catch2)
 fi
 
 # libbpf + libelf + zlib + linux-libc-dev: AF_XDP / BPF 编译需要
