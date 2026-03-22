@@ -200,10 +200,8 @@ echo "============================================"
 if command -v python3 &>/dev/null; then
     python3 -c "
 import json, os, sys
-import numpy as np
 
 results_dir = '$RESULTS_DIR'
-configs = ${CONFIG_ORDER[@]+"'${CONFIG_ORDER[0]}' '${CONFIG_ORDER[1]}' '${CONFIG_ORDER[2]}' '${CONFIG_ORDER[3]}'"}
 config_list = ['tun_baseline', 'afxdp_copy', 'afxdp_zerocopy', 'afxdp_zerocopy_ai']
 
 summary = {'ablation': {}, 'timestamp': '$(date -u +%Y-%m-%dT%H:%M:%SZ)'}
@@ -225,8 +223,14 @@ out_path = os.path.join(results_dir, 'summary.json')
 with open(out_path, 'w') as f:
     json.dump(summary, f, indent=2)
 print(f'Summary written to {out_path}')
-" 2>/dev/null || echo "  (Python post-processing skipped)"
+" || echo "  ERROR: Python post-processing failed"
+else
+    echo "  (Python not available, skipping post-processing)"
 fi
+
+# Create latest symlink
+PARENT_DIR="$(dirname "$RESULTS_DIR")"
+ln -sfn "$RESULTS_DIR" "${PROJECT_ROOT}/bench_results/latest"
 
 # ─────────────────────────────────────────────────────────
 # Cleanup build directories (optional)
