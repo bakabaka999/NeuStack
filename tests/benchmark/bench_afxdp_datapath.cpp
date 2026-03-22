@@ -110,11 +110,23 @@ static void print_json_results() {
     printf("}\n");
 }
 
-// 防止编译器优化
+// 防止编译器优化 — 使用 inline asm 强制编译器认为值被使用
+// 参考 Google Benchmark 的 DoNotOptimize 实现
 template <typename T>
-void do_not_optimize(T const& val) {
+inline void do_not_optimize(T const& val) {
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : : "r,m"(val) : "memory");
+#else
     volatile T sink = val;
     (void)sink;
+#endif
+}
+
+// 强制编译器认为指向的内存可能被修改，阻止死代码消除
+inline void clobber_memory() {
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : : : "memory");
+#endif
 }
 
 // ─────────────────────────────────────────────────────────
@@ -137,7 +149,9 @@ static void bench_umem_alloc_free() {
         for (uint64_t i = 0; i < ITERS; ++i) {
             uint64_t addr = allocator.alloc();
             do_not_optimize(addr);
+            clobber_memory();
             allocator.free(addr);
+            clobber_memory();
         }
         auto end = Clock::now();
 
@@ -163,7 +177,9 @@ static void bench_umem_alloc_free() {
         for (uint32_t r = 0; r < ROUNDS; ++r) {
             uint32_t n = allocator.alloc_batch(addrs, FRAME_COUNT);
             do_not_optimize(n);
+            clobber_memory();
             allocator.free_batch(addrs, n);
+            clobber_memory();
         }
         auto end = Clock::now();
 
@@ -215,12 +231,14 @@ static void bench_xdp_ring() {
                 ring.ring_at(j) = i * batch + j;
             }
             ring.submit(n);
+            clobber_memory();
 
             uint32_t m = ring.peek(batch);
             for (uint32_t j = 0; j < m; ++j) {
                 do_not_optimize(ring.ring_at_consumer(j));
             }
             ring.release(m);
+            clobber_memory();
         }
         auto end = Clock::now();
 
@@ -267,9 +285,12 @@ static void bench_zero_copy() {
         auto start = Clock::now();
         for (uint64_t i = 0; i < ITERS; ++i) {
             std::memcpy(tcp_buf + TCP_HDR, payload, PAYLOAD_SIZE);
+            clobber_memory();
             std::memcpy(ip_buf + IP_HDR, tcp_buf, PAYLOAD_SIZE + TCP_HDR);
+            clobber_memory();
             std::memcpy(kern_buf + ETH_HDR, ip_buf, PAYLOAD_SIZE + TCP_HDR + IP_HDR);
-            do_not_optimize(kern_buf[0]);
+            clobber_memory();
+            do_not_optimize(kern_buf[ETH_HDR]);
         }
         auto end = Clock::now();
 
@@ -288,8 +309,10 @@ static void bench_zero_copy() {
         auto start = Clock::now();
         for (uint64_t i = 0; i < ITERS; ++i) {
             std::memcpy(frame + TOTAL_HDR, payload, PAYLOAD_SIZE);
+            clobber_memory();
             std::memset(frame, 0, TOTAL_HDR);
-            do_not_optimize(frame[0]);
+            clobber_memory();
+            do_not_optimize(frame[TOTAL_HDR]);
         }
         auto end = Clock::now();
 
@@ -414,6 +437,7 @@ static void bench_header_build() {
                    .set_payload(payload, PAYLOAD_SIZE);
             ssize_t len = builder.build(buffer, sizeof(buffer));
             do_not_optimize(len);
+            clobber_memory();
         }
         auto end = Clock::now();
         double ns = std::chrono::duration<double, std::nano>(end - start).count();
@@ -440,6 +464,7 @@ static void bench_header_build() {
                    .set_payload(payload, PAYLOAD_SIZE);
             ssize_t len = builder.build_header_only(buffer, sizeof(buffer));
             do_not_optimize(len);
+            clobber_memory();
         }
         auto end = Clock::now();
         double ns = std::chrono::duration<double, std::nano>(end - start).count();
@@ -466,6 +491,7 @@ static void bench_header_build() {
                    .set_payload(tcp_payload, PAYLOAD_SIZE);
             ssize_t len = builder.build(buffer, sizeof(buffer));
             do_not_optimize(len);
+            clobber_memory();
         }
         auto end = Clock::now();
         double ns = std::chrono::duration<double, std::nano>(end - start).count();
@@ -489,6 +515,7 @@ static void bench_header_build() {
                    .set_ttl(64);
             ssize_t len = builder.build_header_only(buffer, sizeof(buffer), PAYLOAD_SIZE);
             do_not_optimize(len);
+            clobber_memory();
         }
         auto end = Clock::now();
         double ns = std::chrono::duration<double, std::nano>(end - start).count();
