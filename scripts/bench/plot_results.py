@@ -290,50 +290,74 @@ def plot_waterfall(results, output_dir):
 # Figure 5: Ablation Study (placeholder for real-machine data)
 # ─────────────────────────────────────────────────────────
 
-def plot_ablation(results, output_dir):
-    """Grouped bar chart for ablation study configurations.
+def plot_ablation(ablation_data, output_dir):
+    """Grouped bar chart comparing key metrics across build configurations.
 
-    Expected keys in results:
-      ablation.tun_baseline_mpps
-      ablation.afxdp_copy_mpps
-      ablation.afxdp_zerocopy_mpps
-      ablation.afxdp_zerocopy_ai_mpps
+    ablation_data: {config_name: stats_dict} from load_ablation_configs().
     """
-    ab = results.get("ablation", {})
-    configs = [
-        ("TUN\nBaseline", "tun_baseline_mpps"),
-        ("AF_XDP\n(copy)", "afxdp_copy_mpps"),
-        ("AF_XDP\n(zero-copy)", "afxdp_zerocopy_mpps"),
-        ("AF_XDP+ZC\n+AI", "afxdp_zerocopy_ai_mpps"),
-    ]
-
-    labels = []
-    values = []
-    errors = []
-    for label, key in configs:
-        v = get_val(ab, key)
-        if v is not None:
-            labels.append(label)
-            values.append(v)
-            errors.append(get_err(ab, key))
-
-    if len(values) < 2:
+    if not ablation_data or len(ablation_data) < 2:
         print("  [Skip] Ablation: no data (run on real machine)")
         return
 
-    fig, ax = plt.subplots(figsize=(4, 2.8))
-    x = np.arange(len(labels))
-    bars = ax.bar(x, values, yerr=errors, color=COLORS[:len(values)],
-                  capsize=4, edgecolor="black", linewidth=0.5, width=0.6)
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Throughput (Mpps)")
-    ax.set_title("Ablation: Data Path Configuration Comparison")
+    config_labels = {
+        "tun_baseline": "TUN\nBaseline",
+        "afxdp_copy": "AF_XDP\n(copy)",
+        "afxdp_zerocopy": "AF_XDP\n(ZC)",
+        "afxdp_zerocopy_ai": "AF_XDP+ZC\n+AI",
+    }
 
-    # Annotate values on top
-    for bar, val in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
-                f"{val:.2f}", ha="center", va="bottom", fontsize=7)
+    # Metrics to compare across configs (shared by all or most configs)
+    metric_specs = [
+        ("Zero-Copy\nSend (ns/pkt)", "zero_copy.zero_copy_ns_per_pkt"),
+        ("Traditional\nSend (ns/pkt)", "zero_copy.traditional_ns_per_pkt"),
+        ("TCP build()\n(ns/op)", "header_build.tcp_build_ns_per_op"),
+        ("TCP header\nonly (ns/op)", "header_build.tcp_header_only_ns_per_op"),
+        ("Metrics\n(ns/op)", "global_metrics.aligned_ns_per_op"),
+    ]
+
+    # Collect data: for each metric, get value per config
+    configs_present = [c for c in
+                       ["tun_baseline", "afxdp_copy", "afxdp_zerocopy", "afxdp_zerocopy_ai"]
+                       if c in ablation_data]
+
+    # Find metrics that have data in at least 2 configs
+    valid_metrics = []
+    for label, key in metric_specs:
+        count = sum(1 for c in configs_present if get_val(ablation_data[c], key) is not None)
+        if count >= 2:
+            valid_metrics.append((label, key))
+
+    if len(valid_metrics) < 2:
+        print("  [Skip] Ablation: insufficient shared metrics across configs")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+
+    n_configs = len(configs_present)
+    n_metrics = len(valid_metrics)
+    x = np.arange(n_metrics)
+    bar_width = 0.8 / n_configs
+
+    for i, config in enumerate(configs_present):
+        label = config_labels.get(config, config)
+        vals = []
+        errs = []
+        for _, key in valid_metrics:
+            v = get_val(ablation_data[config], key)
+            e = get_err(ablation_data[config], key)
+            vals.append(v if v is not None else 0)
+            errs.append(e if e is not None else 0)
+
+        offset = (i - n_configs / 2 + 0.5) * bar_width
+        ax.bar(x + offset, vals, bar_width, yerr=errs,
+               label=label, color=COLORS[i % len(COLORS)],
+               capsize=3, edgecolor="black", linewidth=0.5)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([m[0] for m in valid_metrics], fontsize=7)
+    ax.set_ylabel("Latency (ns)")
+    ax.set_title("Ablation: Build Configuration Comparison")
+    ax.legend(fontsize=7, ncol=n_configs, loc="upper right")
 
     save_fig(fig, output_dir, "05_ablation_study")
 
@@ -485,6 +509,26 @@ def _compute_stats_from_runs(runs: list) -> dict:
     return stats
 
 
+def load_ablation_configs(input_path: str) -> dict:
+    """Load per-config stats from ablation summary.
+
+    Returns dict: {config_name: stats_dict, ...} or empty dict.
+    """
+    with open(input_path) as f:
+        data = json.load(f)
+
+    if "ablation" not in data:
+        return {}
+
+    configs = {}
+    for config_name, config_data in data["ablation"].items():
+        runs = config_data.get("runs", [])
+        if runs and isinstance(runs[0], dict):
+            configs[config_name] = _compute_stats_from_runs(runs)
+
+    return configs
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate publication-quality benchmark figures")
@@ -509,12 +553,13 @@ def main():
     print()
 
     results = load_results(args.input)
+    ablation_data = load_ablation_configs(args.input)
 
     plot_xdp_ring_batch(results, output_dir)
     plot_zero_copy(results, output_dir)
     plot_header_build(results, output_dir)
     plot_waterfall(results, output_dir)
-    plot_ablation(results, output_dir)
+    plot_ablation(ablation_data, output_dir)
     generate_latex_table(results, output_dir)
 
     print(f"\n=== Done ===")
