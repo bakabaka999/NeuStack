@@ -45,6 +45,9 @@ third_party/onnxruntime/
 # Test artifacts
 Testing/
 
+# Benchmark results
+bench_results/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -74,14 +77,5 @@ training/*/*.png
 
 # doc file
 docs/_draft/*
-# OpenClaw workspace files (personal AI assistant config)
-AGENTS.md
-SOUL.md
-USER.md
-IDENTITY.md
-TOOLS.md
-HEARTBEAT.md
-MEMORY.md
-memory/
-pr-v1.2.md
-log（不要提交）.md
+
+.claude

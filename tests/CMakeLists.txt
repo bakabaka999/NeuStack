@@ -147,6 +147,10 @@ add_executable(bench_metrics_hotpath benchmark/bench_metrics_hotpath.cpp)
 target_link_libraries(bench_metrics_hotpath PRIVATE neustack_lib)
 add_test(NAME "Benchmark: Metrics hotpath" COMMAND bench_metrics_hotpath)
 
+add_executable(bench_afxdp_datapath benchmark/bench_afxdp_datapath.cpp)
+target_link_libraries(bench_afxdp_datapath PRIVATE neustack_lib)
+add_test(NAME "Benchmark: AF_XDP datapath" COMMAND bench_afxdp_datapath)
+
 # --- AI 智能平面相关测试 ---
 # 仅在 NEUSTACK_ENABLE_AI 选项开启时编译
 if(NEUSTACK_ENABLE_AI)
