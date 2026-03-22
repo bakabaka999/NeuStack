@@ -15,29 +15,46 @@ jobs:
           - os: ubuntu-latest
             build_type: Release
             ai_enabled: ON
+            af_xdp: OFF
           - os: ubuntu-latest
             build_type: Release
             ai_enabled: OFF
+            af_xdp: OFF
           - os: ubuntu-latest
             build_type: Debug
             ai_enabled: ON
+            af_xdp: OFF
           - os: ubuntu-latest
             build_type: Debug
             ai_enabled: OFF
+            af_xdp: OFF
+          # Linux: AF_XDP (Release, AI ON/OFF)
+          - os: ubuntu-latest
+            build_type: Release
+            ai_enabled: ON
+            af_xdp: ON
+          - os: ubuntu-latest
+            build_type: Release
+            ai_enabled: OFF
+            af_xdp: ON
           # macOS: Release only (with and without AI)
           - os: macos-latest
             build_type: Release
             ai_enabled: ON
+            af_xdp: OFF
           - os: macos-latest
             build_type: Release
             ai_enabled: OFF
+            af_xdp: OFF
           # Windows: Release (with and without AI)
           - os: windows-latest
             build_type: Release
             ai_enabled: ON
+            af_xdp: OFF
           - os: windows-latest
             build_type: Release
             ai_enabled: OFF
+            af_xdp: OFF
 
     runs-on: ${{ matrix.os }}
 
@@ -50,6 +67,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ ninja-build
+          # AF_XDP dependencies (clang for BPF compilation, libbpf for loading)
+          if [ "${{ matrix.af_xdp }}" = "ON" ]; then
+            sudo apt-get install -y clang libbpf-dev libelf-dev zlib1g-dev pkg-config
+            # BPF cross-compilation needs asm/types.h symlink
+            if [ ! -e /usr/include/asm ]; then
+              sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
+            fi
+          fi
 
       # ─── macOS dependencies ───
       - name: Install dependencies (macOS)
@@ -116,7 +141,8 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }}
+            -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }} \
+            -DNEUSTACK_ENABLE_AF_XDP=${{ matrix.af_xdp }}
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
