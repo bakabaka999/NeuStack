@@ -205,7 +205,7 @@ for config in $CONFIGS; do
 
         # Run sink in the sink namespace
         out_file=$(mktemp)
-        local ifname_args=""
+        ifname_args=""
         if [ "$config" != "kernel_udp" ]; then
             ifname_args="--ifname $VETH_SINK"
         fi
