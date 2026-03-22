@@ -148,6 +148,45 @@ ssize_t IPv4Builder::build(uint8_t* buffer, size_t buffer_len) const {
     return static_cast<ssize_t>(total_len);
 }
 
+ssize_t IPv4Builder::build_header_only(uint8_t* buffer, size_t buffer_len,
+                                        size_t payload_len) const {
+    constexpr size_t HEADER_LEN = 20;
+    size_t total_len = HEADER_LEN + payload_len;
+
+    if (buffer_len < HEADER_LEN) {
+        LOG_ERROR(IPv4, "build_header_only: buffer too small (%zu < %zu)", buffer_len, HEADER_LEN);
+        return -1;
+    }
+
+    if (total_len > 65535) {
+        LOG_ERROR(IPv4, "build_header_only: packet too large (%zu)", total_len);
+        return -1;
+    }
+
+    auto* hdr = reinterpret_cast<IPv4Header*>(buffer);
+
+    hdr->version_ihl = (4 << 4) | 5;
+    hdr->dscp_ecn = (_dscp << 2) | (_ecn & 0x03);
+    hdr->total_length = htons(static_cast<uint16_t>(total_len));
+    hdr->identification = htons(_identification);
+
+    uint16_t flags_frag = 0;
+    if (_dont_fragment) {
+        flags_frag |= (0x02 << 13);
+    }
+    hdr->flags_fragment = htons(flags_frag);
+
+    hdr->ttl = _ttl;
+    hdr->protocol = _protocol;
+    hdr->checksum = 0;
+    hdr->src_addr = htonl(_src_addr);
+    hdr->dst_addr = htonl(_dst_addr);
+
+    hdr->checksum = compute_checksum(hdr, HEADER_LEN);
+
+    return static_cast<ssize_t>(HEADER_LEN);
+}
+
 // ============================================================================
 // IPv4Layer
 // ============================================================================

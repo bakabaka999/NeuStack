@@ -141,6 +141,16 @@ public:
      */
     ssize_t build(uint8_t* buffer, size_t buffer_len) const;
 
+    /**
+     * @brief 只写 IPv4 header，不拷贝 payload
+     * @param buffer header 写到这里
+     * @param buffer_len 缓冲区长度
+     * @param payload_len payload 长度 (用于计算 total_length)
+     * @return header 长度 (20)，-1 表示失败
+     */
+    ssize_t build_header_only(uint8_t* buffer, size_t buffer_len,
+                              size_t payload_len) const;
+
 private:
     uint8_t  _dscp = 0;
     uint8_t  _ecn = 0;

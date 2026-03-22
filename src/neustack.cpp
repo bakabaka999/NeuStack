@@ -2,6 +2,11 @@
 #include "neustack/telemetry/metrics_registry.hpp"
 #include "neustack/telemetry/http_endpoints.hpp"
 
+#ifdef NEUSTACK_PLATFORM_LINUX
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 #ifdef NEUSTACK_AI_ENABLED
 #include "neustack/ai/intelligence_plane.hpp"
 #endif
@@ -307,6 +312,20 @@ void NeuStack::run() {
     const bool use_batch = _impl->device->supports_batch();
     constexpr uint32_t BATCH_SIZE = 64;
 
+    // CPU 亲和性：将 IO 线程绑定到指定核心
+#ifdef NEUSTACK_PLATFORM_LINUX
+    if (_impl->config.io_cpu >= 0) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(_impl->config.io_cpu, &cpuset);
+        if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) == 0) {
+            LOG_INFO(APP, "IO thread pinned to CPU %d", _impl->config.io_cpu);
+        } else {
+            LOG_WARN(APP, "Failed to pin IO thread to CPU %d", _impl->config.io_cpu);
+        }
+    }
+#endif
+
     uint8_t buf[2048];
     PacketDesc rx_descs[BATCH_SIZE];
 
@@ -322,8 +341,8 @@ void NeuStack::run() {
         uint32_t rx_count = 0;
 
         if (use_batch) {
-            // AF_XDP 批量路径
-            int events = _impl->device->poll(10);  // 10ms timeout
+            // AF_XDP 批量路径 — 1ms timeout 更积极地收包
+            int events = _impl->device->poll(1);
             if (events & NetDevice::POLL_RX) {
                 rx_count = _impl->device->recv_batch(rx_descs, BATCH_SIZE);
             }
@@ -336,8 +355,13 @@ void NeuStack::run() {
             }
         }
 
-        // 2. 处理阶段
+        // 2. 处理阶段 — 带 prefetch
         for (uint32_t i = 0; i < rx_count; ++i) {
+            // 预取下一个包的数据到 L1 cache
+            if (i + 1 < rx_count) {
+                __builtin_prefetch(rx_descs[i + 1].data, 0, 1);
+            }
+
             bool pass = true;
             if (_impl->firewall)
                 pass = _impl->firewall->inspect(rx_descs[i].data, rx_descs[i].len);

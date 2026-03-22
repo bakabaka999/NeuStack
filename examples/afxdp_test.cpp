@@ -14,6 +14,8 @@
 #include "neustack/common/log.hpp"
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <string>
 
 using namespace neustack;
 
@@ -23,6 +25,7 @@ static void print_usage(const char* prog) {
     printf("Options:\n");
     printf("  --iface NAME   Network interface (default: eth0)\n");
     printf("  --ip ADDR      Local IP address (default: 192.168.100.2)\n");
+    printf("  --cpu N        Pin IO thread to CPU N (default: no pinning)\n");
     printf("  -v             Verbose (DEBUG log level)\n");
     printf("  -h, --help     Show this help\n");
     printf("\nRequires root. The stack auto-detects MAC addresses.\n");
@@ -39,6 +42,8 @@ int main(int argc, char* argv[]) {
             cfg.device_ifname = argv[++i];
         else if (strcmp(argv[i], "--ip") == 0 && i + 1 < argc)
             cfg.local_ip = argv[++i];
+        else if (strcmp(argv[i], "--cpu") == 0 && i + 1 < argc)
+            cfg.io_cpu = atoi(argv[++i]);
         else if (strcmp(argv[i], "-v") == 0)
             cfg.log_level = LogLevel::DEBUG;
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -55,6 +60,7 @@ int main(int argc, char* argv[]) {
     printf("  Interface: %s\n",
            cfg.device_ifname.empty() ? "eth0 (default)" : cfg.device_ifname.c_str());
     printf("  Local IP:  %s\n", cfg.local_ip.c_str());
+    printf("  CPU pin:   %s\n", cfg.io_cpu >= 0 ? std::to_string(cfg.io_cpu).c_str() : "off");
     printf("  Mode:      AF_XDP\n\n");
 
     auto stack = NeuStack::create(cfg);

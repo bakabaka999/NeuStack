@@ -219,6 +219,7 @@ uint32_t LinuxAFXDPDevice::recv_batch(PacketDesc* descs, uint32_t max_count) {
         if (etype != ETH_P_IP) {
             // 非 IPv4 (ARP, IPv6 等)，释放 frame
             _umem.free_frame(desc.addr);
+            _stats.rx_dropped++;
             continue;
         }
 
@@ -271,6 +272,7 @@ uint32_t LinuxAFXDPDevice::send_batch(const PacketDesc* descs, uint32_t count) {
             // L3 数据在外部缓冲区，拷贝到 UMEM frame 并添加 Ethernet header
             uint64_t frame_addr = _umem.alloc_frame();
             if (frame_addr == UmemFrameAllocator::INVALID_ADDR) {
+                _stats.invalid_descs += (count - i);
                 n = i;
                 break;
             }
