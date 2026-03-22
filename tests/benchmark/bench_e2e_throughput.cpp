@@ -115,6 +115,56 @@ static SinkStats run_sink_raw_socket(const std::string& ifname, int duration_s) 
     ::close(fd);
     return stats;
 }
+
+// ─────────────────────────────────────────────────────────
+// Sink: Kernel UDP socket (full kernel stack baseline)
+// SOCK_DGRAM recvfrom() — goes through IP → UDP → socket buffer → copy
+// This is what a normal application sees.
+// ─────────────────────────────────────────────────────────
+
+static SinkStats run_sink_kernel_udp(int duration_s) {
+    SinkStats stats{};
+
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) { perror("socket(UDP)"); return stats; }
+
+    struct sockaddr_in bind_addr{};
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_port = htons(9999);
+    bind_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(fd, reinterpret_cast<struct sockaddr*>(&bind_addr), sizeof(bind_addr)) < 0) {
+        perror("bind");
+        ::close(fd);
+        return stats;
+    }
+
+    uint8_t buf[2048];
+    struct pollfd pfd{};
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+
+    auto start = Clock::now();
+    auto deadline = start + std::chrono::seconds(duration_s);
+
+    while (g_running) {
+        if (Clock::now() >= deadline) break;
+
+        int ret = poll(&pfd, 1, 100);
+        if (ret <= 0) continue;
+
+        ssize_t n = recvfrom(fd, buf, sizeof(buf), MSG_DONTWAIT, nullptr, nullptr);
+        if (n > 0) {
+            stats.packets++;
+            stats.bytes += static_cast<uint64_t>(n);
+        }
+    }
+
+    auto end = Clock::now();
+    stats.duration_s = std::chrono::duration<double>(end - start).count();
+    ::close(fd);
+    return stats;
+}
 #endif
 
 // ─────────────────────────────────────────────────────────
@@ -199,7 +249,7 @@ static void print_results(const char* device_type, const SinkStats& stats, bool 
 static void usage(const char* prog) {
     printf("Usage: %s [options]\n", prog);
     printf("Options:\n");
-    printf("  --device <raw_socket|af_xdp>  Backend (default: raw_socket)\n");
+    printf("  --device <kernel_udp|raw_socket|af_xdp>  Backend (default: kernel_udp)\n");
     printf("  --ifname <name>               Interface to bind (required)\n");
     printf("  --duration <seconds>          Test duration (default: 10)\n");
     printf("  --json                        JSON output\n");
@@ -220,8 +270,8 @@ int main(int argc, char* argv[]) {
         else if (arg == "--help" || arg == "-h") { usage(argv[0]); return 0; }
     }
 
-    if (ifname.empty()) {
-        fprintf(stderr, "Error: --ifname is required\n");
+    if (ifname.empty() && device_type != "kernel_udp") {
+        fprintf(stderr, "Error: --ifname is required for %s\n", device_type.c_str());
         usage(argv[0]);
         return 1;
     }
@@ -232,7 +282,10 @@ int main(int argc, char* argv[]) {
     SinkStats stats{};
 
 #ifdef __linux__
-    if (device_type == "raw_socket") {
+    if (device_type == "kernel_udp") {
+        stats = run_sink_kernel_udp(duration);
+    }
+    else if (device_type == "raw_socket") {
         stats = run_sink_raw_socket(ifname, duration);
     }
 #if defined(NEUSTACK_ENABLE_AF_XDP)

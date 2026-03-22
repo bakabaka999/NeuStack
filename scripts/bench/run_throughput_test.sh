@@ -175,8 +175,8 @@ stop_flood() {
 # ─────────────────────────────────────────────────────────
 # Configurations to test
 # ─────────────────────────────────────────────────────────
-# Always try both - the benchmark will fail gracefully if AF_XDP isn't compiled
-CONFIGS="raw_socket af_xdp"
+# Always try all three
+CONFIGS="kernel_udp raw_socket af_xdp"
 
 echo "  Configs: $CONFIGS"
 echo ""
@@ -205,9 +205,13 @@ for config in $CONFIGS; do
 
         # Run sink in the sink namespace
         out_file=$(mktemp)
+        local ifname_args=""
+        if [ "$config" != "kernel_udp" ]; then
+            ifname_args="--ifname $VETH_SINK"
+        fi
         ip netns exec "$NS_SINK" "$BENCH_EXE" \
             --device "$config" \
-            --ifname "$VETH_SINK" \
+            $ifname_args \
             --duration "$DURATION" \
             --json \
             > "$out_file" 2>/dev/null || true
@@ -292,17 +296,24 @@ print(f"Summary: {out_path}")
 # Print comparison
 if len(summary["configs"]) >= 2:
     print("\n--- Comparison ---")
-    for name, data in summary["configs"].items():
+    for name, data in sorted(summary["configs"].items()):
         m = data["mpps"]["mean"]
         s = data["mpps"]["std"]
         print(f"  {name:15s}: {m:.4f} +/- {s:.4f} Mpps")
 
-    configs = list(summary["configs"].keys())
-    if "raw_socket" in summary["configs"] and "af_xdp" in summary["configs"]:
-        raw = summary["configs"]["raw_socket"]["mpps"]["mean"]
-        xdp = summary["configs"]["af_xdp"]["mpps"]["mean"]
+    c = summary["configs"]
+    baseline = c.get("kernel_udp", {}).get("mpps", {}).get("mean", 0)
+    raw = c.get("raw_socket", {}).get("mpps", {}).get("mean", 0)
+    xdp = c.get("af_xdp", {}).get("mpps", {}).get("mean", 0)
+
+    if baseline > 0:
+        print(f"\n  vs kernel UDP:")
         if raw > 0:
-            print(f"\n  AF_XDP speedup: {xdp/raw:.2f}x over raw_socket (TUN-equivalent)")
+            print(f"    raw_socket: {raw/baseline:.2f}x")
+        if xdp > 0:
+            print(f"    AF_XDP:     {xdp/baseline:.2f}x")
+    if raw > 0 and xdp > 0:
+        print(f"  AF_XDP vs raw_socket: {xdp/raw:.2f}x")
 PYEOF
 
 ln -sfn "$RESULTS_DIR" "${PROJECT_ROOT}/bench_results/latest_e2e"
