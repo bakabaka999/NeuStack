@@ -22,7 +22,35 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <linux/if_link.h>
-#endif
+
+// ── libbpf API compatibility shim ──
+// libbpf < 0.6 has no version macros; < 0.8 lacks bpf_xdp_attach/detach
+// and bpf_object__next_program.  libbpf >= 1.0 removed the old APIs.
+// We detect the version and provide inline wrappers when needed.
+#if !defined(LIBBPF_MAJOR_VERSION) || \
+    (LIBBPF_MAJOR_VERSION == 0 && LIBBPF_MINOR_VERSION < 8)
+
+static inline int compat_xdp_attach(int ifindex, int prog_fd,
+                                     __u32 flags, const void*) {
+    return bpf_set_link_xdp_fd(ifindex, prog_fd, flags);
+}
+static inline int compat_xdp_detach(int ifindex, __u32 flags,
+                                     const void*) {
+    return bpf_set_link_xdp_fd(ifindex, -1, flags);
+}
+#define bpf_xdp_attach  compat_xdp_attach
+#define bpf_xdp_detach  compat_xdp_detach
+
+// Old: bpf_program__next(prev, obj)  New: bpf_object__next_program(obj, prev)
+static inline struct bpf_program*
+compat_object__next_program(const struct bpf_object* obj,
+                            struct bpf_program* prev) {
+    return bpf_program__next(prev, obj);
+}
+#define bpf_object__next_program compat_object__next_program
+
+#endif // libbpf compat
+#endif // NEUSTACK_ENABLE_AF_XDP
 
 using namespace neustack;
 
@@ -680,7 +708,7 @@ int LinuxAFXDPDevice::auto_detect_gateway_mac() {
 
     char line[256];
     uint32_t gw_ip = 0;
-    fgets(line, sizeof(line), fp); // 跳过表头
+    (void)fgets(line, sizeof(line), fp); // 跳过表头
     while (fgets(line, sizeof(line), fp)) {
         char iface[IFNAMSIZ];
         uint32_t dest, gateway;
@@ -710,7 +738,7 @@ int LinuxAFXDPDevice::auto_detect_gateway_mac() {
     char gw_str[16];
     snprintf(gw_str, sizeof(gw_str), "%u.%u.%u.%u", g[0], g[1], g[2], g[3]);
 
-    fgets(line, sizeof(line), fp); // 跳过表头
+    (void)fgets(line, sizeof(line), fp); // 跳过表头
     bool found = false;
     while (fgets(line, sizeof(line), fp)) {
         char ip[32], hw[32], dev[IFNAMSIZ];
