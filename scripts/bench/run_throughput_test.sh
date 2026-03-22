@@ -160,12 +160,8 @@ stop_flood() {
 # ─────────────────────────────────────────────────────────
 # Configurations to test
 # ─────────────────────────────────────────────────────────
-CONFIGS="raw_socket"
-
-# Check if AF_XDP is compiled in
-if strings "$BENCH_EXE" 2>/dev/null | grep -q "af_xdp"; then
-    CONFIGS="raw_socket af_xdp"
-fi
+# Always try both - the benchmark will fail gracefully if AF_XDP isn't compiled
+CONFIGS="raw_socket af_xdp"
 
 echo "  Configs: $CONFIGS"
 echo ""
@@ -231,6 +227,8 @@ done
 # ─────────────────────────────────────────────────────────
 echo "--- Post-processing ---"
 
+export RESULTS_DIR
+
 python3 << 'PYEOF'
 import json, os, statistics
 
@@ -292,7 +290,6 @@ if len(summary["configs"]) >= 2:
             print(f"\n  AF_XDP speedup: {xdp/raw:.2f}x over raw_socket (TUN-equivalent)")
 PYEOF
 
-export RESULTS_DIR
 ln -sfn "$RESULTS_DIR" "${PROJECT_ROOT}/bench_results/latest_e2e"
 
 echo ""
