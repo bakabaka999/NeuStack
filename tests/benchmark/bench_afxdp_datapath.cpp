@@ -129,6 +129,18 @@ inline void clobber_memory() {
 #endif
 }
 
+// 让编译器认为指针 p 指向的内存可能被外部代码读写
+// 这样编译器就不能消除对该内存的写入（如 memcpy）
+template <typename T>
+inline void escape(T* p) {
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : : "g"(p) : "memory");
+#else
+    volatile void* sink = p;
+    (void)sink;
+#endif
+}
+
 // ─────────────────────────────────────────────────────────
 // Test 1: UMEM Frame Alloc/Free
 // ─────────────────────────────────────────────────────────
@@ -279,6 +291,14 @@ static void bench_zero_copy() {
     uint8_t kern_buf[PAYLOAD_SIZE + TOTAL_HDR];
     uint8_t frame[PAYLOAD_SIZE + TOTAL_HDR];
 
+    // Let the compiler know external code may access these buffers,
+    // preventing it from eliminating memcpy as dead stores.
+    escape(payload);
+    escape(tcp_buf);
+    escape(ip_buf);
+    escape(kern_buf);
+    escape(frame);
+
     // --- Traditional: 3 copies ---
     double trad_ns_per_pkt;
     {
@@ -422,6 +442,9 @@ static void bench_header_build() {
     uint8_t payload[PAYLOAD_SIZE];
     std::memset(payload, 0xAB, PAYLOAD_SIZE);
     uint8_t buffer[2048];
+
+    escape(payload);
+    escape(buffer);
 
     // --- TCPBuilder::build (with payload copy) ---
     {
