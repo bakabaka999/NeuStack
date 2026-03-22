@@ -137,9 +137,23 @@ trap teardown_ns EXIT
 # ─────────────────────────────────────────────────────────
 # UDP flood generator (runs in ns_gen)
 # ─────────────────────────────────────────────────────────
+
+FLOOD_EXE="${BUILD_DIR}/tools/udp_flood"
+if [ ! -x "$FLOOD_EXE" ]; then
+    echo "WARNING: udp_flood not found, falling back to Python sender (slower)."
+    echo "  Build: cmake --build ${BUILD_DIR} --target udp_flood"
+    USE_C_FLOOD=false
+else
+    USE_C_FLOOD=true
+fi
+
 start_flood() {
     local duration="$1"
-    ip netns exec "$NS_GEN" python3 -c "
+    if $USE_C_FLOOD; then
+        ip netns exec "$NS_GEN" "$FLOOD_EXE" \
+            "$IP_SINK" 9999 "$PAYLOAD_SIZE" "$duration" &
+    else
+        ip netns exec "$NS_GEN" python3 -c "
 import socket, time
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 payload = b'\\xaa' * ${PAYLOAD_SIZE}
@@ -149,6 +163,7 @@ while time.monotonic() < end:
     sock.sendto(payload, target)
 sock.close()
 " &
+    fi
     FLOOD_PID=$!
 }
 
