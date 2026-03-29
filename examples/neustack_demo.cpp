@@ -1,6 +1,6 @@
 /**
  * @file neustack_demo.cpp
- * @brief NeuStack v1.3.0 — Interactive Demo
+ * @brief NeuStack v1.4.0 — Interactive Demo
  */
 
 #include "neustack/neustack.hpp"
@@ -117,7 +117,7 @@ static void print_banner() {
         "╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝\n"
         C_RESET);
     std::printf(C_GRAY "  User-space TCP/IP Stack  " C_RESET
-                C_DIM  "v1.3.0  •  github.com/bakabaka999/NeuStack\n" C_RESET);
+                C_DIM  "v1.4.0  •  github.com/bakabaka999/NeuStack\n" C_RESET);
     std::printf("\n");
 }
 
@@ -187,7 +187,7 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NeuStack v1.3.0</title>
+    <title>NeuStack v1.4.0</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -291,7 +291,7 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
 <body>
     <div class="container">
         <header>
-            <h1>NeuStack v1.3.0</h1>
+            <h1>NeuStack v1.4.0</h1>
             <div class="subtitle">High-Performance User-Space TCP/IP Stack</div>
         </header>
         
@@ -377,7 +377,7 @@ static void setup_http_server(NeuStack &stack) {
     server.get("/api/status", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("application/json")
-            .set_body(R"({"status":"running","version":"1.3.0"})");
+            .set_body(R"({"status":"running","version":"1.4.0"})");
     });
 
     server.get("/api/info", [local_ip, &stack](const HttpRequest &) {
@@ -983,7 +983,7 @@ int main(int argc, char *argv[]) {
     logger.set_timestamp(cfg.timestamp);
 
     print_banner();
-    LOG_INFO(APP, "NeuStack v1.3.0 starting");
+    LOG_INFO(APP, "NeuStack 1.4.0 starting");
 
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);

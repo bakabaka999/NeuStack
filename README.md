@@ -1,118 +1,157 @@
+<h1 align="center">NeuStack</h1>
+
 <p align="center">
-  <h1 align="center">NeuStack</h1>
-  <p align="center">
-    <strong>A cross-platform user-space TCP/IP stack built from scratch, with AI-powered congestion control and intelligent firewall</strong>
-  </p>
-  <p align="center">
-    <a href="https://github.com/bakabaka999/NeuStack/actions"><img src="https://github.com/bakabaka999/NeuStack/workflows/CI/badge.svg" alt="CI"></a>
-    <a href="https://isocpp.org/"><img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20"></a>
-    <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-SAC%20%2F%20LSTM%20%2F%20AE-EE4C2C.svg" alt="PyTorch"></a>
-    <a href="https://onnxruntime.ai/"><img src="https://img.shields.io/badge/ONNX%20Runtime-inference-7B68EE.svg" alt="ONNX Runtime"></a>
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platform">
-    <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
-  </p>
+  <strong>A high-performance, programmable user-space network stack — built from scratch in C++20.</strong><br>
+  <sub>Designed for workloads where kernel overhead matters: AI collective communications, inference serving, HPC data paths, and systems research.</sub>
 </p>
 
-**[中文](README.zh-CN.md) | English**
+<p align="center">
+  <a href="https://github.com/bakabaka999/NeuStack/actions"><img src="https://github.com/bakabaka999/NeuStack/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://isocpp.org/"><img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20"></a>
+  <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-SAC%20%2F%20LSTM%20%2F%20AE-EE4C2C.svg" alt="PyTorch"></a>
+  <a href="https://onnxruntime.ai/"><img src="https://img.shields.io/badge/ONNX%20Runtime-inference-7B68EE.svg" alt="ONNX Runtime"></a>
+  <img src="https://img.shields.io/badge/AF__XDP-generic%20copy%20mode-9C27B0.svg" alt="AF_XDP">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platform">
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
+</p>
+
+<p align="center">
+  <b><a href="README.zh-CN.md">中文</a> | English</b>
+</p>
+
+<br>
+
+<div align="center">
+
+| **Full Protocol Stack** | **AF_XDP Kernel Bypass** | **3 ONNX Models** | **1.45×** | **~10,000** |
+|:-:|:-:|:-:|:-:|:-:|
+| Ethernet → IPv4 → TCP/UDP → HTTP | batch ring I/O, 1-copy (generic mode) | async AI inference, lock-free feedback | throughput vs kernel UDP | lines of C++20 |
+
+</div>
 
 ---
 
-## 📖 Table of Contents
+## Table of Contents
 
-- [Introduction](#introduction)
+- [Overview](#overview)
 - [Key Features](#key-features)
 - [System Architecture](#system-architecture)
+- [Performance](#performance)
 - [Quick Start](#quick-start)
-- [Documentation](#documentation)
-- [AI Intelligence Plane & NetworkAgent](#ai-intelligence-plane--networkagent)
+- [AI Intelligence Plane](#ai-intelligence-plane)
+- [AF_XDP Data Path](#afxdp-data-path)
 - [Firewall](#firewall)
+- [Telemetry & Observability](#telemetry--observability)
+- [Benchmarks](#benchmarks)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
+- [Build Options](#build-options)
+- [Documentation](#documentation)
 - [License](#license)
 
 ---
 
-## Introduction
+## Overview
 
-NeuStack is a **fully from-scratch** user-space TCP/IP stack with AI-driven congestion control and intelligent firewall capabilities.
+NeuStack is a **complete, from-scratch** user-space network stack written in C++20, implementing the full protocol chain — Ethernet → IPv4 → TCP/UDP → HTTP/DNS — with no dependence on the kernel network stack.
 
-- **C++ Core**: ~10,000 lines — complete protocol stack + AI inference + firewall
-- **Python Training**: ~4,000 lines — SAC/LSTM/Autoencoder model training
-- **Shell Scripts**: ~2,700 lines — data collection and environment setup
+**Why user-space?**  The kernel network stack is a general-purpose design optimized for compatibility, not throughput. Moving the stack to user space unlocks:
+
+- **Bypass kernel scheduling and syscall overhead** on the packet fast path
+- **Programmable transport semantics** — e.g., custom congestion control tuned per workload
+- **Zero-copy data movement** from NIC ring buffers directly to application buffers
+- **Full observability** into every layer without kernel tracing overhead
+
+This is directly applicable to workloads where network I/O is a bottleneck: **distributed AI training** (AllReduce / NCCL-style collective comms), **high-throughput inference serving**, **HPC cluster communication**, and **low-latency trading infrastructure**. NeuStack explores the full design space of such a stack — from hardware abstraction to AI-assisted transport.
+
+What makes NeuStack different:
+
+- **AI-native transport**: Three ONNX models (SAC RL · LSTM · Autoencoder) run in a dedicated async inference thread. Congestion control decisions feed back to the data plane through a lock-free SPSC queue — zero inference latency on the hot path
+- **AF_XDP kernel bypass**: UMEM shared-memory ring, batch packet I/O, BPF/XDP program loading. Tested in **generic (copy) mode** on commodity hardware — **1.45× over kernel UDP**. Native zero-copy mode is ready for Intel NICs (i40e / ice / igc)
+- **Zero-allocation hot path**: FixedPool slab allocator — no `new`/`delete` in the packet processing loop
+- **Production observability**: Prometheus/JSON telemetry, 7 live HTTP endpoints, `neustack-stat` live CLI
+- **Unified cross-platform HAL**: macOS utun · Linux TUN/TAP + AF_XDP · Windows Wintun — one API
+<!-- 
+```
+C++ Core:        ~10,000 lines  —  protocol stack + AI inference + firewall + AF_XDP HAL
+Python Training:  ~4,000 lines  —  SAC / LSTM / Autoencoder training pipelines
+Scripts:          ~2,700 lines  —  data collection, benchmarks, environment setup
+``` -->
+
+---
 
 ## Key Features
 
 | Category | Details |
 |----------|---------|
-| **Protocol Stack** | IPv4 / ICMP / UDP / TCP / HTTP 1.1 / DNS |
+| **Protocol Stack** | IPv4 · ICMP · UDP · TCP · HTTP 1.1 · DNS |
 | **Congestion Control** | Reno · CUBIC · **Orca (SAC Reinforcement Learning)** |
-| **AI Intelligence Plane** | Bandwidth Prediction (LSTM) · Anomaly Detection (Autoencoder) · Smart Congestion Control (SAC) · Security Anomaly Detection (Deep AE) |
-| **Firewall** | Blacklist/Whitelist · Port Blocking · Token Bucket Rate Limiting · AI Shadow Mode · Auto Escalation/De-escalation · Security Data Export |
-| **Telemetry & Observability** | MetricsRegistry (Counter/Gauge/Histogram) · JSON & Prometheus exporters · 7 HTTP endpoints · `neustack-stat` live CLI dashboard |
-| **NetworkAgent** | 4-state decision layer coordinating 4 models with policy-based clamp / fallback / connection control |
-| **Cross-Platform** | macOS (utun) · Linux (TUN/TAP) · Windows (Wintun) |
-| **Zero-Allocation Design** | FixedPool memory pool, no new/delete on hot paths |
+| **AI Intelligence Plane** | BW Prediction (LSTM) · Anomaly Detection (AE) · Congestion Control (SAC) · NetworkAgent 4-State FSM |
+| **AF_XDP Data Path** | UMEM · Batch Ring I/O · BPF/XDP loading · **Generic copy mode tested**; native zero-copy ready for Intel NICs |
+| **Firewall** | O(1) Blacklist/Whitelist · Token Bucket Rate Limiter · AI Shadow Mode · Auto Escalation |
+| **Telemetry** | MetricsRegistry · JSON & Prometheus · 7 HTTP endpoints · `neustack-stat` live CLI |
+| **Zero-Allocation Hot Path** | FixedPool · no `new`/`delete` in the packet processing loop |
+| **Cross-Platform** | macOS (utun) · Linux (TUN/TAP + AF_XDP) · Windows (Wintun) |
+
+---
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│              HTTP Server/Client  ·  DNS Client                │
-├─────────────────────────────────────────────────────────────┤
-│                  Telemetry & Observability                    │
-│  MetricsRegistry · JSON/Prometheus Export · HTTP Endpoints    │
-├─────────────────────────────────────────────────────────────┤
-│                    Transport Layer                            │
-│          TCP (Reno / CUBIC / Orca)  ·  UDP                    │
-├─────────────────────────────────────────────────────────────┤
-│                    Network Layer                              │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              FirewallEngine                          │    │
-│  │  ┌───────────┬──────────────┬───────────────────┐   │    │
-│  │  │ Whitelist │  Blacklist   │  RateLimiter      │   │    │
-│  │  │   (O(1))  │    (O(1))    │  (Token Bucket)   │   │    │
-│  │  └───────────┴──────────────┴───────────────────┘   │    │
-│  │  ┌─────────────────────────────────────────────┐    │    │
-│  │  │ FirewallAI  (Deep AE · Shadow/Enforce Mode) │    │    │
-│  │  └─────────────────────────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                     IPv4  ·  ICMP                            │
-├─────────────────────────────────────────────────────────────┤
-│               Hardware Abstraction Layer (HAL)                │
-│           macOS utun  ·  Linux TUN  ·  Wintun                 │
-└─────────────────────────────────────────────────────────────┘
-                             ↕
-              ┌──────────────────────────────────┐
-              │     NetworkAgent (AI Decision)    │
-              │  Orca (SAC) · BW Predict · Anomaly│
-              └──────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/img/architecture.png" alt="NeuStack System Architecture" width="920"/>
+</p>
+
+NeuStack separates packet processing across two planes:
+
+**Data Plane** (main thread): HAL receives packets → FirewallEngine filters → IPv4 routes → TCP/UDP processes → Application delivers. Every layer writes to lock-free atomic metrics.
+
+**AI Intelligence Plane** (async thread): reads `MetricsBuffer<TCPSample>` from data plane → three ONNX models infer → `NetworkAgent` (4-State FSM) decides → writes `AIAction` back via `SPSCQueue`.
+
+---
+
+## Performance
+
+<p align="center">
+  <img src="docs/img/perf_highlights.png" alt="NeuStack Performance Benchmarks" width="880"/>
+</p>
+
+| Benchmark | Result | vs Baseline |
+|-----------|--------|-------------|
+| E2E throughput — AF_XDP **generic/copy mode** | **1.18 Mpps** | **1.45×** over kernel UDP |
+| E2E throughput — kernel UDP (SOCK_DGRAM) | 0.82 Mpps | baseline |
+| E2E throughput — raw socket (TUN-equivalent) | 0.60 Mpps | 0.73× |
+| Zero-copy send path vs traditional 3-copy | **52 vs 162 ns/pkt** | **3.1×** faster |
+| XDP Ring ops: batch=1 → batch=128 | 2.37 → 0.55 ns/op | **4.3×** amortization |
+| UMEM alloc+free (sequential) | **0.46 ns/op** | near hardware limit |
+| TCP `build_header_only()` vs `build()` | 1.9 vs 11.4 ns/op | **6×** faster |
+
+> **AF_XDP note**: All E2E benchmarks run in **generic (copy) mode** on veth pairs with a Realtek r8169 NIC, which does **not** support native XDP. The AF_XDP implementation fully supports native zero-copy mode for Intel NICs (i40e / ice / igc), where 5–10× additional throughput gains are expected based on published XDP benchmarks.
+
+---
 
 ## Quick Start
 
 ### Dependencies
 
-- CMake >= 3.20
-- C++20 compiler (Clang >= 14 / GCC >= 11 / MSVC 2019+)
-- Optional: ONNX Runtime (AI inference), Catch2 v3 (tests)
-- Windows only: [Wintun](https://www.wintun.net/) (downloaded automatically by setup)
+| Dependency | Required | Notes |
+|-----------|----------|-------|
+| CMake ≥ 3.20 | Yes | |
+| C++20 compiler | Yes | GCC ≥ 11 / Clang ≥ 14 / MSVC 2019+ |
+| ONNX Runtime | Optional | AI inference (`-DNEUSTACK_ENABLE_AI=ON`) |
+| libbpf + clang | Optional | AF_XDP, Linux only (`-DNEUSTACK_ENABLE_AF_XDP=ON`) |
+| Catch2 v3 | Optional | Unit tests |
+| Wintun | Windows only | Auto-downloaded by setup script |
 
 ### One-Command Setup
 
-The setup script auto-detects your platform, installs dependencies, downloads ONNX Runtime, and builds the project with AI enabled.
-
 ```bash
 # macOS / Linux
-./setup
+./setup              # with AI
+./setup --no-ai      # without AI (faster build)
 
 # Windows (PowerShell as Administrator)
 .\setup.bat
-# or directly:
-.\scripts\windows\setup.ps1
 ```
-
-To build without AI: `./setup --no-ai` (or `.\setup.bat -NoAI` on Windows).
 
 ### Manual Build
 
@@ -120,23 +159,22 @@ To build without AI: `./setup --no-ai` (or `.\setup.bat -NoAI` on Windows).
 git clone https://github.com/bakabaka999/NeuStack.git
 cd NeuStack
 
-cmake -B build -G Ninja
-cmake --build build
+# Standard build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 
-# Test
+# Full build with AF_XDP + AI (Linux)
+sudo apt install libbpf-dev clang
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -DNEUSTACK_ENABLE_AF_XDP=ON \
+    -DNEUSTACK_ENABLE_AI=ON
+cmake --build build -j$(nproc)
+
+# Run tests
 cd build && ctest --output-on-failure
 
-# Run (requires root / Administrator)
-sudo ./build/examples/neustack_demo          # macOS / Linux
-.\build\examples\neustack_demo.exe           # Windows (Admin PowerShell)
-```
-
-### Enable AI (manual)
-
-```bash
-./scripts/download/download_onnxruntime.sh
-cmake -B build -DNEUSTACK_ENABLE_AI=ON
-cmake --build build
+# Run demo (requires root for TUN/AF_XDP)
+sudo ./build/examples/neustack_demo
 ```
 
 ### Minimal Example
@@ -155,192 +193,212 @@ int main() {
     });
     stack->http_server().listen(80);
 
-    // Configure firewall (access rule engine via facade API)
+    // Firewall rules
     auto* rules = stack->firewall_rules();
-    rules->add_blacklist_ip(0x01020304);  // Block 1.2.3.4
-    rules->rate_limiter().set_enabled(true);
-    rules->rate_limiter().set_rate(1000, 100);  // 1000 PPS
+    rules->add_blacklist_ip(0x01020304);        // Block 1.2.3.4
+    rules->rate_limiter().set_rate(1000, 100);  // 1000 pps, burst 100
 
-    stack->run();
+    // AI congestion control
+    stack->enable_ai_congestion_control("models/orca.onnx");
+
+    stack->run();  // blocks until Ctrl+C
 }
 ```
 
-## Documentation
+---
 
-| Document | Description |
-|----------|-------------|
-| [API Reference](docs/api/README.md) | C++ API reference |
-| [Firewall Guide](docs/api/firewall.md) | Firewall configuration guide |
-| [AI Training](docs/api/ai-training.md) | AI model training guide |
-| [AI Inference](docs/api/ai-inference.md) | AI inference & NetworkAgent API |
-| [Telemetry](docs/api/telemetry.md) | Telemetry framework, HTTP endpoints, CLI tool |
-| [Integration Guide](docs/api/integration.md) | Use NeuStack as a library in your project |
-| [Project Whitepaper](docs/project_whitepaper.md) | Project whitepaper (design details) |
-| [Changelog](CHANGELOG.md) | Version history |
-| [Contributing](CONTRIBUTING.md) | Contribution guide |
+## AI Intelligence Plane
 
-## AI Intelligence Plane & NetworkAgent
+The AI system runs in a **dedicated async thread** (`IntelligencePlane`), completely decoupled from packet processing. It pulls TCP samples from a lock-free ring buffer, runs three ONNX models, feeds results into `NetworkAgent`, and pushes `AIAction` back to the data plane via SPSC queue — zero blocking on the hot path.
 
-NeuStack's AI subsystem coordinates three models through **NetworkAgent**:
+### Models
 
-| Model | Algorithm | Purpose |
-|-------|-----------|---------|
-| **Orca** | SAC (Reinforcement Learning) | Smart congestion window adjustment |
-| **Bandwidth Prediction** | LSTM | Proactive bandwidth estimation |
-| **Security Anomaly Detection** | Deep Autoencoder | Firewall security threat detection |
-| **Traffic Anomaly Detection** | Autoencoder | Detect abnormal network traffic patterns |
+| Model | Algorithm | Role | Interval |
+|-------|-----------|------|----------|
+| **Orca** | SAC Reinforcement Learning | Congestion window alpha → `TCPOrca::cwnd()` | 10 ms |
+| **BW Predict** | LSTM | Bandwidth forecast → proactive rate adjustment | 100 ms |
+| **Anomaly Detect** | Autoencoder | Traffic anomaly scoring → connection gating | 1000 ms |
 
-### NetworkAgent State Machine
+### NetworkAgent States
+
+| State | Behavior |
+|-------|----------|
+| `NORMAL` | Full AI-assisted CC, firewall in shadow mode |
+| `CONGESTED` | Tighter cwnd clamping, conservative bandwidth target |
+| `UNDER_ATTACK` | Connection gate active, firewall escalated to enforce mode |
+| `RECOVERING` | Gradual parameter restoration, firewall returning to shadow |
+
+### Firewall AI (separate, synchronous)
+
+Apart from the async `IntelligencePlane`, a second AI model (`SecurityAnomalyModel`, MLP) runs **synchronously on a 1-second timer** in the data plane thread. It scores the traffic using 8 volume-invariant features derived from `SecurityMetrics`, caches the result atomically, and uses the cached score per packet — no per-packet inference overhead.
+
+---
+
+## AF_XDP Data Path
+
+NeuStack implements AF_XDP as its high-performance Linux data path backend.
 
 ```
-NORMAL ──(BW drops sharply)──→ DEGRADED
-   │                              │
-   │(anomaly detected)       (anomaly detected)
-   ↓                              ↓
-UNDER_ATTACK ──(recovered)──→ RECOVERY ──→ NORMAL
+Traditional path (TUN):
+  NIC → kernel sk_buff alloc → copy → TUN fd read() → copy → userspace
+  2 memory copies, one syscall per packet
+
+AF_XDP path (NeuStack):
+  NIC → XDP program (BPF) → UMEM (shared mmap ring) → userspace batch recv
+  1 memory copy (generic mode), batch syscall
 ```
 
-See [AI Training Guide](docs/api/ai-training.md) for details.
-
-## Security Model Training
+> **Current status**: Tested in **AF_XDP generic (SKB copy) mode** — packets still pass through the kernel sk_buff path before entering the UMEM ring. This is because the test NIC (Realtek r8169) does not support native XDP. The implementation fully supports **native zero-copy mode** (`zero_copy = true`, `force_native_mode = true`) for NICs with XDP driver support (Intel i40e / ice / igc / mlx5).
 
 ```bash
-# 1. Collect data (Docker environment)
-cd docker && docker compose up -d
-./scripts/linux/collect_security.sh
-
-# 2. Clean & generate dataset
-python training/security/data_clean.py --input data/ --output data/cleaned/
-python scripts/python/csv_to_dataset.py --security data/cleaned/ --output data/security_dataset.npz
-
-# 3. Train
-python training/security/train.py --config training/security/config.yaml
-
-# 4. Export ONNX
-python training/security/export_onnx.py --checkpoint training/security/checkpoints/best.pt --output models/security_anomaly.onnx
+# Build with AF_XDP
+sudo apt install libbpf-dev clang
+cmake -B build -DNEUSTACK_ENABLE_AF_XDP=ON
+cmake --build build -j$(nproc)
 ```
 
-## Docker Environment
+See [`docs/api/af-xdp.md`](docs/api/af-xdp.md) for NIC compatibility table, configuration options, and the batch recv/send API.
 
-```bash
-cd docker
-docker compose up -d    # Start TUN network environment
-docker compose exec neustack bash
-./build/examples/neustack_demo --models models/
-```
+---
 
 ## Firewall
 
-NeuStack includes a built-in zero-allocation firewall engine with:
+The firewall runs **inline on every packet** in the data plane, before the network layer.
 
-- **Blacklist/Whitelist**: O(1) hash lookup
-- **Port Blocking**: Protocol filtering (TCP/UDP)
-- **Token Bucket Rate Limiting**: Per-IP PPS limiting
-- **Shadow Mode**: AI detection alert-only, with auto-escalation support
-- **Security AI**: Deep Autoencoder 8-dimensional feature anomaly detection, ONNX inference
+| Feature | Details |
+|---------|---------|
+| **Whitelist / Blacklist** | O(1) hash lookup, IP-based |
+| **Rate Limiter** | Token Bucket, configurable pps + burst |
+| **AI Anomaly Detection** | MLP model, 8 volume-invariant features (SYN ratio, RST ratio, conn completion rate...) |
+| **Shadow Mode** | Alert-only, no drops — safe for gradual production rollout |
+| **Auto Escalation** | N consecutive anomalies auto-disables shadow mode → enforce mode |
+| **API** | `NeuStack::firewall_rules()` facade for programmatic rule management |
 
-### Shadow Mode Auto-Escalation
+---
 
-```
-Normal traffic ──→ Shadow Mode (alert only)
-                       │
-                 N consecutive anomalies
-                       ↓
-                Blocking Mode (block)
-                       │
-                 M consecutive normals
-                       ↓
-                Shadow Mode (recover)
-```
+## Telemetry & Observability
 
-Auto-escalation is enabled via `FirewallAIConfig::auto_escalate` (off by default). `escalate_cooldown_ms` controls the cooldown period to prevent oscillation.
+Every data plane layer writes to lock-free atomic counters (`GlobalMetrics`, `SecurityMetrics`). These are exported via:
 
-```cpp
-auto* rules = stack->firewall_rules();
+| Endpoint | Format | Description |
+|----------|--------|-------------|
+| `GET /api/v1/health` | JSON | Stack health and uptime |
+| `GET /api/v1/stats` | JSON | Full statistics snapshot |
+| `GET /api/v1/stats/traffic` | JSON | Packet/byte counters |
+| `GET /api/v1/stats/tcp` | JSON | TCP connections, RTT distribution |
+| `GET /api/v1/stats/security` | JSON | Firewall hits, anomaly scores |
+| `GET /api/v1/connections` | JSON | Active TCP connections |
+| `GET /metrics` | Prometheus | Prometheus-compatible scrape endpoint |
 
-// Whitelist (highest priority)
-rules->add_whitelist_ip(ip_from_string("192.168.1.1"));
+```bash
+# Live terminal dashboard
+./build/tools/neustack-stat --host 127.0.0.1 --port 8080
 
-// Blacklist
-rules->add_blacklist_ip(ip_from_string("1.2.3.4"));
-
-// Block port
-rules->add_rule(Rule::block_port(1, 22, 6));  // Block SSH (TCP)
-
-// Rate limiting
-rules->rate_limiter().set_enabled(true);
-rules->rate_limiter().set_rate(1000, 100);  // 1000 PPS, burst 100
-
-// View firewall stats
-auto stats = stack->firewall_stats();
-auto ai_stats = stack->firewall_ai_stats();
+# One-shot stats
+curl http://127.0.0.1:8080/api/v1/stats | python3 -m json.tool
 ```
 
-See [Firewall Guide](docs/api/firewall.md) for details.
+---
+
+## Benchmarks
+
+```bash
+# Build in Release mode
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -DNEUSTACK_ENABLE_AF_XDP=ON \
+    -DNEUSTACK_ENABLE_AI=ON
+cmake --build build -j$(nproc)
+
+# Component micro-benchmarks (5 runs, with statistics)
+python3 scripts/bench/benchmark_runner.py --build-dir build/ --runs 5
+
+# Generate publication-quality figures (PDF + PNG + LaTeX table)
+python3 scripts/bench/plot_results.py --input bench_results/latest/summary.json
+ls bench_results/latest/figures/
+
+# End-to-end throughput: kernel_udp vs raw_socket vs af_xdp (requires root)
+sudo bash scripts/bench/run_throughput_test.sh --duration 10 --runs 3
+```
+
+See [`docs/api/benchmark.md`](docs/api/benchmark.md) for full details and reproduction instructions.
+
+---
 
 ## Testing
 
 ```bash
-cd build
-ctest --output-on-failure
-
-# By category
-ctest -R "unit"         # Unit tests
-ctest -R "Integration"  # Integration tests
-ctest -R "Benchmark"    # Benchmarks
+cd build && ctest --output-on-failure
 ```
 
-| Category | Coverage |
-|----------|----------|
-| **Unit Tests** | Checksum, TCP/IP parsing, congestion control, HTTP parsing, firewall rule engine, rate limiter, security model, telemetry registry, JSON/Prometheus exporters |
-| **Integration Tests** | TCP handshake, HTTP roundtrip, firewall packet filtering, AI Shadow Mode, Firewall E2E (16 cases / 91 assertions) |
-| **Benchmarks** | Checksum throughput, queue performance, TCP throughput, memory pool performance, metrics hotpath |
+| Suite | Tests |
+|-------|-------|
+| Common | Checksum · IP address · Ring buffer · SPSC queue · Memory pool · JSON builder |
+| HAL | Batch device · Ethernet · UMEM · XDP ring · AF_XDP config · BPF object |
+| AI | Feature extraction · NetworkAgent FSM · ONNX model integration |
+| Benchmarks | `bench_afxdp_datapath` (micro) · `bench_e2e_throughput` (E2E) |
+
+---
 
 ## Project Structure
 
 ```
 NeuStack/
 ├── include/neustack/          # Public headers
-│   ├── common/                #   Common utilities
-│   ├── hal/                   #   Hardware Abstraction Layer
-│   ├── net/                   #   Network layer (IPv4, ICMP)
-│   ├── transport/             #   Transport layer (TCP, UDP)
-│   ├── app/                   #   Application layer (HTTP, DNS)
-│   ├── firewall/              #   Firewall engine
-│   ├── metrics/               #   Metrics collection
-│   ├── telemetry/             #   Telemetry & observability
-│   └── ai/                    #   AI inference
-├── src/                       # Source implementations
-├── tools/                     # CLI tools (neustack-stat)
-├── tests/                     # Test code
-├── training/                  # Python training code
-│   ├── orca/                  #   SAC reinforcement learning
+│   ├── hal/                   #   HAL: device.hpp, AF_XDP, UMEM, XDP ring
+│   ├── net/                   #   Network: IPv4, ICMP, ARP
+│   ├── transport/             #   TCP, UDP, packet builders
+│   ├── firewall/              #   FirewallEngine, FirewallAI, RuleEngine
+│   ├── ai/                    #   IntelligencePlane, models, NetworkAgent
+│   ├── metrics/               #   GlobalMetrics, MetricsRegistry, TelemetryAPI
+│   └── neustack.hpp           #   Unified facade
+├── src/                       # Implementations
+├── tests/
+│   ├── unit/                  #   Catch2 unit tests
+│   └── benchmark/             #   bench_afxdp_datapath, bench_e2e_throughput
+├── training/                  # Python AI training pipelines
+│   ├── congestion/            #   Orca (SAC RL)
 │   ├── bandwidth/             #   LSTM bandwidth prediction
-│   ├── anomaly/               #   Traffic anomaly detection
-│   └── security/              #   Security anomaly detection (Deep AE)
-├── models/                    # ONNX models
-├── scripts/                   # Shell scripts
-│   ├── download/              #   Download scripts (ONNX Runtime, Wintun)
-│   ├── python/                #   Python tools (csv_to_dataset, test model gen)
-│   ├── linux/                 #   Linux collection/traffic scripts
-│   ├── mac/                   #   macOS collection/traffic scripts
-│   └── windows/               #   Windows setup (PowerShell)
-├── docker/                    # Docker TUN environment
+│   ├── anomaly/               #   Autoencoder anomaly detection
+│   └── security/              #   Security anomaly detection (MLP)
+├── scripts/
+│   ├── bench/                 #   Benchmark runner, plot generator, E2E test
+│   ├── linux/                 #   Data collection scripts
+│   └── mac/                   #   macOS data collection
+├── tools/
+│   ├── neustack_stat.cpp      #   Live telemetry CLI
+│   └── udp_flood.cpp          #   High-speed UDP packet generator (sendmmsg)
+├── docs/
+│   ├── img/                   #   Architecture + perf diagrams
+│   ├── api/                   #   af-xdp.md, benchmark.md
+│   └── project_whitepaper.md  #   Technical whitepaper
+├── bpf/                       # BPF/XDP programs
 ├── examples/                  # Example programs
-├── docs/                      # Documentation
-│   ├── api/                   #   API reference
-│   └── project_whitepaper.md  #   Whitepaper
-└── cmake/                     # CMake modules
+└── cmake/                     # CMake modules (BPFCompile)
 ```
+
+---
 
 ## Build Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `NEUSTACK_BUILD_TESTS` | ON | Build tests |
-| `NEUSTACK_BUILD_EXAMPLES` | ON | Build examples |
+| `NEUSTACK_BUILD_TESTS` | ON | Build tests and benchmarks |
+| `NEUSTACK_BUILD_EXAMPLES` | ON | Build example programs |
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
-| `NEUSTACK_ENABLE_AI` | OFF | AI congestion control + security anomaly detection |
+| `NEUSTACK_ENABLE_AI` | OFF | AI inference (requires ONNX Runtime) |
+| `NEUSTACK_ENABLE_AF_XDP` | OFF | AF_XDP kernel-bypass backend (Linux; requires libbpf + clang) |
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP: NIC compatibility, modes, configuration, API |
+| [`docs/api/benchmark.md`](docs/api/benchmark.md) | Benchmark framework: usage, results, reproduction |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper |
+
+---
 
 ## License
 

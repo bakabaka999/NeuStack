@@ -54,7 +54,7 @@ Download the pre-built archive for your platform from [GitHub Releases](https://
 ### Archive Contents
 
 ```
-neustack-<platform>-v1.3.0/
+neustack-<platform>-v1.4.0/
 ├── lib/
 │   ├── libneustack_lib.a          # Static library (Unix)
 │   ├── neustack_lib.lib           # Static library (Windows)
@@ -75,10 +75,10 @@ neustack-<platform>-v1.3.0/
 
 ```bash
 # Extract
-tar xzf neustack-linux-x64-v1.3.0.tar.gz
+tar xzf neustack-linux-x64-v1.4.0.tar.gz
 
 # Use in your CMake project
-cmake -B build -DCMAKE_PREFIX_PATH=$(pwd)/neustack-linux-x64-v1.3.0
+cmake -B build -DCMAKE_PREFIX_PATH=$(pwd)/neustack-linux-x64-v1.4.0
 ```
 
 Then in your `CMakeLists.txt`:

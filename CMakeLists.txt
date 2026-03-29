@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(NeuStack
-    VERSION 1.3.0
-    DESCRIPTION "Cross-platform User-space TCP/IP Stack with AI-powered Congestion Control and Intelligent Firewall"
+    VERSION 1.4.0
+    DESCRIPTION "High-performance user-space TCP/IP stack with AI-native congestion control, AF_XDP kernel bypass, and intelligent firewall"
     LANGUAGES CXX
 )
 

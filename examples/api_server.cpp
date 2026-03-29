@@ -44,7 +44,7 @@ int main() {
     srv.get("/api/status", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("application/json")
-            .set_body(R"({"status":"ok","version":"1.3.0"})");
+            .set_body(R"({"status":"ok","version":"1.4.0"})");
     });
 
     // ── GET /api/greet?name=<name> ───────────────────────────────────────────
