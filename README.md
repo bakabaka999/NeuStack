@@ -445,6 +445,23 @@ NeuStack/
 
 ---
 
+## Roadmap
+
+**v1.5 — Near-term**
+
+- [ ] **Native zero-copy benchmark** — reproduce 3.1× send speedup on Intel NIC (i40e / ice / igc) with `force_native_mode=true`
+- [ ] **Web Dashboard** — browser-based observability UI backed by the Telemetry HTTP API
+- [ ] **Multi-queue AF_XDP** — per-core RX/TX queues for multi-threaded packet processing
+- [ ] **AI Benchmark Suite** — latency/throughput profiling of each ONNX model under sustained load
+
+**v2.0 — AI Infra Transport Layer**
+
+- [ ] **AllReduce transport** — Ring/Tree-AllReduce collective communication over NeuStack, targeting distributed AI training (NCCL-style workloads)
+- [ ] **GPU↔NIC zero-copy** — DMA-BUF / GPUDirect RDMA integration, eliminating CPU copies on the training data path
+- [ ] **LLM Agent integration** — natural-language network diagnostics via live Telemetry API, automated anomaly explanation and remediation
+- [ ] **Distributed AI training benchmark** — NeuStack transport vs kernel TCP for AllReduce throughput and latency
+- [ ] **RDMA / RoCE backend** — HAL extension for RDMA-capable NICs
+
 ## License
 
 [MIT License](LICENSE)

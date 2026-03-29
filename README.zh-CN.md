@@ -438,6 +438,27 @@ NeuStack/
 
 ---
 
+## Roadmap
+
+**v1.5 — 近期目标**
+
+- [ ] **原生零拷贝 Benchmark** — 在 Intel NIC（i40e / ice / igc）上复现 3.1× 发送加速，验证 `force_native_mode=true` 效果
+- [ ] **Web Dashboard** — 基于 Telemetry HTTP API 的浏览器可观测性界面
+- [ ] **Multi-queue AF_XDP** — 每核独立 RX/TX 队列，支持多线程包处理
+- [ ] **AI Benchmark Suite** — 各 ONNX 模型在持续负载下的延迟/吞吐 profiling
+
+**v2.0 — AI Infra 传输层**
+
+- [ ] **AllReduce 传输层** — 基于 NeuStack 实现 Ring/Tree-AllReduce 集合通信原语，面向分布式 AI 训练（NCCL 风格工作负载）
+- [ ] **GPU↔NIC 零拷贝** — DMA-BUF / GPUDirect RDMA 集成，消除训练数据路径上的 CPU 拷贝
+- [ ] **LLM Agent 接入** — 自然语言网络诊断，通过 LLM Agent 查询实时 Telemetry API，自动解释异常并给出修复建议
+- [ ] **分布式 AI 训练 Benchmark** — AllReduce 场景下 NeuStack 传输 vs 内核 TCP 的吞吐与延迟对比
+- [ ] **RDMA / RoCE 后端** — HAL 扩展支持 RDMA NIC，实现 RDMA 层内核旁路
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
+---
+
 ## 许可证
 
 [MIT License](LICENSE)
