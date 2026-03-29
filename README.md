@@ -209,6 +209,10 @@ int main() {
 
 ## AI Intelligence Plane
 
+<p align="center">
+  <img src="docs/img/ai_plane.png" alt="NeuStack AI Intelligence Plane" width="900"/>
+</p>
+
 The AI system runs in a **dedicated async thread** (`IntelligencePlane`), completely decoupled from packet processing. It pulls TCP samples from a lock-free ring buffer, runs three ONNX models, feeds results into `NetworkAgent`, and pushes `AIAction` back to the data plane via SPSC queue — zero blocking on the hot path.
 
 ### Models
@@ -231,6 +235,8 @@ The AI system runs in a **dedicated async thread** (`IntelligencePlane`), comple
 ### Firewall AI (separate, synchronous)
 
 Apart from the async `IntelligencePlane`, a second AI model (`SecurityAnomalyModel`, MLP) runs **synchronously on a 1-second timer** in the data plane thread. It scores the traffic using 8 volume-invariant features derived from `SecurityMetrics`, caches the result atomically, and uses the cached score per packet — no per-packet inference overhead.
+
+See [`docs/api/ai-inference.md`](docs/api/ai-inference.md) for model architecture, ONNX configuration, and `NetworkAgent` API. See [`docs/api/ai-training.md`](docs/api/ai-training.md) for training pipelines.
 
 ---
 
@@ -274,6 +280,8 @@ The firewall runs **inline on every packet** in the data plane, before the netwo
 | **Auto Escalation** | N consecutive anomalies auto-disables shadow mode → enforce mode |
 | **API** | `NeuStack::firewall_rules()` facade for programmatic rule management |
 
+See [`docs/api/firewall.md`](docs/api/firewall.md) for full rule engine API, AI anomaly detection configuration, and Shadow Mode details.
+
 ---
 
 ## Telemetry & Observability
@@ -297,6 +305,8 @@ Every data plane layer writes to lock-free atomic counters (`GlobalMetrics`, `Se
 # One-shot stats
 curl http://127.0.0.1:8080/api/v1/stats | python3 -m json.tool
 ```
+
+See [`docs/api/telemetry.md`](docs/api/telemetry.md) for full endpoint reference, Prometheus integration, and `neustack-stat` CLI options.
 
 ---
 
@@ -394,9 +404,15 @@ NeuStack/
 
 | Document | Description |
 |----------|-------------|
+| [`docs/api/core.md`](docs/api/core.md) | Core API: protocol stack, HTTP server/client, DNS, TCP/UDP |
+| [`docs/api/ai-inference.md`](docs/api/ai-inference.md) | AI inference engine, NetworkAgent, ONNX model configuration |
+| [`docs/api/ai-training.md`](docs/api/ai-training.md) | SAC / LSTM / Autoencoder training pipelines |
+| [`docs/api/firewall.md`](docs/api/firewall.md) | Firewall rule engine, AI anomaly detection, Shadow Mode |
+| [`docs/api/telemetry.md`](docs/api/telemetry.md) | Telemetry framework, HTTP endpoints, Prometheus, CLI |
 | [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP: NIC compatibility, modes, configuration, API |
 | [`docs/api/benchmark.md`](docs/api/benchmark.md) | Benchmark framework: usage, results, reproduction |
-| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper |
+| [`docs/api/integration.md`](docs/api/integration.md) | Using NeuStack as a library (CMake, release archives) |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper (v1.4) |
 
 ---
 

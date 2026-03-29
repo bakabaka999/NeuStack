@@ -208,7 +208,7 @@ int main() {
 ## AI 智能面
 
 <p align="center">
-  <img src="docs/img/architecture.png" alt="AI 智能面架构" width="880"/>
+  <img src="docs/img/ai_plane.png" alt="NeuStack AI 智能面" width="900"/>
 </p>
 
 AI 智能面运行在独立的异步线程中，通过无锁 `SPSCQueue<AIAction>` 与数据面通信，不阻塞包处理热路径。
@@ -233,6 +233,8 @@ AI 智能面运行在独立的异步线程中，通过无锁 `SPSCQueue<AIAction
 ### 防火墙 AI（独立，同步）
 
 与异步 `IntelligencePlane` 分离，另有一个 AI 模型（`SecurityAnomalyModel`，MLP）**在数据面线程中以 1 秒定时器同步运行**。它对来自 `SecurityMetrics` 的 8 个体积无关特征打分，原子缓存结果，每包使用缓存分数——无逐包推理开销。
+
+详见 [`docs/api/ai-inference.md`](docs/api/ai-inference.md)：模型架构、ONNX 配置、NetworkAgent API。训练管线见 [`docs/api/ai-training.md`](docs/api/ai-training.md)。
 
 ---
 
@@ -276,6 +278,8 @@ cmake --build build -j$(nproc)
 | **自动升降级** | 连续 N 次异常自动关闭 shadow 模式 → enforce 模式 |
 | **API** | `NeuStack::firewall_rules()` facade，编程式规则管理 |
 
+详见 [`docs/api/firewall.md`](docs/api/firewall.md)：完整规则引擎 API、AI 异常检测配置、Shadow Mode 说明。
+
 ---
 
 ## Telemetry 与可观测性
@@ -300,6 +304,8 @@ cmake --build build -j$(nproc)
 curl http://localhost:9090/api/v1/stats | python3 -m json.tool
 curl http://localhost:9090/metrics
 ```
+
+详见 [`docs/api/telemetry.md`](docs/api/telemetry.md)：完整端点参考、Prometheus 集成、`neustack-stat` CLI 选项。
 
 ---
 
@@ -391,9 +397,15 @@ NeuStack/
 
 | 文档 | 说明 |
 |------|------|
+| [`docs/api/core.md`](docs/api/core.md) | 核心 API：协议栈、HTTP 服务器/客户端、DNS、TCP/UDP |
+| [`docs/api/ai-inference.md`](docs/api/ai-inference.md) | AI 推理引擎、NetworkAgent、ONNX 模型配置 |
+| [`docs/api/ai-training.md`](docs/api/ai-training.md) | SAC / LSTM / Autoencoder 训练管线 |
+| [`docs/api/firewall.md`](docs/api/firewall.md) | 防火墙规则引擎、AI 异常检测、Shadow Mode |
+| [`docs/api/telemetry.md`](docs/api/telemetry.md) | Telemetry 框架、HTTP 端点、Prometheus、CLI |
 | [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP：NIC 兼容性、模式、配置、API |
 | [`docs/api/benchmark.md`](docs/api/benchmark.md) | 基准测试框架：使用方法、结果、复现步骤 |
-| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书 |
+| [`docs/api/integration.md`](docs/api/integration.md) | 将 NeuStack 作为库使用（CMake、release 压缩包） |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书（v1.4） |
 
 ---
 
