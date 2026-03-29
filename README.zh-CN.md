@@ -1,3 +1,4 @@
+<a name="top"></a>
 <h1 align="center">NeuStack</h1>
 
 <p align="center">
@@ -91,6 +92,8 @@ NeuStack 的差异化特性：
 | **零分配热路径** | FixedPool · 包处理循环中无 `new`/`delete` |
 | **跨平台** | macOS（utun） · Linux（TUN/TAP + AF_XDP） · Windows（Wintun） |
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## 系统架构
@@ -104,6 +107,8 @@ NeuStack 将包处理分离为两个平面：
 **数据面**（主线程）：HAL 收包 → FirewallEngine 过滤 → IPv4 路由 → TCP/UDP 处理 → 应用层交付。每一层都向无锁原子指标写入数据。
 
 **AI 智能面**（异步线程）：读取数据面的 `MetricsBuffer<TCPSample>` → 三个 ONNX 模型推理 → `NetworkAgent`（4 状态 FSM）决策 → 通过 `SPSCQueue` 将 `AIAction` 写回数据面。
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 
@@ -123,7 +128,10 @@ NeuStack 将包处理分离为两个平面：
 | UMEM alloc+free（顺序） | **0.46 ns/op** | 接近硬件极限 |
 | TCP `build_header_only()` vs `build()` | 1.9 vs 11.4 ns/op | **6×** |
 
-> **AF_XDP 说明**：所有 E2E 基准在 veth pair 上以 **generic（copy）模式**运行，测试 NIC 为 Realtek r8169，**不支持**原生 XDP。AF_XDP 实现完整支持 Intel NIC（i40e / ice / igc）的原生零拷贝模式，预计可带来 5–10× 额外吞吐提升。
+> [!NOTE]
+> 所有 E2E 基准在 veth pair 上以 **generic（copy）模式**运行，测试 NIC 为 Realtek r8169，**不支持**原生 XDP。AF_XDP 实现完整支持 Intel NIC（i40e / ice / igc）的原生零拷贝模式，预计可带来 5–10× 额外吞吐提升。
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 
@@ -203,6 +211,8 @@ int main() {
 }
 ```
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## AI 智能面
@@ -236,6 +246,8 @@ AI 智能面运行在独立的异步线程中，通过无锁 `SPSCQueue<AIAction
 
 详见 [`docs/api/ai-inference.md`](docs/api/ai-inference.md)：模型架构、ONNX 配置、NetworkAgent API。训练管线见 [`docs/api/ai-training.md`](docs/api/ai-training.md)。
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## AF_XDP 数据路径
@@ -252,7 +264,8 @@ AF_XDP 路径（NeuStack）：
   1 次内存拷贝（generic 模式），批量 syscall
 ```
 
-> **当前状态**：在 **AF_XDP generic（SKB copy）模式**下测试 — 数据包在进入 UMEM 环之前仍经过内核 sk_buff 路径。原因是测试 NIC（Realtek r8169）不支持原生 XDP。实现完整支持 **原生零拷贝模式**（`zero_copy = true`，`force_native_mode = true`），适用于有 XDP 驱动支持的 NIC（Intel i40e / ice / igc / mlx5）。
+> [!NOTE]
+> 在 **AF_XDP generic（SKB copy）模式**下测试 — 数据包在进入 UMEM 环之前仍经过内核 sk_buff 路径。原因是测试 NIC（Realtek r8169）不支持原生 XDP。实现完整支持 **原生零拷贝模式**（`zero_copy = true`，`force_native_mode = true`），适用于有 XDP 驱动支持的 NIC（Intel i40e / ice / igc / mlx5）。
 
 ```bash
 # 构建 AF_XDP 支持
@@ -262,6 +275,8 @@ cmake --build build -j$(nproc)
 ```
 
 详见 [`docs/api/af-xdp.md`](docs/api/af-xdp.md)：NIC 兼容性表、配置选项、批量收发 API。
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 
@@ -279,6 +294,8 @@ cmake --build build -j$(nproc)
 | **API** | `NeuStack::firewall_rules()` facade，编程式规则管理 |
 
 详见 [`docs/api/firewall.md`](docs/api/firewall.md)：完整规则引擎 API、AI 异常检测配置、Shadow Mode 说明。
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 
@@ -307,6 +324,8 @@ curl http://localhost:9090/metrics
 
 详见 [`docs/api/telemetry.md`](docs/api/telemetry.md)：完整端点参考、Prometheus 集成、`neustack-stat` CLI 选项。
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## 基准测试
@@ -331,6 +350,8 @@ sudo bash scripts/bench/run_throughput_test.sh --duration 10 --runs 3
 
 详见 [`docs/api/benchmark.md`](docs/api/benchmark.md)。
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## 测试
@@ -345,6 +366,8 @@ cd build && ctest --output-on-failure
 | HAL | 批量设备 · Ethernet · UMEM · XDP ring · AF_XDP 配置 · BPF 对象 |
 | AI | 特征提取 · NetworkAgent FSM · ONNX 模型集成 |
 | Benchmarks | `bench_afxdp_datapath`（micro） · `bench_e2e_throughput`（E2E） |
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 
@@ -379,6 +402,8 @@ NeuStack/
 └── cmake/                     # CMake 模块（BPFCompile）
 ```
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## 构建选项
@@ -390,6 +415,8 @@ NeuStack/
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
 | `NEUSTACK_ENABLE_AI` | OFF | AI 推理（需要 ONNX Runtime） |
 | `NEUSTACK_ENABLE_AF_XDP` | OFF | AF_XDP kernel-bypass 后端（Linux，需要 libbpf + clang） |
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 
@@ -407,11 +434,15 @@ NeuStack/
 | [`docs/api/integration.md`](docs/api/integration.md) | 将 NeuStack 作为库使用（CMake、release 压缩包） |
 | [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书（v1.4） |
 
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
+
 ---
 
 ## 许可证
 
 [MIT License](LICENSE)
+
+<p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
 ---
 

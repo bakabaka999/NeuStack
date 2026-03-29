@@ -1,3 +1,4 @@
+<a name="top"></a>
 <h1 align="center">NeuStack</h1>
 
 <p align="center">
@@ -93,6 +94,8 @@ Scripts:          ~2,700 lines  —  data collection, benchmarks, environment se
 | **Zero-Allocation Hot Path** | FixedPool · no `new`/`delete` in the packet processing loop |
 | **Cross-Platform** | macOS (utun) · Linux (TUN/TAP + AF_XDP) · Windows (Wintun) |
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## System Architecture
@@ -106,6 +109,8 @@ NeuStack separates packet processing across two planes:
 **Data Plane** (main thread): HAL receives packets → FirewallEngine filters → IPv4 routes → TCP/UDP processes → Application delivers. Every layer writes to lock-free atomic metrics.
 
 **AI Intelligence Plane** (async thread): reads `MetricsBuffer<TCPSample>` from data plane → three ONNX models infer → `NetworkAgent` (4-State FSM) decides → writes `AIAction` back via `SPSCQueue`.
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
@@ -125,7 +130,10 @@ NeuStack separates packet processing across two planes:
 | UMEM alloc+free (sequential) | **0.46 ns/op** | near hardware limit |
 | TCP `build_header_only()` vs `build()` | 1.9 vs 11.4 ns/op | **6×** faster |
 
-> **AF_XDP note**: All E2E benchmarks run in **generic (copy) mode** on veth pairs with a Realtek r8169 NIC, which does **not** support native XDP. The AF_XDP implementation fully supports native zero-copy mode for Intel NICs (i40e / ice / igc), where 5–10× additional throughput gains are expected based on published XDP benchmarks.
+> [!NOTE]
+> All E2E benchmarks run in **generic (copy) mode** on veth pairs with a Realtek r8169 NIC, which does **not** support native XDP. The AF_XDP implementation fully supports native zero-copy mode for Intel NICs (i40e / ice / igc), where 5–10× additional throughput gains are expected based on published XDP benchmarks.
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
@@ -205,6 +213,8 @@ int main() {
 }
 ```
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## AI Intelligence Plane
@@ -238,6 +248,8 @@ Apart from the async `IntelligencePlane`, a second AI model (`SecurityAnomalyMod
 
 See [`docs/api/ai-inference.md`](docs/api/ai-inference.md) for model architecture, ONNX configuration, and `NetworkAgent` API. See [`docs/api/ai-training.md`](docs/api/ai-training.md) for training pipelines.
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## AF_XDP Data Path
@@ -254,7 +266,8 @@ AF_XDP path (NeuStack):
   1 memory copy (generic mode), batch syscall
 ```
 
-> **Current status**: Tested in **AF_XDP generic (SKB copy) mode** — packets still pass through the kernel sk_buff path before entering the UMEM ring. This is because the test NIC (Realtek r8169) does not support native XDP. The implementation fully supports **native zero-copy mode** (`zero_copy = true`, `force_native_mode = true`) for NICs with XDP driver support (Intel i40e / ice / igc / mlx5).
+> [!NOTE]
+> Tested in **AF_XDP generic (SKB copy) mode** — packets still pass through the kernel sk_buff path before entering the UMEM ring. This is because the test NIC (Realtek r8169) does not support native XDP. The implementation fully supports **native zero-copy mode** (`zero_copy = true`, `force_native_mode = true`) for NICs with XDP driver support (Intel i40e / ice / igc / mlx5).
 
 ```bash
 # Build with AF_XDP
@@ -264,6 +277,8 @@ cmake --build build -j$(nproc)
 ```
 
 See [`docs/api/af-xdp.md`](docs/api/af-xdp.md) for NIC compatibility table, configuration options, and the batch recv/send API.
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
@@ -281,6 +296,8 @@ The firewall runs **inline on every packet** in the data plane, before the netwo
 | **API** | `NeuStack::firewall_rules()` facade for programmatic rule management |
 
 See [`docs/api/firewall.md`](docs/api/firewall.md) for full rule engine API, AI anomaly detection configuration, and Shadow Mode details.
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
@@ -308,6 +325,8 @@ curl http://127.0.0.1:8080/api/v1/stats | python3 -m json.tool
 
 See [`docs/api/telemetry.md`](docs/api/telemetry.md) for full endpoint reference, Prometheus integration, and `neustack-stat` CLI options.
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## Benchmarks
@@ -332,6 +351,8 @@ sudo bash scripts/bench/run_throughput_test.sh --duration 10 --runs 3
 
 See [`docs/api/benchmark.md`](docs/api/benchmark.md) for full details and reproduction instructions.
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## Testing
@@ -346,6 +367,8 @@ cd build && ctest --output-on-failure
 | HAL | Batch device · Ethernet · UMEM · XDP ring · AF_XDP config · BPF object |
 | AI | Feature extraction · NetworkAgent FSM · ONNX model integration |
 | Benchmarks | `bench_afxdp_datapath` (micro) · `bench_e2e_throughput` (E2E) |
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
@@ -386,6 +409,8 @@ NeuStack/
 └── cmake/                     # CMake modules (BPFCompile)
 ```
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## Build Options
@@ -397,6 +422,8 @@ NeuStack/
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
 | `NEUSTACK_ENABLE_AI` | OFF | AI inference (requires ONNX Runtime) |
 | `NEUSTACK_ENABLE_AF_XDP` | OFF | AF_XDP kernel-bypass backend (Linux; requires libbpf + clang) |
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
@@ -414,11 +441,15 @@ NeuStack/
 | [`docs/api/integration.md`](docs/api/integration.md) | Using NeuStack as a library (CMake, release archives) |
 | [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper (v1.4) |
 
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
+
 ---
 
 ## License
 
 [MIT License](LICENSE)
+
+<p align="right"><a href="#top">&#8593; Back to top</a></p>
 
 ---
 
