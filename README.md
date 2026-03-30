@@ -17,7 +17,11 @@
 </p>
 
 <p align="center">
-  <b><a href="README.zh-CN.md">中文</a> | English</b>
+  <a href="docs/project_whitepaper.md"><b>Whitepaper</b></a> &nbsp;·&nbsp;
+  <a href="docs/api/"><b>API Docs</b></a> &nbsp;·&nbsp;
+  <a href="docs/api/benchmark.md"><b>Benchmarks</b></a> &nbsp;·&nbsp;
+  <a href="#roadmap"><b>Roadmap</b></a> &nbsp;·&nbsp;
+  <a href="README.zh-CN.md"><b>中文</b></a>
 </p>
 
 <br>

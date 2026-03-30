@@ -7,10 +7,6 @@
 </p>
 
 <p align="center">
-  <sub>完整协议栈（Ethernet → IPv4 → TCP/UDP → HTTP）&nbsp;·&nbsp; AF_XDP 内核旁路 &nbsp;·&nbsp; AI 驱动拥塞控制 &nbsp;·&nbsp; 零分配热路径</sub>
-</p>
-
-<p align="center">
   <a href="https://github.com/bakabaka999/NeuStack/actions"><img src="https://github.com/bakabaka999/NeuStack/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://isocpp.org/"><img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20"></a>
   <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-SAC%20%2F%20LSTM%20%2F%20AE-EE4C2C.svg" alt="PyTorch"></a>
@@ -21,7 +17,11 @@
 </p>
 
 <p align="center">
-  <b>中文 | <a href="README.md">English</a></b>
+  <a href="docs/project_whitepaper.md"><b>白皮书</b></a> &nbsp;·&nbsp;
+  <a href="docs/api/"><b>API 文档</b></a> &nbsp;·&nbsp;
+  <a href="docs/api/benchmark.md"><b>基准测试</b></a> &nbsp;·&nbsp;
+  <a href="#roadmap"><b>Roadmap</b></a> &nbsp;·&nbsp;
+  <a href="README.md"><b>English</b></a>
 </p>
 
 <br>
@@ -315,11 +315,11 @@ cmake --build build -j$(nproc)
 
 ```bash
 # 实时终端仪表盘
-./build/tools/neustack-stat
+./build/tools/neustack-stat --host 127.0.0.1 --port 8080
 
 # 直接查询
-curl http://localhost:9090/api/v1/stats | python3 -m json.tool
-curl http://localhost:9090/metrics
+curl http://127.0.0.1:8080/api/v1/stats | python3 -m json.tool
+curl http://127.0.0.1:8080/metrics
 ```
 
 详见 [`docs/api/telemetry.md`](docs/api/telemetry.md)：完整端点参考、Prometheus 集成、`neustack-stat` CLI 选项。

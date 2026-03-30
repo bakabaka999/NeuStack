@@ -140,7 +140,8 @@ High-speed packet generator using `sendmmsg()` (64 packets per syscall):
 | Raw socket (`AF_PACKET`, TUN-equivalent) | 0.60 | 0.73× |
 | **AF_XDP (generic/SKB)** | **1.18** | **1.45×** |
 
-> **Note:** These results use generic XDP (SKB mode) on a NIC without native XDP support. Native XDP on Intel NICs (i40e/ice/igc) is expected to yield 5–10× additional throughput gains.
+> [!NOTE]
+> These results use generic XDP (SKB mode) on a NIC without native XDP support. Native XDP on Intel NICs (i40e/ice/igc) is expected to yield 5–10× additional throughput gains.
 
 ## Reproducing
 
