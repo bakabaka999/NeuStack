@@ -38,20 +38,30 @@
 
 ## Table of Contents
 
+- [Table of Contents](#table-of-contents)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [System Architecture](#system-architecture)
 - [Performance](#performance)
 - [Quick Start](#quick-start)
+  - [Dependencies](#dependencies)
+  - [One-Command Setup](#one-command-setup)
+  - [Manual Build](#manual-build)
+  - [Recommended First Run](#recommended-first-run)
+  - [Minimal Example](#minimal-example)
 - [AI Intelligence Plane](#ai-intelligence-plane)
-- [AF_XDP Data Path](#afxdp-data-path)
+  - [Models](#models)
+  - [NetworkAgent States](#networkagent-states)
+  - [Firewall AI (separate, synchronous)](#firewall-ai-separate-synchronous)
+- [AF\_XDP Data Path](#af_xdp-data-path)
 - [Firewall](#firewall)
-- [Telemetry & Observability](#telemetry--observability)
+- [Telemetry \& Observability](#telemetry--observability)
 - [Benchmarks](#benchmarks)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [Build Options](#build-options)
 - [Documentation](#documentation)
+- [Roadmap](#roadmap)
 - [License](#license)
 
 ---
