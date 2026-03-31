@@ -101,7 +101,12 @@ void HttpClient::request(uint32_t server_ip, uint16_t port,
 
             // 如果连接关闭时还没收到完整响应
             if (ctx->callback) {
-                if (ctx->parser.state() != HttpParser::State::FirstLine) {
+                if (conn && conn->last_error() != StreamError::None) {
+                    LOG_WARN(HTTP, "client transport closed with error=%u detail=%u",
+                             static_cast<unsigned>(conn->last_error()),
+                             static_cast<unsigned>(conn->last_error_detail()));
+                    ctx->callback(HttpResponse{}, -1);
+                } else if (ctx->parser.state() != HttpParser::State::FirstLine) {
                     // 部分响应，可能服务器没发 Content-Length
                     ctx->callback(ctx->parser.response(), 0);
                 } else {
@@ -112,4 +117,3 @@ void HttpClient::request(uint32_t server_ip, uint16_t port,
         }
     );
 }
-

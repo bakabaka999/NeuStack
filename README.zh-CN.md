@@ -485,8 +485,11 @@ NeuStack/
 - [ ] **Multi-queue AF_XDP** — 每核独立 RX/TX 队列，支持多线程包处理
 - [ ] **AI Benchmark Suite** — 各 ONNX 模型在持续负载下的延迟/吞吐 profiling
 - [ ] **TLS / HTTPS 支持** — 接入成熟 TLS 后端，为客户端/服务端提供安全连接，不自行重复实现 TLS
+- [x] **HTTP chunked 传输支持** — 客户端解析 chunked 响应，服务端对未知长度响应输出标准 chunked 流
 - [ ] **解析器 Fuzz 测试** — 为 HTTP、DNS、IPv4、TCP 热路径增加 libFuzzer 覆盖，并和 sanitizer 联动
-- [ ] **异常路径闭环** — 打通 ICMP unreachable / time exceeded 到 TCP/UDP 消费方的错误传播，并补齐 retransmit telemetry
+- [x] **UDP ICMP 错误传播** — 将 ICMP unreachable / time exceeded 元数据传递到绑定的 UDP 消费方
+- [x] **TCP ICMP 错误传播** — 将 ICMP unreachable / time exceeded 失败传播到 TCP connect 和流关闭消费者
+- [x] **重传 Telemetry** — 通过 `GlobalMetrics` / Telemetry API 导出 TCP retransmit 计数
 
 **v2.0 — AI Infra 传输层**
 

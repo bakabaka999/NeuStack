@@ -38,6 +38,8 @@ public:
 
     uint32_t remote_ip() const override;
     uint16_t remote_port() const override;
+    StreamError last_error() const override;
+    uint8_t last_error_detail() const override;
 
     // 获取底层 TCB（内部使用）
     TCB *tcb() const { return _tcb; }

@@ -127,6 +127,7 @@ private:
     void handle_last_ack(TCB *tcb, const TCPSegment &seg);
     void handle_time_wait(TCB *tcb, const TCPSegment &seg);
     void handle_rst(TCB *tcb, const TCPSegment &seg);
+    void close_with_error(TCB *tcb, StreamError error, uint8_t detail, bool delete_now);
 
 private:
     // ─── 定时器 ───

@@ -14,6 +14,14 @@
 
 namespace neustack {
 
+enum class StreamError : uint8_t {
+    None = 0,
+    Reset,
+    Timeout,
+    ICMPUnreachable,
+    ICMPTimeExceeded,
+};
+
 /**
  * 字节流连接接口
  *
@@ -46,6 +54,16 @@ public:
      * @brief 获取远端端口（可选）
      */
     virtual uint16_t remote_port() const { return 0; }
+
+    /**
+     * @brief 获取最近一次传输层关闭原因
+     */
+    virtual StreamError last_error() const { return StreamError::None; }
+
+    /**
+     * @brief 获取错误细节（如 ICMP code）
+     */
+    virtual uint8_t last_error_detail() const { return 0; }
 };
 
 /**

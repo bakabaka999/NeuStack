@@ -24,6 +24,14 @@ uint16_t TCPStreamConnection::remote_port() const {
     return _tcb->t_tuple.remote_port;
 }
 
+StreamError TCPStreamConnection::last_error() const {
+    return _tcb->last_error;
+}
+
+uint8_t TCPStreamConnection::last_error_detail() const {
+    return _tcb->last_error_detail;
+}
+
 // ============================================================================
 // TCPLayer 实现
 // ============================================================================

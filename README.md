@@ -488,8 +488,11 @@ NeuStack/
 - [ ] **Multi-queue AF_XDP** — per-core RX/TX queues for multi-threaded packet processing
 - [ ] **AI Benchmark Suite** — latency/throughput profiling of each ONNX model under sustained load
 - [ ] **TLS / HTTPS support** — integrate a mature TLS backend for secure client/server connections without reimplementing TLS in-house
+- [x] **HTTP chunked transfer support** — client parser consumes chunked responses; server emits standards-compliant chunked streams for unknown-size bodies
 - [ ] **Parser fuzzing** — add libFuzzer-based coverage for HTTP, DNS, IPv4, and TCP parsing hot paths with sanitizer integration
-- [ ] **Exception-path closure** — propagate ICMP unreachable / time-exceeded errors to TCP/UDP consumers and complete retransmit telemetry
+- [x] **UDP ICMP error propagation** — deliver ICMP unreachable / time-exceeded metadata to bound UDP consumers
+- [x] **TCP ICMP error propagation** — surface ICMP unreachable / time-exceeded failures to TCP connect and stream-close consumers
+- [x] **Retransmit telemetry** — export TCP retransmit counters through `GlobalMetrics` / Telemetry API
 
 **v2.0 — AI Infra Transport Layer**
 

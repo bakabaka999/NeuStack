@@ -11,6 +11,7 @@
 #include <list>
 
 #include "neustack/transport/tcp_state.hpp"
+#include "neustack/transport/stream.hpp"
 #include "neustack/common/isn_generator.hpp"
 #include "neustack/common/ring_buffer.hpp"
 
@@ -248,6 +249,10 @@ struct TCB {
     TCPConnectCallback on_connect;
     TCPReceiveCallback on_receive;
     TCPCloseCallback   on_close;
+
+    // ─── 异常关闭状态 ───
+    StreamError last_error = StreamError::None;
+    uint8_t last_error_detail = 0;
 
     // ─── 时间戳 ───
     std::chrono::steady_clock::time_point last_activity;
