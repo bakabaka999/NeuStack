@@ -624,7 +624,7 @@ static void print_overview(const JsonReader& traffic,
     printf("%s██║╚██╗██║██╔══╝  ██║   ██║╚════██║   ██║   ██╔══██║██║     ██╔═██╗ %s\n", ansi::green(), ansi::clr());
     printf("%s██║ ╚████║███████╗╚██████╔╝███████║   ██║   ██║  ██║╚██████╗██║  ██╗%s\n", ansi::magenta(), ansi::clr());
     printf("%s╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝%s\n", ansi::cyan(), ansi::clr());
-    printf("%s  User-space TCP/IP Stack  %s%sv1.4.0  •  github.com/bakabaka999/NeuStack%s\n", 
+    printf("%s  User-space TCP/IP Stack  %s%sv1.5.0  •  github.com/bakabaka999/NeuStack%s\n", 
            ansi::dim(), ansi::reset(), ansi::dim(), ansi::clr());
     printf("\n%s\n", ansi::clr());
 

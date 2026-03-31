@@ -470,7 +470,7 @@ NeuStack/
 | [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP：NIC 兼容性、模式、配置、API |
 | [`docs/api/benchmark.md`](docs/api/benchmark.md) | 基准测试框架：使用方法、结果、复现步骤 |
 | [`docs/api/integration.md`](docs/api/integration.md) | 将 NeuStack 作为库使用（CMake、release 压缩包） |
-| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书（v1.4） |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书（v1.5） |
 
 <p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 

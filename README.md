@@ -473,7 +473,7 @@ NeuStack/
 | [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP: NIC compatibility, modes, configuration, API |
 | [`docs/api/benchmark.md`](docs/api/benchmark.md) | Benchmark framework: usage, results, reproduction |
 | [`docs/api/integration.md`](docs/api/integration.md) | Using NeuStack as a library (CMake, release archives) |
-| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper (v1.4) |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper (v1.5) |
 
 <p align="right"><a href="#top">&#8593; Back to top</a></p>
 
