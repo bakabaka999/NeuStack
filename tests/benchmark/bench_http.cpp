@@ -34,7 +34,7 @@ void bench_request_parse() {
     std::string request = 
         "GET /api/data?id=123 HTTP/1.1\r\n"
         "Host: example.com\r\n"
-        "User-Agent: NeuStack/1.2\r\n"
+        "User-Agent: NeuStack/1.4\r\n"
         "Accept: application/json\r\n"
         "Connection: keep-alive\r\n"
         "\r\n";
@@ -105,7 +105,7 @@ void bench_response_serialize() {
     
     resp.status = HttpStatus::OK;
     resp.content_type("application/json");
-    resp.set_header("Server", "NeuStack/1.2");
+    resp.set_header("Server", "NeuStack/1.4");
     resp.set_header("Connection", "keep-alive");
     resp.set_body(body);
 

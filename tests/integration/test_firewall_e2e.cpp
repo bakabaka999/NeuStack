@@ -2,7 +2,7 @@
  * 端到端测试：防火墙全功能验证
  *
  * 模拟真实流量场景，完整验证防火墙从包解析 → 规则检查 → AI 检测 → 决策的全流程。
- * 覆盖 v1.2 全部功能：
+ * 覆盖当前防火墙完整功能：
  *   1. 基础包过滤（黑白名单、端口规则）
  *   2. 限速（Token Bucket + EWMA）
  *   3. AI 异常检测（Shadow Mode / Enforce Mode）
@@ -924,7 +924,7 @@ int main() {
 
     std::printf("============================================\n");
     std::printf("  NeuStack Firewall End-to-End Test Suite\n");
-    std::printf("  v1.2 Full Feature Coverage\n");
+    std::printf("  Full Feature Coverage\n");
     std::printf("============================================\n");
 
     test_rule_pipeline_priority();    //  1. 规则管线优先级
