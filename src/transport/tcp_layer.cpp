@@ -55,6 +55,10 @@ void TCPLayer::on_timer() {
     process_ai_actions();
 }
 
+void TCPLayer::handle_icmp_error(const ICMPErrorInfo &error) {
+    _tcp_mgr.on_icmp_error(error);
+}
+
 #ifdef NEUSTACK_AI_ENABLED
 void TCPLayer::enable_ai(const IntelligencePlaneConfig& config) {
     if (_ai) {

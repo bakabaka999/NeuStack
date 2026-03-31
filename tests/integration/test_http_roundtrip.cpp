@@ -19,6 +19,7 @@
 #include <vector>
 #include <queue>
 #include <string>
+#include <utility>
 
 using namespace neustack;
 
@@ -66,6 +67,29 @@ static void transfer_packets(MockDevice& from, IPv4Layer& to_ip) {
     }
 }
 
+class ScriptedChunkedResponse : public IChunkedResponse {
+public:
+    explicit ScriptedChunkedResponse(std::vector<std::string> chunks)
+        : _chunks(std::move(chunks)) {}
+
+    std::string next_chunk(size_t /*chunk_size*/) override {
+        if (_index >= _chunks.size()) return "";
+        return _chunks[_index++];
+    }
+
+    bool has_more() const override {
+        return _index < _chunks.size();
+    }
+
+    std::string content_type() const override {
+        return "text/plain";
+    }
+
+private:
+    std::vector<std::string> _chunks;
+    size_t _index = 0;
+};
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -109,6 +133,11 @@ int main() {
             .set_body("path=" + req.path);
     });
 
+    http_server.get_chunked("/stream", [](const HttpRequest&) {
+        return std::make_unique<ScriptedChunkedResponse>(
+            std::vector<std::string>{"Hello", " ", "chunked"});
+    });
+
     http_server.listen(80);
 
     // --- 3. HTTP Client 发起请求 ---
@@ -117,6 +146,8 @@ int main() {
     bool callback_called = false;
     bool request_success = false;
     std::string response_body;
+    bool chunked_callback_called = false;
+    bool chunked_success = false;
 
     http_client.get(server_addr, 80, "/api/data",
         [&](const HttpResponse& resp, int err) {
@@ -131,6 +162,20 @@ int main() {
         }
     );
 
+    http_client.get(server_addr, 80, "/stream",
+        [&](const HttpResponse& resp, int err) {
+            chunked_callback_called = true;
+            if (err != 0) return;
+
+            if (resp.status == HttpStatus::OK &&
+                resp.body == "Hello chunked" &&
+                resp.headers.count("Transfer-Encoding") == 1 &&
+                resp.headers.at("Transfer-Encoding")[0] == "chunked") {
+                chunked_success = true;
+            }
+        }
+    );
+
     // --- 4. 事件驱动循环 ---
     for (int tick = 0; tick < 500; ++tick) {
         transfer_packets(client_dev, server_ip);
@@ -141,7 +186,7 @@ int main() {
 
         http_server.poll();
 
-        if (request_success) break;
+        if (request_success && chunked_success) break;
     }
 
     // --- 5. 验证 ---
@@ -158,6 +203,8 @@ int main() {
     check(handler_called, "Server handler was called");
     check(callback_called, "Client callback was called");
     check(request_success, "Response body contains expected data");
+    check(chunked_callback_called, "Chunked route callback was called");
+    check(chunked_success, "Chunked response was framed and parsed correctly");
 
     std::printf("\n%s\n", failures == 0
         ? "=== ALL PASSED ==="

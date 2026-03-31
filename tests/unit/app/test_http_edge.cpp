@@ -194,21 +194,62 @@ TEST_CASE("HTTP Edge: Response status code boundary", "[app][http][edge]") {
 
 TEST_CASE("HTTP Edge: Chunked transfer encoding", "[app][http][edge]") {
     HttpResponseParser parser;
-    SECTION("响应带 Transfer-Encoding: chunked 且有 Content-Length 触发 body 状态") {
-        // chunked 检测发生在 headers 解析完、进入 Body 状态后
-        // 需要 Content-Length 让状态进入 Body，才会触发 chunked 错误
-        std::string data = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 10\r\n\r\n";
+    SECTION("响应带 Transfer-Encoding: chunked 时按 chunk 解析") {
+        std::string data =
+            "HTTP/1.1 200 OK\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+            "4\r\nWiki\r\n"
+            "5\r\npedia\r\n"
+            "0\r\n\r\n";
         parser.feed(reinterpret_cast<const uint8_t*>(data.data()), data.size());
-        CHECK(parser.has_error());
-        CHECK(parser.error() == "Chunked transfer not implemented");
+        REQUIRE(parser.is_complete());
+        CHECK(parser.response().body == "Wikipedia");
     }
 
-    SECTION("无 Content-Length 的 chunked 响应直接完成") {
-        // 没有 Content-Length 时，parse_headers 进入 Complete，不触发 chunked 检测
-        std::string data = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+    SECTION("chunked 优先于 Content-Length") {
+        std::string data =
+            "HTTP/1.1 200 OK\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "Content-Length: 999\r\n"
+            "\r\n"
+            "3\r\nabc\r\n"
+            "0\r\n\r\n";
         parser.feed(reinterpret_cast<const uint8_t*>(data.data()), data.size());
-        CHECK(parser.is_complete());
-        CHECK_FALSE(parser.has_error());
+        REQUIRE(parser.is_complete());
+        CHECK(parser.response().body == "abc");
+    }
+
+    SECTION("逐段 feed 直到最后一个 chunk 才完成") {
+        std::string headers = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+        std::string chunk1 = "5\r\nhello\r\n";
+        std::string chunk2 = "6\r\n world\r\n";
+        std::string end = "0\r\n\r\n";
+
+        parser.feed(reinterpret_cast<const uint8_t*>(headers.data()), headers.size());
+        CHECK_FALSE(parser.is_complete());
+
+        parser.feed(reinterpret_cast<const uint8_t*>(chunk1.data()), chunk1.size());
+        CHECK_FALSE(parser.is_complete());
+
+        parser.feed(reinterpret_cast<const uint8_t*>(chunk2.data()), chunk2.size());
+        CHECK_FALSE(parser.is_complete());
+
+        parser.feed(reinterpret_cast<const uint8_t*>(end.data()), end.size());
+        REQUIRE(parser.is_complete());
+        CHECK(parser.response().body == "hello world");
+    }
+
+    SECTION("非法 chunk size 报错") {
+        std::string data =
+            "HTTP/1.1 200 OK\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+            "ZZ\r\n"
+            "hello\r\n";
+        parser.feed(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+        CHECK(parser.has_error());
+        CHECK(parser.error() == "Invalid chunk size");
     }
 }
 

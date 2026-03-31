@@ -31,8 +31,8 @@ void UDPLayer::handle(const IPv4Packet &pkt) {
     auto it = _sockets.find(datagram->dst_port);
     if (it != _sockets.end()) {
         // 调用回调函数
-        it->second(datagram->src_addr, datagram->src_port,
-                   datagram->data, datagram->data_length);
+        it->second.on_receive(datagram->src_addr, datagram->src_port,
+                              datagram->data, datagram->data_length);
     } else {
         // 端口未绑定，发送 ICMP Port Unreachable
         LOG_DEBUG(UDP, "port %u not bound, sending ICMP Port Unreachable", datagram->dst_port);
@@ -160,7 +160,10 @@ uint16_t UDPLayer::bind(uint16_t port, UDPReceiveCallback callback) {
         return 0;
     }
 
-    _sockets[port] = std::move(callback);
+    _sockets[port] = BoundSocket{
+        .on_receive = std::move(callback),
+        .on_error = nullptr
+    };
     LOG_INFO(UDP, "bound to port %u", port);
     return port;
 }
@@ -170,6 +173,24 @@ void UDPLayer::unbind(uint16_t port) {
     if (it != _sockets.end()) {
         _sockets.erase(it);
         LOG_INFO(UDP, "unbound port %u", port);
+    }
+}
+
+void UDPLayer::set_error_callback(uint16_t port, UDPErrorCallback callback) {
+    auto it = _sockets.find(port);
+    if (it != _sockets.end()) {
+        it->second.on_error = std::move(callback);
+    }
+}
+
+void UDPLayer::handle_icmp_error(const ICMPErrorInfo &error) {
+    auto it = _sockets.find(error.local_port);
+    if (it == _sockets.end()) {
+        return;
+    }
+
+    if (it->second.on_error) {
+        it->second.on_error(error);
     }
 }
 

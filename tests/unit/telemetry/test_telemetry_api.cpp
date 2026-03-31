@@ -137,6 +137,7 @@ TEST_CASE("TelemetryAPI: TCP stats from GlobalMetrics", "[telemetry][api]") {
     env.gm.conn_established.store(100, std::memory_order_relaxed);
     env.gm.conn_reset.store(5, std::memory_order_relaxed);
     env.gm.conn_timeout.store(2, std::memory_order_relaxed);
+    env.gm.total_retransmits.store(9, std::memory_order_relaxed);
 
     auto tcp = env.api->tcp_stats();
 
@@ -144,6 +145,7 @@ TEST_CASE("TelemetryAPI: TCP stats from GlobalMetrics", "[telemetry][api]") {
     CHECK(tcp.total_established == 100);
     CHECK(tcp.total_reset == 5);
     CHECK(tcp.total_timeout == 2);
+    CHECK(tcp.total_retransmits == 9);
 }
 
 TEST_CASE("TelemetryAPI: TCP RTT from Histogram", "[telemetry][api]") {

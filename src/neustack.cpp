@@ -104,6 +104,19 @@ struct NeuStack::Impl {
         tcp->set_default_options(TCPOptions::high_throughput());
         ip->register_handler(static_cast<uint8_t>(IPProtocol::TCP), tcp.get());
 
+        if (icmp && udp) {
+            icmp->set_error_callback(static_cast<uint8_t>(IPProtocol::UDP),
+                                     [this](const ICMPErrorInfo &error) {
+                                         udp->handle_icmp_error(error);
+                                     });
+        }
+        if (icmp) {
+            icmp->set_error_callback(static_cast<uint8_t>(IPProtocol::TCP),
+                                     [this](const ICMPErrorInfo &error) {
+                                         tcp->handle_icmp_error(error);
+                                     });
+        }
+
         // 5. 应用层
         http_server = std::make_unique<HttpServer>(*tcp);
         http_client = std::make_unique<HttpClient>(*tcp);

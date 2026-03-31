@@ -1,4 +1,5 @@
 #include "neustack/app/dns_client.hpp"
+#include "neustack/net/icmp.hpp"
 #include "neustack/common/log.hpp"
 #include <cstring>
 #include <random>
@@ -15,6 +16,9 @@ bool DNSClient::init() {
         on_receive(src_ip, src_port, data, len); 
     };
     _udp.bind(_local_port, udp_callback);
+    _udp.set_error_callback(_local_port, [this](const ICMPErrorInfo &error) {
+        on_error(error);
+    });
 
     LOG_INFO(DNS, "DNS client initialized, local port %u", _local_port);
     return true;
@@ -102,6 +106,25 @@ void DNSClient::on_timer() {
             it++;
         }
     }
+}
+
+void DNSClient::on_error(const ICMPErrorInfo &error) {
+    if (error.remote_ip != _dns_server || error.remote_port != 53) {
+        return;
+    }
+
+    LOG_WARN(DNS, "ICMP error for DNS socket: type=%u code=%u from %u.%u.%u.%u",
+             static_cast<unsigned>(error.type),
+             static_cast<unsigned>(error.code),
+             (error.reporter_ip >> 24) & 0xff,
+             (error.reporter_ip >> 16) & 0xff,
+             (error.reporter_ip >> 8) & 0xff,
+             error.reporter_ip & 0xff);
+
+    for (auto &entry : _pending) {
+        entry.second.callback(std::nullopt);
+    }
+    _pending.clear();
 }
 
 std::vector<uint8_t> DNSClient::build_query(uint16_t id,

@@ -21,6 +21,8 @@
 
 namespace neustack {
 
+struct ICMPErrorInfo;
+
 // ============================================================================
 // TCPStreamConnection - TCP 连接的 IStreamConnection 适配器
 // ============================================================================
@@ -167,6 +169,7 @@ public:
      * @brief 获取连接管理器引用 (Telemetry API 用)
      */
     TCPConnectionManager& connection_manager() { return _tcp_mgr; }
+    void handle_icmp_error(const ICMPErrorInfo &error);
 
 private:
     friend class TCPStreamConnection;  // 允许访问 _tcp_mgr

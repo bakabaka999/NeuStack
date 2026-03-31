@@ -141,6 +141,7 @@ private:
         // 流式响应
         std::unique_ptr<IChunkedResponse> chunked_generator;
         bool chunked_header_sent = false;
+        bool chunked_transfer_encoding = false;
     };
     std::unordered_map<IStreamConnection *, ConnectionState> _connections;
 

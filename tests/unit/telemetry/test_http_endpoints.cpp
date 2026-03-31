@@ -87,10 +87,12 @@ TEST_CASE("endpoint data: tcp stats JSON structure is valid", "[http_endpoints][
     EndpointFixture fix;
     fix.gm.active_connections.store(5,  std::memory_order_relaxed);
     fix.gm.conn_established.store(100,  std::memory_order_relaxed);
+    fix.gm.total_retransmits.store(7,   std::memory_order_relaxed);
 
     auto t = fix.api.tcp_stats();
     CHECK(t.active_connections == 5);
     CHECK(t.total_established  == 100);
+    CHECK(t.total_retransmits  == 7);
 
     JsonBuilder b(false, 512);
     b.begin_object();

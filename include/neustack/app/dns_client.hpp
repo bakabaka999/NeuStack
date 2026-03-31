@@ -142,6 +142,8 @@ public:
     bool init();
 
 private:
+    void on_error(const ICMPErrorInfo &error);
+
     // 构建查询报文
     std::vector<uint8_t> build_query(uint16_t id, const std::string &hostname, DNSType type);
 

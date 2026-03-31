@@ -65,10 +65,12 @@ neustack_add_test(test_tcp_orca    unit/transport/test_tcp_orca.cpp)
 neustack_add_test(test_tcp_builder unit/transport/test_tcp_builder.cpp)
 neustack_add_test(test_tcp_sample  unit/transport/test_tcp_sample.cpp)
 neustack_add_test(test_tcp_edge    unit/transport/test_tcp_edge.cpp)
+neustack_add_test(test_tcp_exception unit/transport/test_tcp_exception.cpp)
 neustack_add_test(test_udp_edge    unit/transport/test_udp_edge.cpp)
 
 # --- 网络层测试 (net/) ---
 neustack_add_test(test_ip_edge     unit/net/test_ip_edge.cpp)
+neustack_add_test(test_icmp        unit/net/test_icmp.cpp)
 
 # --- 应用层测试 (app/) ---
 neustack_add_test(test_http_types  unit/app/test_http_types.cpp)

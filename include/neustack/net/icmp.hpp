@@ -7,6 +7,7 @@
 #include "neustack/net/ipv4.hpp"
 
 #include <functional>
+#include <unordered_map>
 
 namespace neustack {
 
@@ -63,10 +64,22 @@ static_assert(sizeof(ICMPHeader) == 4, "ICMPHeader must be 4 bytes");
 static_assert(sizeof(ICMPEcho) == 4, "ICMPEcho must be 4 bytes");
 static_assert(sizeof(ICMPError) == 4, "ICMPError must be 4 bytes");
 
+struct ICMPErrorInfo {
+    ICMPType type;
+    uint8_t code;
+    uint32_t reporter_ip;
+    uint32_t local_ip;
+    uint32_t remote_ip;
+    uint8_t protocol;
+    uint16_t local_port;
+    uint16_t remote_port;
+};
+
 class ICMPHandler : public IProtocolHandler {
 public:
     // reply 回调: (src_ip, identifier, sequence, rtt_us)
     using EchoReplyCallback = std::function<void(uint32_t, uint16_t, uint16_t, uint32_t)>;
+    using ErrorCallback = std::function<void(const ICMPErrorInfo&)>;
 
     explicit ICMPHandler(IPv4Layer &ip_layer) : _ip_layer(ip_layer) {}
 
@@ -100,10 +113,14 @@ public:
      *           rtt_us 为 0 表示无法计算（未记录发送时间）
      */
     void set_echo_reply_callback(EchoReplyCallback cb) { _reply_cb = std::move(cb); }
+    void set_error_callback(uint8_t protocol, ErrorCallback cb) {
+        _error_callbacks[protocol] = std::move(cb);
+    }
 
 private:
     void handle_echo_request(const IPv4Packet &pkt);
     void handle_echo_reply(const IPv4Packet &pkt);
+    bool parse_error_info(const IPv4Packet &pkt, ICMPErrorInfo &info) const;
 
     void send_error(uint8_t type, uint8_t code,
                     uint32_t extra, // unused/mtu字段
@@ -111,6 +128,7 @@ private:
 
     IPv4Layer &_ip_layer;
     EchoReplyCallback _reply_cb;
+    std::unordered_map<uint8_t, ErrorCallback> _error_callbacks;
 };
 
 } // namespace neustack

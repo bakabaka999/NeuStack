@@ -1,6 +1,7 @@
 #include "neustack/transport/tcp_connection.hpp"
 #include "neustack/common/log.hpp"
 #include "neustack/common/ip_addr.hpp"
+#include "neustack/net/icmp.hpp"
 #include "neustack/transport/tcp_reno.hpp"
 #include "neustack/transport/tcp_cubic.hpp"
 #include "neustack/transport/tcp_orca.hpp"
@@ -311,7 +312,7 @@ void TCPConnectionManager::on_timer() {
     auto now = std::chrono::steady_clock::now();
 
     // 收集需要删除的连接（超过最大重传次数）
-    std::vector<TCPTuple> to_delete;
+    std::vector<TCB *> to_delete;
 
     // 检查所有连接的重传队列
     for (auto& [tuple, tcb] : _connections) {
@@ -319,7 +320,7 @@ void TCPConnectionManager::on_timer() {
 
         // 如果连接已经标记为 CLOSED（超过最大重传），加入删除列表
         if (tcb->state == TCPState::CLOSED) {
-            to_delete.push_back(tuple);
+            to_delete.push_back(tcb.get());
             continue;
         }
 
@@ -330,8 +331,8 @@ void TCPConnectionManager::on_timer() {
     }
 
     // 删除已关闭的连接
-    for (const auto& tuple : to_delete) {
-        _connections.erase(tuple);
+    for (TCB *tcb : to_delete) {
+        delete_tcb(tcb);
     }
 
     // 处理 TIME_WAIT 超时
@@ -346,6 +347,30 @@ void TCPConnectionManager::on_timer() {
         } else {
             it++;
         }
+    }
+}
+
+void TCPConnectionManager::on_icmp_error(const ICMPErrorInfo &error) {
+    TCPTuple tuple{error.local_ip, error.remote_ip, error.local_port, error.remote_port};
+    TCB *tcb = find_tcb(tuple);
+    if (!tcb) {
+        return;
+    }
+
+    LOG_INFO(TCP, "ICMP error %u/%u for %s:%u -> %s:%u in state %s",
+             static_cast<unsigned>(error.type),
+             static_cast<unsigned>(error.code),
+             ip_to_string(error.local_ip).c_str(), error.local_port,
+             ip_to_string(error.remote_ip).c_str(), error.remote_port,
+             tcp_state_name(tcb->state));
+
+    if (tcb->state == TCPState::SYN_SENT ||
+        (tcb->state == TCPState::SYN_RCVD && !tcb->passive_open)) {
+        if (tcb->on_connect) {
+            tcb->on_connect(tcb, -1);
+        }
+        tcb->state = TCPState::CLOSED;
+        delete_tcb(tcb);
     }
 }
 
@@ -1244,8 +1269,24 @@ void TCPConnectionManager::check_retransmit(TCB *tcb, std::chrono::steady_clock:
     // 检查是否超过了最大重传次数
     if (entry.retransmit_count > tcb->options.max_retransmit) {
         LOG_WARN(TCP, "Max retransmit reached, closing connection");
-        // 通知应用层，关闭连接
-        if (tcb->on_close) {
+        global_metrics().conn_timeout.fetch_add(1, std::memory_order_relaxed);
+
+        if (tcb->state == TCPState::ESTABLISHED ||
+            tcb->state == TCPState::FIN_WAIT_1 ||
+            tcb->state == TCPState::FIN_WAIT_2 ||
+            tcb->state == TCPState::CLOSE_WAIT ||
+            tcb->state == TCPState::CLOSING ||
+            tcb->state == TCPState::LAST_ACK ||
+            tcb->state == TCPState::TIME_WAIT) {
+            global_metrics().active_connections.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        if (tcb->state == TCPState::SYN_SENT ||
+            (tcb->state == TCPState::SYN_RCVD && !tcb->passive_open)) {
+            if (tcb->on_connect) {
+                tcb->on_connect(tcb, -1);
+            }
+        } else if (tcb->on_close) {
             tcb->on_close(tcb);
         }
         tcb->state = TCPState::CLOSED;
@@ -1270,6 +1311,7 @@ void TCPConnectionManager::check_retransmit(TCB *tcb, std::chrono::steady_clock:
     // 注意：重传不能使用 send_segment（会更新 snd_nxt 和重传队列）
     // 使用 raw_send 直接发送，只发送最多一个 MSS
     if (entry.data_len > 0) { // 数据重传
+        global_metrics().total_retransmits.fetch_add(1, std::memory_order_relaxed);
         size_t retransmit_len = std::min(entry.data_len,
                                           static_cast<size_t>(tcb->options.mss));
         raw_send(tcb, TCPFlags::ACK | TCPFlags::PSH,
@@ -1285,6 +1327,7 @@ void TCPConnectionManager::check_retransmit(TCB *tcb, std::chrono::steady_clock:
             flags = TCPFlags::FIN | TCPFlags::ACK;
         }
         if (flags) {
+            global_metrics().total_retransmits.fetch_add(1, std::memory_order_relaxed);
             raw_send(tcb, flags, entry.seq_start);
         }
     }
@@ -1325,6 +1368,7 @@ void TCPConnectionManager::check_dup_ack(TCB *tcb, uint32_t ack_num) {
             // 注意：只重传最多一个 MSS 的数据
             auto &entry = tcb->retransmit_queue.front();
             if (entry.data_len > 0) {
+                global_metrics().total_retransmits.fetch_add(1, std::memory_order_relaxed);
                 size_t retransmit_len = std::min(entry.data_len,
                                                   static_cast<size_t>(tcb->options.mss));
                 raw_send(tcb, TCPFlags::ACK, entry.seq_start,
@@ -1605,4 +1649,3 @@ void TCPConnectionManager::check_delayed_ack(TCB *tcb, std::chrono::steady_clock
         tcb->delayed_ack_pending = false;
     }
 }
-
