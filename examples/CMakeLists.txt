@@ -42,6 +42,12 @@ target_link_libraries(udp_example PRIVATE neustack_lib)
 add_executable(neustack_demo neustack_demo.cpp)
 target_link_libraries(neustack_demo PRIVATE neustack_lib)
 
+# AF_XDP test (Linux + AF_XDP only)
+if(NEUSTACK_PLATFORM_LINUX AND NEUSTACK_ENABLE_AF_XDP AND NEUSTACK_BPF_SUPPORTED)
+    add_executable(afxdp_test afxdp_test.cpp)
+    target_link_libraries(afxdp_test PRIVATE neustack_lib)
+endif()
+
 # RPATH for ONNX Runtime (demo links neustack_lib which may use ONNX)
 if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
     if(APPLE)

@@ -17,21 +17,25 @@ namespace neustack {
  * 注意: 无竞争的 atomic increment 开销极小（≈ 普通 increment），
  * 因为只有一个写者，cache line 不会 bouncing。
  */
-struct GlobalMetrics {
-    // ─── 包统计 ───
+struct alignas(64) GlobalMetrics {
+    // ─── 热路径: 每个包都更新 (IO 线程写，独占 cache line) ───
     std::atomic<uint64_t> packets_rx{0};
     std::atomic<uint64_t> packets_tx{0};
     std::atomic<uint64_t> bytes_rx{0};
     std::atomic<uint64_t> bytes_tx{0};
 
-    // ─── TCP 标志统计 (异常检测核心) ───
+    char _pad_hot[64 - 4 * sizeof(std::atomic<uint64_t>)];
+
+    // ─── 温路径: TCP 包才更新 ───
     std::atomic<uint64_t> syn_received{0};
     std::atomic<uint64_t> syn_ack_sent{0};
     std::atomic<uint64_t> rst_received{0};
     std::atomic<uint64_t> rst_sent{0};
     std::atomic<uint64_t> fin_received{0};
 
-    // ─── 连接统计 ───
+    char _pad_warm[64 - 5 * sizeof(std::atomic<uint64_t>)];
+
+    // ─── 冷路径: 连接事件才更新 (Telemetry 读，独占 cache line) ───
     std::atomic<uint32_t> active_connections{0};
     std::atomic<uint64_t> conn_established{0};
     std::atomic<uint64_t> conn_closed{0};

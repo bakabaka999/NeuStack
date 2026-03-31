@@ -31,6 +31,11 @@ public:
     // 返回构建的长度，-1表示失败
     ssize_t build(uint8_t *buffer, size_t buffer_len) const;
 
+    // 只写 TCP header 到 buffer，不拷贝 payload
+    // payload 必须已在 buffer + header_len 位置
+    // 返回 header 长度 (20)，-1表示失败
+    ssize_t build_header_only(uint8_t *buffer, size_t buffer_len) const;
+
     // 计算并填充校验和
     static void fill_checksum(uint8_t *tcp_data, size_t tcp_len,
                               uint32_t src_ip, uint32_t dst_ip);

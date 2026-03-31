@@ -11,7 +11,7 @@ set -e
 
 VERSION="1.17.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEST_DIR="$PROJECT_ROOT/third_party/onnxruntime"
 
 echo "ONNX Runtime Downloader"

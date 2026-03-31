@@ -1,21 +1,21 @@
 # NeuStack Core API Reference
 
-This document describes the NeuStack core protocol stack API.
+This document describes the current public C++ facade exposed by `include/neustack/neustack.hpp`.
 
 ## Table of Contents
 
-- [NeuStack](#neustack)
+- [NeuStack Facade](#neustack-facade)
 - [HTTP Server](#http-server)
 - [HTTP Client](#http-client)
 - [DNS Client](#dns-client)
 - [TCP Layer](#tcp-layer)
 - [Configuration Options](#configuration-options)
+- [Utility Functions](#utility-functions)
+- [Threading Model](#threading-model)
 
 ---
 
-## NeuStack
-
-The main protocol stack class, providing a unified interface.
+## NeuStack Facade
 
 ### Header File
 
@@ -26,91 +26,131 @@ The main protocol stack class, providing a unified interface.
 ### Creating an Instance
 
 ```cpp
-// 默认配置
+using namespace neustack;
+
+// Default configuration
 auto stack = NeuStack::create();
 
-// 自定义配置
-NeuStackConfig config;
-config.local_ip = ip_from_string("192.168.100.2");
-config.gateway_ip = ip_from_string("192.168.100.1");
-config.device_name = "utun4";
+// Custom configuration
+StackConfig config;
+config.local_ip = "192.168.100.2";
+config.dns_server = ip_from_string("8.8.8.8");
+config.device_type = "tun";      // or "af_xdp" on Linux
+config.device_ifname = "";       // NIC name for AF_XDP
+config.firewall_shadow_mode = true;
+config.orca_model_path = "models/orca_actor.onnx";
+config.bandwidth_model_path = "models/bandwidth_predictor.onnx";
+config.anomaly_model_path = "models/anomaly_detector.onnx";
+
 auto stack = NeuStack::create(config);
+if (!stack) {
+    return 1;
+}
 ```
 
-### Main Methods
+### Main Facade Methods
 
 ```cpp
-// 获取各层组件
+// Hardware / protocol layers
+NetDevice& device();
+IPv4Layer& ip();
+ICMPHandler* icmp();   // nullptr when ICMP is disabled
+UDPLayer* udp();       // nullptr when UDP is disabled
+TCPLayer& tcp();
+
+// Application layer
 HttpServer& http_server();
 HttpClient& http_client();
-DNSClient& dns_client();
-TCPLayer& tcp_layer();
-IPv4Layer& ip_layer();
-FirewallEngine& firewall();
+DNSClient* dns();      // nullptr when UDP is disabled
 
-// 运行事件循环
-void run();                    // 阻塞运行
-void run_once();               // 单次迭代
-void stop();                   // 停止运行
+// Firewall facade
+bool firewall_enabled() const;
+bool firewall_ai_enabled() const;
+bool firewall_shadow_mode() const;
+void firewall_set_shadow_mode(bool shadow);
+void firewall_set_threshold(float threshold);
+bool firewall_inspect(const uint8_t* data, size_t len);
+void firewall_on_timer();
+RuleEngine* firewall_rules();
+FirewallStats firewall_stats() const;
+FirewallAIStats firewall_ai_stats() const;
 
-// 定时器
-void on_timer();               // 手动触发定时器
+// Telemetry
+telemetry::TelemetryAPI& telemetry();
+std::string status_json(bool pretty = false);
+std::string status_prometheus();
+
+// AI status
+bool ai_enabled() const;
+
+// Lifecycle
+void run();
+void stop();
+bool running() const;
 ```
+
+Notes:
+
+- `dns()`, `udp()`, and `icmp()` return pointers because those subsystems can be disabled by config.
+- AI model paths are runtime configuration only; actual inference support still requires building with `-DNEUSTACK_ENABLE_AI=ON`.
 
 ---
 
 ## HTTP Server
 
-A simple HTTP/1.1 server.
+The built-in HTTP server runs on top of NeuStack's stream interface.
 
 ### Route Registration
 
 ```cpp
 auto& server = stack->http_server();
 
-// GET 请求
-server.get("/", [](const HttpRequest& req) {
-    return HttpResponse()
-        .status(200)
-        .content_type("text/html")
-        .set_body("<h1>Hello!</h1>");
+server.get("/", [](const neustack::HttpRequest&) {
+    return neustack::HttpResponse()
+        .content_type("text/plain")
+        .set_body("Hello from NeuStack!\n");
 });
 
-// POST 请求
-server.post("/api/data", [](const HttpRequest& req) {
-    auto body = req.body();
-    // 处理数据...
-    return HttpResponse()
-        .status(201)
+server.post("/api/echo", [](const neustack::HttpRequest& req) {
+    return neustack::HttpResponse()
         .content_type("application/json")
-        .set_body("{\"status\":\"ok\"}");
+        .set_body(req.body);
 });
 
-// 启动监听
 server.listen(80);
 ```
 
-### HttpRequest
+### `HttpRequest`
 
 ```cpp
 struct HttpRequest {
-    HttpMethod method() const;
-    const std::string& path() const;
-    const std::string& body() const;
-    std::optional<std::string> header(const std::string& name) const;
-    std::optional<std::string> query(const std::string& name) const;
+    HttpMethod method;
+    std::string path;
+    std::string version;
+    std::string raw_query;
+    std::unordered_map<std::string, std::string> query_params;
+    std::unordered_map<std::string, std::vector<std::string>> headers;
+    std::string body;
+
+    std::string get_header(const std::string& key) const;
+    std::vector<std::string> get_headers(const std::string& key) const;
+    bool has_header(const std::string& key) const;
+    std::string query_param(const std::string& key) const;
 };
 ```
 
-### HttpResponse
+### `HttpResponse`
 
 ```cpp
-class HttpResponse {
-    HttpResponse& status(int code);
+struct HttpResponse {
+    HttpStatus status = HttpStatus::OK;
+    std::unordered_map<std::string, std::vector<std::string>> headers;
+    std::string body;
+
+    HttpResponse& set_header(const std::string& key, const std::string& value);
+    HttpResponse& add_header(const std::string& key, const std::string& value);
     HttpResponse& content_type(const std::string& type);
-    HttpResponse& header(const std::string& name, const std::string& value);
-    HttpResponse& set_body(const std::string& body);
-    HttpResponse& set_body(const uint8_t* data, size_t len);
+    HttpResponse& set_body(const std::string& content);
 };
 ```
 
@@ -118,81 +158,89 @@ class HttpResponse {
 
 ## HTTP Client
 
-HTTP/1.1 client.
-
-### Making Requests
+The HTTP client is asynchronous and uses NeuStack's TCP implementation underneath.
 
 ```cpp
 auto& client = stack->http_client();
+client.set_default_host("example.com");
 
-// GET 请求
-client.get("http://example.com/api/data",
-    // on_response
-    [](const HttpResponse& resp) {
-        printf("Status: %d\n", resp.status_code());
-        printf("Body: %s\n", resp.body().c_str());
-    },
-    // on_error
-    [](int error) {
-        printf("Error: %d\n", error);
+client.get(neustack::ip_from_string("93.184.216.34"), 80, "/",
+    [](const neustack::HttpResponse& resp, int error) {
+        if (error != 0) {
+            std::printf("HTTP error: %d\n", error);
+            return;
+        }
+
+        std::printf("Response bytes: %zu\n", resp.body.size());
     }
 );
+```
 
-// POST 请求
-client.post("http://example.com/api/data",
-    "application/json",
-    "{\"key\":\"value\"}",
-    on_response,
-    on_error
-);
+### Main Methods
+
+```cpp
+void get(uint32_t server_ip, uint16_t port, const std::string& path,
+         ResponseCallback on_response);
+
+void post(uint32_t server_ip, uint16_t port, const std::string& path,
+          const std::string& body, const std::string& content_type,
+          ResponseCallback on_response);
+
+void request(uint32_t server_ip, uint16_t port,
+             const HttpRequest& req, ResponseCallback on_response);
 ```
 
 ---
 
 ## DNS Client
 
-Asynchronous DNS resolution.
-
-### Resolving Domain Names
+NeuStack's DNS client depends on UDP. Always check the pointer returned by `stack->dns()`.
 
 ```cpp
-auto& dns = stack->dns_client();
+if (auto* dns = stack->dns()) {
+    dns->set_server(neustack::ip_from_string("8.8.8.8"));
 
-// 设置 DNS 服务器
-dns.set_server(ip_from_string("8.8.8.8"));
+    dns->resolve_async("example.com", [](std::optional<neustack::DNSResponse> response) {
+        if (!response) {
+            std::puts("DNS lookup failed");
+            return;
+        }
 
-// 异步解析
-dns.resolve("example.com",
-    // on_success
-    [](uint32_t ip) {
-        printf("Resolved: %s\n", ip_to_string(ip).c_str());
-    },
-    // on_error
-    [](int error) {
-        printf("DNS error: %d\n", error);
-    }
-);
+        if (auto ip = response->get_ip()) {
+            std::printf("Resolved: %s\n", neustack::ip_to_string(*ip).c_str());
+        }
+    });
+}
+```
+
+### Main Methods
+
+```cpp
+bool init();
+void set_server(uint32_t ip);
+void resolve_async(const std::string& hostname, DNSCallback callback,
+                   DNSType type = DNSType::A);
+void on_timer();
 ```
 
 ---
 
 ## TCP Layer
 
-Low-level TCP interface.
+The TCP layer exposes both server and client stream interfaces.
 
 ### Listening
 
 ```cpp
-auto& tcp = stack->tcp_layer();
+auto& tcp = stack->tcp();
 
-tcp.listen(8080, [](IStreamConnection* conn) -> StreamCallbacks {
+tcp.listen(8080, [](neustack::IStreamConnection* conn) -> neustack::StreamCallbacks {
+    (void)conn;
     return {
-        .on_receive = [](IStreamConnection* c, const uint8_t* data, size_t len) {
-            // 处理接收数据
-            c->send(data, len);  // Echo
+        .on_receive = [](neustack::IStreamConnection* c, const uint8_t* data, size_t len) {
+            c->send(data, len);  // echo
         },
-        .on_close = [](IStreamConnection* c) {
-            // 连接关闭
+        .on_close = [](neustack::IStreamConnection*) {
         }
     };
 });
@@ -201,40 +249,34 @@ tcp.listen(8080, [](IStreamConnection* conn) -> StreamCallbacks {
 ### Connecting
 
 ```cpp
-tcp.connect(server_ip, 8080,
-    // on_connect
-    [](IStreamConnection* conn, int err) {
-        if (err == 0) {
-            conn->send("Hello", 5);
-        }
+auto server_ip = neustack::ip_from_string("192.168.100.1");
+
+stack->tcp().connect(
+    server_ip, 8080,
+    [](neustack::IStreamConnection* conn, int err) {
+        if (err != 0) return;
+
+        static const uint8_t hello[] = {'H', 'e', 'l', 'l', 'o', '\n'};
+        conn->send(hello, sizeof(hello));
     },
-    // on_receive
-    [](IStreamConnection* conn, const uint8_t* data, size_t len) {
-        // 处理数据
+    [](neustack::IStreamConnection*, const uint8_t* data, size_t len) {
+        std::printf("Received %zu bytes\n", len);
+        (void)data;
     },
-    // on_close
-    [](IStreamConnection* conn) {
-        // 连接关闭
+    [](neustack::IStreamConnection*) {
     }
 );
 ```
 
-### IStreamConnection
+### `IStreamConnection`
 
 ```cpp
 class IStreamConnection {
-    // 发送数据
-    ssize_t send(const uint8_t* data, size_t len);
-    ssize_t send(const char* data, size_t len);
-    
-    // 关闭连接
-    void close();
-    
-    // 获取信息
-    uint32_t remote_ip() const;
-    uint16_t remote_port() const;
-    uint32_t local_ip() const;
-    uint16_t local_port() const;
+public:
+    virtual ssize_t send(const uint8_t* data, size_t len) = 0;
+    virtual void close() = 0;
+    virtual uint32_t remote_ip() const;
+    virtual uint16_t remote_port() const;
 };
 ```
 
@@ -242,46 +284,39 @@ class IStreamConnection {
 
 ## Configuration Options
 
-### NeuStackConfig
+### `StackConfig`
 
 ```cpp
-struct NeuStackConfig {
-    // 网络配置
-    uint32_t local_ip = ip_from_string("192.168.100.2");
-    uint32_t gateway_ip = ip_from_string("192.168.100.1");
-    uint32_t netmask = ip_from_string("255.255.255.0");
-    
-    // 设备配置
-    std::string device_name = "";  // 空 = 自动选择
-    
-    // TCP 配置
-    size_t max_connections = 1024;
-    uint32_t mss = 1460;
-    
-    // 拥塞控制
-    CongestionControlType cc_type = CongestionControlType::CUBIC;
-    
-    // AI 配置 (需要 NEUSTACK_ENABLE_AI)
-    bool enable_ai = false;
-    std::string orca_model_path = "models/orca_actor.onnx";
-    std::string bandwidth_model_path = "models/bandwidth_predictor.onnx";
-    std::string anomaly_model_path = "models/anomaly_detector.onnx";
-    
-    // 防火墙配置
-    bool firewall_enabled = true;
+struct StackConfig {
+    std::string local_ip = "192.168.100.2";
+    uint32_t dns_server = 0x08080808;
+    LogLevel log_level = LogLevel::INFO;
+    bool enable_icmp = true;
+    bool enable_udp = true;
+
+    std::string device_type = "tun";   // "tun" or "af_xdp"
+    std::string device_ifname = "";
+    int io_cpu = -1;
+
+    bool enable_firewall = true;
     bool firewall_shadow_mode = true;
+
+    std::string orca_model_path;
+    std::string anomaly_model_path;
+    std::string bandwidth_model_path;
+    std::string security_model_path;
+    float security_threshold = 0.0f;
+
+    std::string data_output_dir;
+    int security_label = 0;
 };
 ```
 
-### CongestionControlType
+Key points:
 
-```cpp
-enum class CongestionControlType {
-    RENO,   // RFC 5681
-    CUBIC,  // RFC 8312
-    ORCA    // SAC 强化学习 (需要 AI)
-};
-```
+- `device_type = "af_xdp"` is only meaningful on Linux builds with `-DNEUSTACK_ENABLE_AF_XDP=ON`.
+- `security_threshold = 0.0f` means "read the threshold from model metadata".
+- `data_output_dir` enables CSV exporters for TCP, metrics, and security data.
 
 ---
 
@@ -292,11 +327,8 @@ enum class CongestionControlType {
 ```cpp
 #include "neustack/common/ip_addr.hpp"
 
-// 字符串 -> uint32_t
-uint32_t ip = ip_from_string("192.168.1.1");
-
-// uint32_t -> 字符串
-std::string str = ip_to_string(ip);
+uint32_t ip = neustack::ip_from_string("192.168.1.1");
+std::string text = neustack::ip_to_string(ip);
 ```
 
 ### Logging
@@ -304,44 +336,22 @@ std::string str = ip_to_string(ip);
 ```cpp
 #include "neustack/common/log.hpp"
 
-// 设置日志级别
-Logger::instance().set_level(LogLevel::DEBUG);
-
-// 日志宏
-LOG_DEBUG(APP, "Debug message: %d", value);
-LOG_INFO(APP, "Info message");
-LOG_WARN(APP, "Warning message");
-LOG_ERROR(APP, "Error message");
+LOG_INFO(APP, "stack started");
+LOG_WARN(FW, "firewall anomaly detected");
+LOG_ERROR(AI, "model load failed");
 ```
 
 ---
 
-## Error Codes
+## Threading Model
 
-| Error Code | Meaning |
-|------------|---------|
-| 0 | Success |
-| -1 | General error |
-| -2 | Connection refused |
-| -3 | Connection timeout |
-| -4 | Connection reset |
-| -5 | Network unreachable |
-
----
-
-## Thread Safety
-
-NeuStack is **not** thread-safe. All operations should be performed in a single thread, or use external synchronization mechanisms.
+NeuStack is designed around a single data-plane event loop. Treat the facade and its subcomponents as **not thread-safe** unless you add your own external synchronization.
 
 Recommended pattern:
-```cpp
-// 主线程运行事件循环
-stack->run();
 
-// 或者手动迭代
-while (running) {
-    stack->run_once();
-    stack->on_timer();
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-}
+```cpp
+auto stack = neustack::NeuStack::create();
+if (!stack) return 1;
+
+stack->run();  // blocks until stop() or process termination
 ```

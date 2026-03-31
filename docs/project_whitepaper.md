@@ -1,8 +1,8 @@
 # NeuStack 项目白皮书
 
-> **Version:** 1.2
-> **Last Updated:** 2026-02-10
-> **Status:** Final
+> **Version:** 1.4
+> **Last Updated:** 2026-03-28
+> **Status:** Active
 
 ---
 
@@ -10,17 +10,19 @@
 
 ### 1.1 项目定位
 
-**NeuStack** 是一个**完全从零实现**的跨平台用户态 TCP/IP 协议栈，集成 AI 拥塞控制智能面。C++ 实现协议栈核心（约 9,400 行），Python 实现 AI 模型训练管线（约 3,200 行），Shell 脚本实现数据采集与环境配置（约 1,400 行），总计约 14,600 行有效代码（不含空行与注释）。
+**NeuStack** 是一个**完全从零实现**的跨平台用户态 TCP/IP 协议栈，集成 AI 拥塞控制智能面与 AF_XDP 高性能数据路径。C++ 实现协议栈核心（约 10,000 行），Python 实现 AI 模型训练管线（约 4,000 行），Shell/Python 脚本实现数据采集、基准测试与环境配置（约 2,700 行）。
 
 区别于传统内核协议栈的黑盒实现，NeuStack 通过以下核心特性实现差异化：
 
 | 特性 | 描述 |
 |------|------|
-| **跨平台 HAL** | 硬件抽象层屏蔽 macOS (utun) / Linux (TUN/TAP) / Windows (Wintun) 底层差异 |
+| **跨平台 HAL** | 硬件抽象层屏蔽 macOS (utun) / Linux (TUN/TAP + AF_XDP) / Windows (Wintun) 底层差异 |
+| **AF_XDP 数据路径** | Linux 高性能 backend：UMEM 共享内存环、BPF/XDP 程序加载、批量收发，generic copy mode 下 1.45× 内核 UDP |
 | **AI 智能面** | 三模型协同决策：Orca (SAC) 拥塞控制 + LSTM 带宽预测 + Autoencoder 异常检测 |
 | **NetworkAgent** | 4 状态决策层，协调 3 个 AI 模型，实现策略性 clamp / 回退 / 连接控制 |
-| **用户态实现** | 完全运行在用户空间，便于调试、定制和部署 |
-| **双线程架构** | 数据面 + AI 推理面分离，通过无锁队列异步通信 |
+| **零分配热路径** | FixedPool slab 分配器，包处理循环中无 new/delete |
+| **Telemetry** | MetricsRegistry + 7 个 HTTP 端点 + Prometheus 导出 + neustack-stat 实时 CLI |
+| **双线程架构** | 数据面 + AI 推理面分离，通过无锁 SPSC 队列异步通信 |
 
 ### 1.2 解决的问题
 
@@ -106,24 +108,44 @@
 
 ```cpp
 struct StackConfig {
-    std::string local_ip   = "192.168.100.2";
-    std::string peer_ip    = "192.168.100.1";
-    std::string netmask    = "255.255.255.0";
-    std::string dns_server = "8.8.8.8";
-    std::string model_dir;         // AI 模型目录（空则禁用 AI）
-    bool        collect_csv = false;
+    std::string local_ip = "192.168.100.2";
+    uint32_t dns_server = 0x08080808;
+    LogLevel log_level = LogLevel::INFO;
+    bool enable_icmp = true;
+    bool enable_udp = true;
+    std::string device_type = "tun";
+    std::string device_ifname;
+    int io_cpu = -1;
+    bool enable_firewall = true;
+    bool firewall_shadow_mode = true;
+    std::string orca_model_path;
+    std::string anomaly_model_path;
+    std::string bandwidth_model_path;
+    std::string security_model_path;
+    float security_threshold = 0.0f;
+    std::string data_output_dir;
+    int security_label = 0;
 };
 
 class NeuStack {
 public:
-    static std::unique_ptr<NeuStack> create(StackConfig cfg = {});
+    static std::unique_ptr<NeuStack> create(const StackConfig& config = {});
 
-    // 组件访问
+    // 关键组件访问
+    NetDevice& device();
+    IPv4Layer& ip();
+    ICMPHandler* icmp();
+    UDPLayer* udp();
     HttpServer& http_server();
     HttpClient& http_client();
-    DnsClient&  dns_client();
+    DNSClient*  dns();
+    TCPLayer&   tcp();
+    telemetry::TelemetryAPI& telemetry();
 
-    // 生命周期
+    // 生命周期 / 观测
+    std::string status_json(bool pretty = false);
+    std::string status_prometheus();
+    bool ai_enabled() const;
     void run();   // 阻塞运行（Ctrl+C 退出）
     void stop();
 };
@@ -309,7 +331,8 @@ public:
 | 平台 | 文件 | 底层技术 | 关键系统调用 |
 |------|------|----------|--------------|
 | macOS | `hal_macos.cpp` | utun (L3 点对点) | `socket(PF_SYSTEM, ...)`, `ioctl(CTLIOCGINFO)` |
-| Linux | `hal_linux.cpp` | TUN/TAP (L2/L3) | `open("/dev/net/tun")`, `ioctl(TUNSETIFF)` |
+| Linux (TUN) | `hal_linux.cpp` | TUN/TAP (L2/L3) | `open("/dev/net/tun")`, `ioctl(TUNSETIFF)` |
+| Linux (AF_XDP) | `hal_linux_afxdp.cpp` | AF_XDP + UMEM + BPF | `socket(AF_XDP, ...)`, `mmap()`, `sendto()` |
 | Windows | `hal_windows.cpp` | Wintun | `WintunCreateAdapter()`, Ring Buffer API |
 
 #### 2.2.9 通用基础设施 (`include/neustack/common/`)
@@ -321,6 +344,7 @@ public:
 | ISN 生成 | `isn_generator.hpp` | TCP 初始序列号安全随机生成 |
 | 环形缓冲区 | `ring_buffer.hpp` | StreamBuffer：TCP 发送/接收缓冲区（64KB，零拷贝 head consume） |
 | SPSC 队列 | `spsc_queue.hpp` | 无锁单生产者单消费者队列（power-of-2，trivially-copyable） |
+| 内存池 | `fixed_pool.hpp` | FixedPool slab 分配器，热路径零 new/delete |
 | 日志 | `log.hpp` | 分级日志系统（TRACE/DEBUG/INFO/WARN/ERROR） |
 
 ---
@@ -670,17 +694,20 @@ NeuStack/
 | `NEUSTACK_BUILD_TESTS` | ON | 编译测试 |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | 编译示例程序 |
 | `NEUSTACK_BUILD_BENCHMARKS` | OFF | 编译性能基准测试 |
+| `NEUSTACK_BUILD_TOOLS` | ON | 编译 `neustack-stat` 等 CLI 工具 |
 | `NEUSTACK_ENABLE_ASAN` | OFF | 启用 Address Sanitizer |
+| `NEUSTACK_ENABLE_UBSAN` | OFF | 启用 Undefined Behavior Sanitizer |
 | `NEUSTACK_ENABLE_AI` | OFF | 启用 AI 拥塞控制（需要 ONNX Runtime） |
+| `NEUSTACK_ENABLE_AF_XDP` | OFF | 启用 AF_XDP kernel-bypass backend（Linux，需要 libbpf + clang） |
 
 ### 6.3 构建与运行
 
 ```bash
 # 基础构建
 cmake -B build -G Ninja
-cmake --build build
+cmake --build build --parallel
 
-# 运行测试 (42 个)
+# 运行测试（注册数量会随 AI / benchmark 选项变化）
 cd build && ctest --output-on-failure
 
 # 启动协议栈（需要 root）
@@ -695,7 +722,7 @@ sudo ./scripts/nat/setup_nat.sh --dev utun4
 ```bash
 ./scripts/download/download_onnxruntime.sh
 cmake -B build -G Ninja -DNEUSTACK_ENABLE_AI=ON
-cmake --build build
+cmake --build build --parallel
 ```
 
 ### 6.4 最小示例
@@ -706,6 +733,7 @@ using namespace neustack;
 
 int main() {
     auto stack = NeuStack::create();
+    if (!stack) return 1;
 
     stack->http_server().get("/", [](const HttpRequest &) {
         return HttpResponse()
@@ -724,13 +752,13 @@ int main() {
 
 ### 7.1 测试概览
 
-共 42 个测试，覆盖单元、集成与性能基准三个层面。测试框架使用 Catch2 v3。
+NeuStack 使用 Catch2 v3 + CTest 管理测试。完整开发构建当前可发现 190+ 条测试用例；关闭 AI 或 benchmark 目标时，注册数量会相应减少。
 
-| 类别 | 数量 | 覆盖 |
-|------|------|------|
-| 单元测试 | 16 | 校验和、IP 地址、TCP 序列号、TCP 段解析/构造、拥塞控制 (Reno/CUBIC/Orca)、TCP 采样、全局指标、HTTP 类型/解析、环形缓冲区、SPSC 队列、AI 特征提取、NetworkAgent |
-| 集成测试 | 4 | TCP 三次握手 + 数据回显、HTTP 完整往返、ONNX Runtime 验证、AI 模型端到端 |
-| 基准测试 | 3 | 校验和吞吐量、SPSC 队列吞吐量、TCP 段处理吞吐量 |
+| 类别 | 覆盖 |
+|------|------|
+| 单元测试 | common、HAL、transport、firewall、telemetry、app、AI 特征与状态机 |
+| 集成测试 | TCP 三次握手/压力、HTTP 完整往返、防火墙规则与 E2E、AI runtime 与模型流水线 |
+| 可选 benchmark | checksum、SPSC、TCP、AF_XDP datapath、E2E throughput（需 `NEUSTACK_BUILD_BENCHMARKS=ON`） |
 
 ### 7.2 单元测试详述
 
@@ -757,20 +785,78 @@ int main() {
 
 | 基准 | 测试内容 |
 |------|----------|
-| `bench_checksum.cpp` | 校验和计算吞吐量（23x 优化验证） |
+| `bench_checksum.cpp` | 校验和计算吞吐量（23× 优化验证） |
 | `bench_spsc_queue.cpp` | SPSC 队列生产者-消费者吞吐量 |
 | `bench_tcp_throughput.cpp` | TCP 段处理吞吐量 |
+| `bench_afxdp_datapath.cpp` | AF_XDP 数据路径各组件 micro-benchmark（UMEM alloc/free、XDP ring 批量、zero-copy send path、prefetch 效果、TCP header build） |
+| `bench_e2e_throughput.cpp` | 端到端包吞吐量：kernel_udp / raw_socket / AF_XDP 三种 backend 对比（veth pair + network namespace 隔离）|
+
+Benchmark 运行方式：
 
 ```bash
-cd build
-ctest -R "unit"         # 运行单元测试
-ctest -R "Integration"  # 运行集成测试
-ctest -R "Benchmark"    # 运行基准测试
+# micro-benchmark（带 JSON 输出）
+./build/tests/bench_afxdp_datapath --json | python3 -m json.tool
+
+# 批量运行 + 统计 + 图表生成
+python3 scripts/bench/benchmark_runner.py --build-dir build/ --runs 5
+python3 scripts/bench/plot_results.py --input bench_results/latest/summary.json
+
+# E2E 吞吐测试（需要 root）
+sudo bash scripts/bench/run_throughput_test.sh --duration 10 --runs 3
 ```
 
 ---
 
-## 8. 技术风险与缓解
+## 8. AF_XDP 高性能数据路径（v1.4 新增）
+
+### 8.1 背景
+
+Linux 传统 TUN/TAP 路径每包需要两次内存拷贝和一次 syscall，在高包率场景下成为瓶颈。AF_XDP 通过 BPF/XDP 程序在驱动层重定向报文到用户态共享内存（UMEM），绕过大部分内核协议栈开销。
+
+### 8.2 实现架构
+
+```
+NIC 驱动
+  │
+  ▼  XDP 程序（BPF，在驱动 RX 钩子执行）
+  │    XDP_REDIRECT → UMEM fill ring
+  ▼
+UMEM（mmap 共享内存，4096 × 4096B frames）
+  │
+  ├─ RX ring ──► userspace batch recv_batch()
+  └─ TX ring ◄── userspace batch send_batch()
+```
+
+### 8.3 关键组件
+
+| 组件 | 头文件 | 说明 |
+|------|--------|------|
+| `UMEMArea` | `hal/umem.hpp` | UMEM 生命周期管理，mmap + frame 分配器（FixedPool） |
+| `XDPRing` | `hal/xdp_ring.hpp` | Fill / Completion / RX / TX 四环抽象，批量 ops |
+| `BPFObject` | `hal/bpf_object.hpp` | BPF 程序加载、XDP attach/detach |
+| `AFXDPDevice` | `hal/hal_linux_afxdp.hpp` | NetDevice 实现，整合以上组件，支持 generic/native 两种模式 |
+
+### 8.4 运行模式
+
+| 模式 | 配置 | 适用 NIC | 内存拷贝数 |
+|------|------|----------|------------|
+| Generic (SKB copy) | `zero_copy=false` | 所有 Linux NIC | 1 次（SKB→UMEM）|
+| Native zero-copy | `zero_copy=true, force_native_mode=true` | Intel i40e/ice/igc/mlx5 等 | 0 次 |
+
+> **当前测试环境**：Realtek r8169（无原生 XDP 支持），使用 generic copy mode。
+
+### 8.5 性能结果（v1.4）
+
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| E2E 吞吐（AF_XDP generic） | **1.18 Mpps** | vs 内核 UDP 0.82 Mpps（**1.45×**）|
+| Zero-copy send path | **52 ns/pkt** | vs 传统 3-copy 162 ns/pkt（**3.1×**）|
+| XDP ring 批量化收益 | batch=128 → **0.55 ns/op** | vs batch=1 时 2.37 ns/op（**4.3×**）|
+| UMEM alloc+free | **0.46 ns/op** | 接近硬件极限 |
+
+---
+
+## 9. 技术风险与缓解
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
@@ -782,7 +868,7 @@ ctest -R "Benchmark"    # 运行基准测试
 
 ---
 
-## 9. 参考文献
+## 10. 参考文献
 
 ### RFC 规范
 

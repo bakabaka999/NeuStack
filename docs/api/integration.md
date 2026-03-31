@@ -35,7 +35,7 @@ If you've installed NeuStack (via `cmake --install` or from a release archive):
 cmake_minimum_required(VERSION 3.20)
 project(MyApp LANGUAGES CXX)
 
-find_package(NeuStack 1.2 REQUIRED)
+find_package(NeuStack 1.4 REQUIRED)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE NeuStack::neustack_lib)
@@ -54,7 +54,7 @@ Download the pre-built archive for your platform from [GitHub Releases](https://
 ### Archive Contents
 
 ```
-neustack-<platform>-v1.3.0/
+neustack-<platform>-v1.4.0/
 ├── lib/
 │   ├── libneustack_lib.a          # Static library (Unix)
 │   ├── neustack_lib.lib           # Static library (Windows)
@@ -75,16 +75,16 @@ neustack-<platform>-v1.3.0/
 
 ```bash
 # Extract
-tar xzf neustack-linux-x64-v1.3.0.tar.gz
+tar xzf neustack-linux-x64-v1.4.0.tar.gz
 
 # Use in your CMake project
-cmake -B build -DCMAKE_PREFIX_PATH=$(pwd)/neustack-linux-x64-v1.3.0
+cmake -B build -DCMAKE_PREFIX_PATH=$(pwd)/neustack-linux-x64-v1.4.0
 ```
 
 Then in your `CMakeLists.txt`:
 
 ```cmake
-find_package(NeuStack 1.2 REQUIRED)
+find_package(NeuStack 1.4 REQUIRED)
 target_link_libraries(my_app PRIVATE NeuStack::neustack_lib)
 ```
 
@@ -141,18 +141,31 @@ cmake -B build -DNEUSTACK_ENABLE_AI=ON
 When AI is enabled, the `NEUSTACK_AI_ENABLED` macro is defined. You can check it in your code:
 
 ```cpp
+neustack::StackConfig config;
+config.orca_model_path = "models/orca_actor.onnx";
+config.bandwidth_model_path = "models/bandwidth_predictor.onnx";
+config.anomaly_model_path = "models/anomaly_detector.onnx";
+config.security_model_path = "models/security_anomaly.onnx";
+
+auto stack = neustack::NeuStack::create(config);
+
 #ifdef NEUSTACK_AI_ENABLED
-    // AI features available
-    auto& agent = stack->network_agent();
+if (stack && stack->ai_enabled()) {
+    const auto& agent = stack->tcp().agent();
+    std::printf("AI state: %s\n", neustack::agent_state_name(agent.state()));
+}
 #endif
 ```
 
-ONNX model files go in a `models/` directory. Pass the path at runtime:
+ONNX model files are passed individually at runtime through `StackConfig`:
 
 ```cpp
-StackConfig config;
-config.model_dir = "models/";
-auto stack = NeuStack::create(config);
+neustack::StackConfig config;
+config.orca_model_path = "models/orca_actor.onnx";
+config.bandwidth_model_path = "models/bandwidth_predictor.onnx";
+config.anomaly_model_path = "models/anomaly_detector.onnx";
+config.security_model_path = "models/security_anomaly.onnx";
+auto stack = neustack::NeuStack::create(config);
 ```
 
 ## Minimal Example
@@ -162,6 +175,7 @@ auto stack = NeuStack::create(config);
 
 int main() {
     auto stack = neustack::NeuStack::create();
+    if (!stack) return 1;
 
     stack->http_server().get("/hello", [](const auto&) {
         return neustack::HttpResponse()

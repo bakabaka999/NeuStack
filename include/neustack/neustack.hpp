@@ -42,6 +42,13 @@ struct StackConfig {
     bool enable_icmp = true;
     bool enable_udp = true;
 
+    // HAL 设备选择（"tun" = 默认 TUN/TAP, "af_xdp" = AF_XDP 高性能模式）
+    std::string device_type = "tun";
+    std::string device_ifname = "";  // AF_XDP 用: 网卡名（空 = 默认 eth0）
+
+    // 性能调优
+    int io_cpu = -1;  // IO 线程绑核 (-1 = 不绑)
+
     // 防火墙配置
     bool enable_firewall = true;          // 启用防火墙
     bool firewall_shadow_mode = true;     // Shadow Mode: AI 只告警不阻断

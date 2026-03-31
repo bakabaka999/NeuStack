@@ -31,6 +31,31 @@ neustack_add_test(test_spsc_queue   unit/common/test_spsc_queue.cpp)
 neustack_add_test(test_memory_pool  unit/common/test_memory_pool.cpp)
 neustack_add_test(test_json_builder unit/common/test_json_builder.cpp)
 
+# --- HAL 层测试 (hal/) ---
+neustack_add_test(test_batch_device unit/hal/test_batch_device.cpp)
+neustack_add_test(test_ethernet     unit/hal/test_ethernet.cpp)
+
+# Linux-only: UMEM 和 XDP Ring (不需要真实内核 XDP，纯逻辑测试)
+if(NEUSTACK_PLATFORM_LINUX)
+    neustack_add_test(test_umem     unit/hal/test_umem.cpp)
+    neustack_add_test(test_xdp_ring unit/hal/test_xdp_ring.cpp)
+
+    # AF_XDP 配置测试 (需要 AF_XDP 编译)
+    if(NEUSTACK_ENABLE_AF_XDP)
+        neustack_add_test(test_afxdp_config unit/hal/test_afxdp_config.cpp)
+
+        # BPF 对象验证测试 (需要 libbpf + 编译产物)
+        if(NEUSTACK_BPF_SUPPORTED)
+            neustack_add_test(test_bpf_object unit/hal/test_bpf_object.cpp)
+            target_link_libraries(test_bpf_object PRIVATE ${LIBBPF_LIBRARY} elf z)
+            target_include_directories(test_bpf_object PRIVATE ${LIBBPF_INCLUDE_DIR})
+            target_compile_definitions(test_bpf_object PRIVATE
+                NEUSTACK_BPF_OBJECT_DIR="${CMAKE_BINARY_DIR}/bpf")
+            add_dependencies(test_bpf_object neustack_bpf)
+        endif()
+    endif()
+endif()
+
 # --- 传输层测试 (transport/) ---
 neustack_add_test(test_tcp_segment unit/transport/test_tcp_segment.cpp)
 neustack_add_test(test_tcp_seq     unit/transport/test_tcp_seq.cpp)
@@ -94,33 +119,43 @@ target_link_libraries(test_firewall_e2e PRIVATE neustack_lib)
 add_test(NAME "Integration: Firewall E2E full feature" COMMAND test_firewall_e2e)
 
 # --- 性能测试---
-add_executable(bench_checksum benchmark/bench_checksum.cpp)
-target_link_libraries(bench_checksum PRIVATE neustack_lib)
-add_test(NAME "Benchmark: Checksum calculate" COMMAND bench_checksum)
+if(NEUSTACK_BUILD_BENCHMARKS)
+    add_executable(bench_checksum benchmark/bench_checksum.cpp)
+    target_link_libraries(bench_checksum PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: Checksum calculate" COMMAND bench_checksum)
 
-add_executable(bench_spsc_queue benchmark/bench_spsc_queue.cpp)
-target_link_libraries(bench_spsc_queue PRIVATE neustack_lib)
-add_test(NAME "Benchmark: Spsc queue test" COMMAND bench_spsc_queue)
+    add_executable(bench_spsc_queue benchmark/bench_spsc_queue.cpp)
+    target_link_libraries(bench_spsc_queue PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: Spsc queue test" COMMAND bench_spsc_queue)
 
-add_executable(bench_tcp_throughput benchmark/bench_tcp_throughput.cpp)
-target_link_libraries(bench_tcp_throughput PRIVATE neustack_lib)
-add_test(NAME "Benchmark: TCP throughput test" COMMAND bench_tcp_throughput)
+    add_executable(bench_tcp_throughput benchmark/bench_tcp_throughput.cpp)
+    target_link_libraries(bench_tcp_throughput PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: TCP throughput test" COMMAND bench_tcp_throughput)
 
-add_executable(bench_tcp_conn benchmark/bench_tcp_conn.cpp)
-target_link_libraries(bench_tcp_conn PRIVATE neustack_lib)
-add_test(NAME "Benchmark: TCP connection test" COMMAND bench_tcp_conn)
+    add_executable(bench_tcp_conn benchmark/bench_tcp_conn.cpp)
+    target_link_libraries(bench_tcp_conn PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: TCP connection test" COMMAND bench_tcp_conn)
 
-add_executable(bench_http benchmark/bench_http.cpp)
-target_link_libraries(bench_http PRIVATE neustack_lib)
-add_test(NAME "Benchmark: HTTP test" COMMAND bench_http)
+    add_executable(bench_http benchmark/bench_http.cpp)
+    target_link_libraries(bench_http PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: HTTP test" COMMAND bench_http)
 
-add_executable(bench_memory_pool benchmark/bench_memory_pool.cpp)
-target_link_libraries(bench_memory_pool PRIVATE neustack_lib)
-add_test(NAME "Benchmark: Memory pool test" COMMAND bench_memory_pool)
+    add_executable(bench_memory_pool benchmark/bench_memory_pool.cpp)
+    target_link_libraries(bench_memory_pool PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: Memory pool test" COMMAND bench_memory_pool)
 
-add_executable(bench_metrics_hotpath benchmark/bench_metrics_hotpath.cpp)
-target_link_libraries(bench_metrics_hotpath PRIVATE neustack_lib)
-add_test(NAME "Benchmark: Metrics hotpath" COMMAND bench_metrics_hotpath)
+    add_executable(bench_metrics_hotpath benchmark/bench_metrics_hotpath.cpp)
+    target_link_libraries(bench_metrics_hotpath PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: Metrics hotpath" COMMAND bench_metrics_hotpath)
+
+    add_executable(bench_afxdp_datapath benchmark/bench_afxdp_datapath.cpp)
+    target_link_libraries(bench_afxdp_datapath PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: AF_XDP datapath" COMMAND bench_afxdp_datapath)
+
+    add_executable(bench_e2e_throughput benchmark/bench_e2e_throughput.cpp)
+    target_link_libraries(bench_e2e_throughput PRIVATE neustack_lib)
+    add_test(NAME "Benchmark: E2E throughput" COMMAND bench_e2e_throughput --help)
+endif()
 
 # --- AI 智能平面相关测试 ---
 # 仅在 NEUSTACK_ENABLE_AI 选项开启时编译
@@ -144,10 +179,16 @@ if(NEUSTACK_ENABLE_AI)
         add_executable(test_onnx_runtime integration/test_onnx_runtime.cpp)
         target_include_directories(test_onnx_runtime PRIVATE ${ONNXRUNTIME_INCLUDE_DIRS})
         target_link_libraries(test_onnx_runtime PRIVATE neustack_lib ${ONNXRUNTIME_LIBRARIES})
+        target_compile_definitions(test_onnx_runtime PRIVATE
+            NEUSTACK_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        add_test(NAME "AI Integration: ONNX Runtime smoke test" COMMAND test_onnx_runtime)
 
         # AI 模型完整管线测试
         add_executable(test_ai_models integration/test_ai_models.cpp)
-        target_link_libraries(test_ai_models PRIVATE neustack_lib)
+        target_link_libraries(test_ai_models PRIVATE neustack_lib ${ONNXRUNTIME_LIBRARIES})
+        target_compile_definitions(test_ai_models PRIVATE
+            NEUSTACK_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        add_test(NAME "AI Integration: Model pipeline validation" COMMAND test_ai_models)
 
         # RPATH
         if(APPLE)

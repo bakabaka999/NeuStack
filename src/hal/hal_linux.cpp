@@ -88,7 +88,7 @@ ssize_t LinuxDevice::recv(uint8_t *buf, size_t len, int timeout_ms)
         pfd.fd = _fd;
         pfd.events = POLLIN;
 
-        int ret = poll(&pfd, 1, timeout_ms);
+        int ret = ::poll(&pfd, 1, timeout_ms);
         if (ret < 0)
         {
             if (errno == EINTR)

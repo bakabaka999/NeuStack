@@ -2,6 +2,11 @@
 #include "neustack/telemetry/metrics_registry.hpp"
 #include "neustack/telemetry/http_endpoints.hpp"
 
+#ifdef NEUSTACK_PLATFORM_LINUX
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 #ifdef NEUSTACK_AI_ENABLED
 #include "neustack/ai/intelligence_plane.hpp"
 #endif
@@ -41,8 +46,12 @@ struct NeuStack::Impl {
     Impl(const StackConfig &cfg) : config(cfg) {}
 
     bool initialize() {
-        // 1. HAL 层
-        device = NetDevice::create();
+        // 1. HAL 层 — 根据 device_type 选择后端
+        if (config.device_type == "af_xdp") {
+            device = NetDevice::create("af_xdp", config.device_ifname);
+        } else {
+            device = NetDevice::create();
+        }
         if (!device || device->open() < 0) {
             LOG_FATAL(HAL, "Failed to open device");
             return false;
@@ -300,7 +309,26 @@ bool NeuStack::ai_enabled() const { return _impl->tcp->ai_enabled(); }
 
 void NeuStack::run() {
     _impl->running = true;
+    const bool use_batch = _impl->device->supports_batch();
+    constexpr uint32_t BATCH_SIZE = 64;
+
+    // CPU 亲和性：将 IO 线程绑定到指定核心
+#ifdef NEUSTACK_PLATFORM_LINUX
+    if (_impl->config.io_cpu >= 0) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(_impl->config.io_cpu, &cpuset);
+        if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) == 0) {
+            LOG_INFO(APP, "IO thread pinned to CPU %d", _impl->config.io_cpu);
+        } else {
+            LOG_WARN(APP, "Failed to pin IO thread to CPU %d", _impl->config.io_cpu);
+        }
+    }
+#endif
+
     uint8_t buf[2048];
+    PacketDesc rx_descs[BATCH_SIZE];
+
     auto last_timer = std::chrono::steady_clock::now();
     auto last_fw_timer = std::chrono::steady_clock::now();
     constexpr auto TIMER_INTERVAL = std::chrono::milliseconds(100);
@@ -309,19 +337,41 @@ void NeuStack::run() {
     LOG_INFO(APP, "NeuStack running on %s", _impl->config.local_ip.c_str());
 
     while (_impl->running) {
-        // 1. 收包
-        ssize_t n = _impl->device->recv(buf, sizeof(buf), 10);
-        if (n > 0) {
-            // 2. 防火墙检查
-            bool pass = true;
-            if (_impl->firewall) {
-                pass = _impl->firewall->inspect(buf, static_cast<size_t>(n));
+        // 1. 收包阶段
+        uint32_t rx_count = 0;
+
+        if (use_batch) {
+            // AF_XDP 批量路径 — 1ms timeout 更积极地收包
+            int events = _impl->device->poll(1);
+            if (events & NetDevice::POLL_RX) {
+                rx_count = _impl->device->recv_batch(rx_descs, BATCH_SIZE);
+            }
+        } else {
+            // TUN 兼容路径 — 行为与 v1.3 完全一致
+            ssize_t n = _impl->device->recv(buf, sizeof(buf), 10);
+            if (n > 0) {
+                rx_descs[0] = {buf, static_cast<uint32_t>(n), 0, 0, 0};
+                rx_count = 1;
+            }
+        }
+
+        // 2. 处理阶段 — 带 prefetch
+        for (uint32_t i = 0; i < rx_count; ++i) {
+            // 预取下一个包的数据到 L1 cache
+            if (i + 1 < rx_count) {
+                __builtin_prefetch(rx_descs[i + 1].data, 0, 1);
             }
 
-            // 3. 放行则交给 IPv4 层处理
-            if (pass) {
-                _impl->ip->on_receive(buf, n);
-            }
+            bool pass = true;
+            if (_impl->firewall)
+                pass = _impl->firewall->inspect(rx_descs[i].data, rx_descs[i].len);
+            if (pass)
+                _impl->ip->on_receive(rx_descs[i].data, rx_descs[i].len);
+        }
+
+        // 3. 释放阶段 (AF_XDP 需要归还 UMEM frame) 
+        if (use_batch && rx_count > 0) {
+            _impl->device->release_rx(rx_descs, rx_count);
         }
 
         // 4. 应用层轮询
