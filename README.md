@@ -173,14 +173,14 @@ cd NeuStack
 
 # Standard build
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # Full build with AF_XDP + AI (Linux)
 sudo apt install libbpf-dev clang
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
     -DNEUSTACK_ENABLE_AF_XDP=ON \
     -DNEUSTACK_ENABLE_AI=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # Run tests
 cd build && ctest --output-on-failure
@@ -189,13 +189,39 @@ cd build && ctest --output-on-failure
 sudo ./build/examples/neustack_demo
 ```
 
+### Recommended First Run
+
+The fastest way to validate a fresh build is the interactive demo plus the built-in telemetry endpoints:
+
+```bash
+# Build the demo and CLI tool
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target neustack_demo neustack_stat
+
+# Start the stack (root is required for utun / TUN / AF_XDP)
+sudo ./build/examples/neustack_demo --ip 192.168.100.2 -v
+
+# In another terminal, query the telemetry API served by the demo on port 80
+curl http://192.168.100.2/api/v1/health
+curl http://192.168.100.2/api/v1/stats | python3 -m json.tool
+
+# Live CLI dashboard
+./build/tools/neustack-stat --host 192.168.100.2 --port 80 --live
+```
+
+On macOS, follow the `scripts/nat/setup_nat.sh` instructions printed by the demo so the host can reach the stack IP.
+
 ### Minimal Example
 
 ```cpp
 #include "neustack/neustack.hpp"
 
 int main() {
-    auto stack = neustack::NeuStack::create();
+    neustack::StackConfig config;
+    config.orca_model_path = "models/orca_actor.onnx";  // optional, requires -DNEUSTACK_ENABLE_AI=ON
+
+    auto stack = neustack::NeuStack::create(config);
+    if (!stack) return 1;
 
     // HTTP server
     stack->http_server().get("/", [](const auto&) {
@@ -207,11 +233,9 @@ int main() {
 
     // Firewall rules
     auto* rules = stack->firewall_rules();
-    rules->add_blacklist_ip(0x01020304);        // Block 1.2.3.4
-    rules->rate_limiter().set_rate(1000, 100);  // 1000 pps, burst 100
-
-    // AI congestion control
-    stack->enable_ai_congestion_control("models/orca.onnx");
+    rules->add_blacklist_ip(neustack::ip_from_string("1.2.3.4"));
+    rules->rate_limiter().set_enabled(true);
+    rules->rate_limiter().set_rate(1000, 100);
 
     stack->run();  // blocks until Ctrl+C
 }
@@ -277,7 +301,7 @@ AF_XDP path (NeuStack):
 # Build with AF_XDP
 sudo apt install libbpf-dev clang
 cmake -B build -DNEUSTACK_ENABLE_AF_XDP=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 ```
 
 See [`docs/api/af-xdp.md`](docs/api/af-xdp.md) for NIC compatibility table, configuration options, and the batch recv/send API.
@@ -321,10 +345,10 @@ Every data plane layer writes to lock-free atomic counters (`GlobalMetrics`, `Se
 
 ```bash
 # Live terminal dashboard
-./build/tools/neustack-stat --host 127.0.0.1 --port 8080
+./build/tools/neustack-stat --host 127.0.0.1 --port 80
 
 # One-shot stats
-curl http://127.0.0.1:8080/api/v1/stats | python3 -m json.tool
+curl http://127.0.0.1:80/api/v1/stats | python3 -m json.tool
 ```
 
 See [`docs/api/telemetry.md`](docs/api/telemetry.md) for full endpoint reference, Prometheus integration, and `neustack-stat` CLI options.
@@ -338,9 +362,10 @@ See [`docs/api/telemetry.md`](docs/api/telemetry.md) for full endpoint reference
 ```bash
 # Build in Release mode
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -DNEUSTACK_BUILD_BENCHMARKS=ON \
     -DNEUSTACK_ENABLE_AF_XDP=ON \
     -DNEUSTACK_ENABLE_AI=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # Component micro-benchmarks (5 runs, with statistics)
 python3 scripts/bench/benchmark_runner.py --build-dir build/ --runs 5
@@ -365,12 +390,14 @@ See [`docs/api/benchmark.md`](docs/api/benchmark.md) for full details and reprod
 cd build && ctest --output-on-failure
 ```
 
+Benchmark executables are optional and require `-DNEUSTACK_BUILD_BENCHMARKS=ON` during configuration.
+
 | Suite | Tests |
 |-------|-------|
 | Common | Checksum · IP address · Ring buffer · SPSC queue · Memory pool · JSON builder |
 | HAL | Batch device · Ethernet · UMEM · XDP ring · AF_XDP config · BPF object |
 | AI | Feature extraction · NetworkAgent FSM · ONNX model integration |
-| Benchmarks | `bench_afxdp_datapath` (micro) · `bench_e2e_throughput` (E2E) |
+| Optional Benchmarks | `bench_afxdp_datapath` (micro) · `bench_e2e_throughput` (E2E) when `NEUSTACK_BUILD_BENCHMARKS=ON` |
 
 <p align="right"><a href="#top">&#8593; Back to top</a></p>
 
@@ -421,9 +448,12 @@ NeuStack/
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `NEUSTACK_BUILD_TESTS` | ON | Build tests and benchmarks |
+| `NEUSTACK_BUILD_TESTS` | ON | Build unit and integration tests |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | Build example programs |
+| `NEUSTACK_BUILD_BENCHMARKS` | OFF | Build benchmark executables and register benchmark ctest targets |
+| `NEUSTACK_BUILD_TOOLS` | ON | Build CLI tools such as `neustack-stat` |
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
+| `NEUSTACK_ENABLE_UBSAN` | OFF | Undefined Behavior Sanitizer |
 | `NEUSTACK_ENABLE_AI` | OFF | AI inference (requires ONNX Runtime) |
 | `NEUSTACK_ENABLE_AF_XDP` | OFF | AF_XDP kernel-bypass backend (Linux; requires libbpf + clang) |
 
@@ -457,6 +487,9 @@ NeuStack/
 - [ ] **Web Dashboard** — browser-based observability UI backed by the Telemetry HTTP API
 - [ ] **Multi-queue AF_XDP** — per-core RX/TX queues for multi-threaded packet processing
 - [ ] **AI Benchmark Suite** — latency/throughput profiling of each ONNX model under sustained load
+- [ ] **TLS / HTTPS support** — integrate a mature TLS backend for secure client/server connections without reimplementing TLS in-house
+- [ ] **Parser fuzzing** — add libFuzzer-based coverage for HTTP, DNS, IPv4, and TCP parsing hot paths with sanitizer integration
+- [ ] **Exception-path closure** — propagate ICMP unreachable / time-exceeded errors to TCP/UDP consumers and complete retransmit telemetry
 
 **v2.0 — AI Infra Transport Layer**
 

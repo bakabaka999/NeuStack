@@ -12,7 +12,9 @@ project(NeuStack
 option(NEUSTACK_BUILD_TESTS "Build unit tests" ON)
 option(NEUSTACK_BUILD_EXAMPLES "Build examples" ON)
 option(NEUSTACK_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(NEUSTACK_BUILD_TOOLS "Build CLI tools" ON)
 option(NEUSTACK_ENABLE_ASAN "Enable Address Sanitizer" OFF)
+option(NEUSTACK_ENABLE_UBSAN "Enable Undefined Behavior Sanitizer" OFF)
 option(NEUSTACK_ENABLE_AI "Enable AI congestion control (requires ONNX Runtime)" OFF)
 option(NEUSTACK_ENABLE_AF_XDP "Enable AF_XDP backend (requires libbpf, Linux only)" OFF)
 
@@ -43,9 +45,21 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         -Wno-unused-parameter
     )
 
+    set(NEUSTACK_SANITIZERS "")
+
     if(NEUSTACK_ENABLE_ASAN)
-        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=address)
+        list(APPEND NEUSTACK_SANITIZERS address)
+        add_compile_options(-fno-omit-frame-pointer)
+    endif()
+
+    if(NEUSTACK_ENABLE_UBSAN)
+        list(APPEND NEUSTACK_SANITIZERS undefined)
+    endif()
+
+    if(NEUSTACK_SANITIZERS)
+        string(REPLACE ";" "," NEUSTACK_SANITIZER_FLAGS "${NEUSTACK_SANITIZERS}")
+        add_compile_options(-fsanitize=${NEUSTACK_SANITIZER_FLAGS})
+        add_link_options(-fsanitize=${NEUSTACK_SANITIZER_FLAGS})
     endif()
 endif()
 
@@ -304,7 +318,10 @@ message(STATUS "C++ Compiler:     ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_
 message(STATUS "Build Type:       ${CMAKE_BUILD_TYPE}")
 message(STATUS "Build Tests:      ${NEUSTACK_BUILD_TESTS}")
 message(STATUS "Build Examples:   ${NEUSTACK_BUILD_EXAMPLES}")
+message(STATUS "Build Benchmarks: ${NEUSTACK_BUILD_BENCHMARKS}")
+message(STATUS "Build Tools:      ${NEUSTACK_BUILD_TOOLS}")
 message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
+message(STATUS "Enable UBSan:     ${NEUSTACK_ENABLE_UBSAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
 if(NEUSTACK_PLATFORM_LINUX)
     message(STATUS "Enable AF_XDP:    ${NEUSTACK_ENABLE_AF_XDP}")
@@ -318,7 +335,6 @@ message(STATUS "")
 # ============================================================================
 # Tools
 # ============================================================================
-option(NEUSTACK_BUILD_TOOLS "Build CLI tools" ON)
 if(NEUSTACK_BUILD_TOOLS)
     add_subdirectory(tools)
 endif()

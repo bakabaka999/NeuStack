@@ -167,14 +167,14 @@ cd NeuStack
 
 # 标准构建
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # 完整构建（AF_XDP + AI，仅 Linux）
 sudo apt install libbpf-dev clang
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
     -DNEUSTACK_ENABLE_AF_XDP=ON \
     -DNEUSTACK_ENABLE_AI=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # 运行测试
 cd build && ctest --output-on-failure
@@ -183,13 +183,39 @@ cd build && ctest --output-on-failure
 sudo ./build/examples/neustack_demo
 ```
 
+### 推荐的首次运行路径
+
+验证新构建是否正常，最快的方式是直接跑交互式 demo，再通过内置 Telemetry 端点确认状态：
+
+```bash
+# 构建 demo 和 CLI 工具
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target neustack_demo neustack_stat
+
+# 启动协议栈（utun / TUN / AF_XDP 需要 root）
+sudo ./build/examples/neustack_demo --ip 192.168.100.2 -v
+
+# 在另一个终端里查询 demo 默认监听在 80 端口的 Telemetry API
+curl http://192.168.100.2/api/v1/health
+curl http://192.168.100.2/api/v1/stats | python3 -m json.tool
+
+# 实时 CLI 仪表盘
+./build/tools/neustack-stat --host 192.168.100.2 --port 80 --live
+```
+
+在 macOS 上，还需要按 demo 启动时打印的提示执行 `scripts/nat/setup_nat.sh`，让宿主机能够访问协议栈 IP。
+
 ### 最小示例
 
 ```cpp
 #include "neustack/neustack.hpp"
 
 int main() {
-    auto stack = neustack::NeuStack::create();
+    neustack::StackConfig config;
+    config.orca_model_path = "models/orca_actor.onnx";  // 可选，需要 -DNEUSTACK_ENABLE_AI=ON
+
+    auto stack = neustack::NeuStack::create(config);
+    if (!stack) return 1;
 
     // HTTP 服务器
     stack->http_server().get("/", [](const auto&) {
@@ -201,11 +227,9 @@ int main() {
 
     // 防火墙规则
     auto* rules = stack->firewall_rules();
-    rules->add_blacklist_ip(0x01020304);        // 封锁 1.2.3.4
-    rules->rate_limiter().set_rate(1000, 100);  // 1000 pps，burst 100
-
-    // AI 拥塞控制
-    stack->enable_ai_congestion_control("models/orca.onnx");
+    rules->add_blacklist_ip(neustack::ip_from_string("1.2.3.4"));
+    rules->rate_limiter().set_enabled(true);
+    rules->rate_limiter().set_rate(1000, 100);
 
     stack->run();  // 阻塞至 Ctrl+C
 }
@@ -271,7 +295,7 @@ AF_XDP 路径（NeuStack）：
 # 构建 AF_XDP 支持
 sudo apt install libbpf-dev clang
 cmake -B build -DNEUSTACK_ENABLE_AF_XDP=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 ```
 
 详见 [`docs/api/af-xdp.md`](docs/api/af-xdp.md)：NIC 兼容性表、配置选项、批量收发 API。
@@ -315,11 +339,11 @@ cmake --build build -j$(nproc)
 
 ```bash
 # 实时终端仪表盘
-./build/tools/neustack-stat --host 127.0.0.1 --port 8080
+./build/tools/neustack-stat --host 127.0.0.1 --port 80
 
 # 直接查询
-curl http://127.0.0.1:8080/api/v1/stats | python3 -m json.tool
-curl http://127.0.0.1:8080/metrics
+curl http://127.0.0.1:80/api/v1/stats | python3 -m json.tool
+curl http://127.0.0.1:80/metrics
 ```
 
 详见 [`docs/api/telemetry.md`](docs/api/telemetry.md)：完整端点参考、Prometheus 集成、`neustack-stat` CLI 选项。
@@ -329,6 +353,15 @@ curl http://127.0.0.1:8080/metrics
 ---
 
 ## 基准测试
+
+```bash
+# 构建 Benchmark（Release 模式）
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -DNEUSTACK_BUILD_BENCHMARKS=ON \
+    -DNEUSTACK_ENABLE_AF_XDP=ON \
+    -DNEUSTACK_ENABLE_AI=ON
+cmake --build build --parallel
+```
 
 ### Micro-Benchmark（`bench_afxdp_datapath`）
 
@@ -360,12 +393,14 @@ sudo bash scripts/bench/run_throughput_test.sh --duration 10 --runs 3
 cd build && ctest --output-on-failure
 ```
 
+Benchmark 可执行文件是可选项，配置阶段需要显式开启 `-DNEUSTACK_BUILD_BENCHMARKS=ON`。
+
 | 套件 | 测试内容 |
 |------|----------|
 | Common | 校验和 · IP 地址 · 环形缓冲区 · SPSC 队列 · 内存池 · JSON 构造器 |
 | HAL | 批量设备 · Ethernet · UMEM · XDP ring · AF_XDP 配置 · BPF 对象 |
 | AI | 特征提取 · NetworkAgent FSM · ONNX 模型集成 |
-| Benchmarks | `bench_afxdp_datapath`（micro） · `bench_e2e_throughput`（E2E） |
+| 可选 Benchmarks | `bench_afxdp_datapath`（micro） · `bench_e2e_throughput`（E2E），需开启 `NEUSTACK_BUILD_BENCHMARKS=ON` |
 
 <p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
@@ -410,9 +445,12 @@ NeuStack/
 
 | 选项 | 默认值 | 说明 |
 |------|--------|------|
-| `NEUSTACK_BUILD_TESTS` | ON | 编译测试与基准测试 |
+| `NEUSTACK_BUILD_TESTS` | ON | 编译单元测试与集成测试 |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | 编译示例程序 |
+| `NEUSTACK_BUILD_BENCHMARKS` | OFF | 编译 benchmark 可执行文件，并注册 benchmark ctest 目标 |
+| `NEUSTACK_BUILD_TOOLS` | ON | 编译 `neustack-stat` 等 CLI 工具 |
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
+| `NEUSTACK_ENABLE_UBSAN` | OFF | Undefined Behavior Sanitizer |
 | `NEUSTACK_ENABLE_AI` | OFF | AI 推理（需要 ONNX Runtime） |
 | `NEUSTACK_ENABLE_AF_XDP` | OFF | AF_XDP kernel-bypass 后端（Linux，需要 libbpf + clang） |
 
@@ -446,6 +484,9 @@ NeuStack/
 - [ ] **Web Dashboard** — 基于 Telemetry HTTP API 的浏览器可观测性界面
 - [ ] **Multi-queue AF_XDP** — 每核独立 RX/TX 队列，支持多线程包处理
 - [ ] **AI Benchmark Suite** — 各 ONNX 模型在持续负载下的延迟/吞吐 profiling
+- [ ] **TLS / HTTPS 支持** — 接入成熟 TLS 后端，为客户端/服务端提供安全连接，不自行重复实现 TLS
+- [ ] **解析器 Fuzz 测试** — 为 HTTP、DNS、IPv4、TCP 热路径增加 libFuzzer 覆盖，并和 sanitizer 联动
+- [ ] **异常路径闭环** — 打通 ICMP unreachable / time exceeded 到 TCP/UDP 消费方的错误传播，并补齐 retransmit telemetry
 
 **v2.0 — AI Infra 传输层**
 
