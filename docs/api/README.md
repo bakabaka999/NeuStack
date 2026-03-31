@@ -20,7 +20,8 @@ This directory contains the API reference documentation for NeuStack.
 ### Firewall
 
 ```cpp
-#include "neustack/firewall.hpp"
+#include "neustack/firewall/firewall_engine.hpp"
+#include "neustack/firewall/rule_engine.hpp"
 
 // Main classes
 FirewallEngine      // Firewall main engine
@@ -75,7 +76,7 @@ stack->firewall_set_threshold(0.01f);  // Adjust AI threshold
 ### AI Intelligence Plane
 
 ```cpp
-#include "neustack/ai/network_agent.hpp"
+#include "neustack/ai/ai_agent.hpp"
 #include "neustack/ai/security_model.hpp"
 
 // Main classes

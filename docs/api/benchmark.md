@@ -7,8 +7,9 @@ NeuStack includes a comprehensive benchmark framework for measuring component-le
 ```bash
 # Build (Release mode required for accurate results)
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNEUSTACK_BUILD_BENCHMARKS=ON \
   -DNEUSTACK_ENABLE_AF_XDP=ON -DNEUSTACK_ENABLE_AI=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # Run micro-benchmarks (5 rounds, with statistics)
 python3 scripts/bench/benchmark_runner.py \
@@ -148,8 +149,9 @@ High-speed packet generator using `sendmmsg()` (64 packets per syscall):
 ```bash
 # Full pipeline
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNEUSTACK_BUILD_BENCHMARKS=ON \
   -DNEUSTACK_ENABLE_AF_XDP=ON -DNEUSTACK_ENABLE_AI=ON
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 
 # Micro-benchmarks
 python3 scripts/bench/benchmark_runner.py --build-dir build/ --runs 5

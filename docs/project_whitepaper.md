@@ -108,24 +108,44 @@
 
 ```cpp
 struct StackConfig {
-    std::string local_ip   = "192.168.100.2";
-    std::string peer_ip    = "192.168.100.1";
-    std::string netmask    = "255.255.255.0";
-    std::string dns_server = "8.8.8.8";
-    std::string model_dir;         // AI 模型目录（空则禁用 AI）
-    bool        collect_csv = false;
+    std::string local_ip = "192.168.100.2";
+    uint32_t dns_server = 0x08080808;
+    LogLevel log_level = LogLevel::INFO;
+    bool enable_icmp = true;
+    bool enable_udp = true;
+    std::string device_type = "tun";
+    std::string device_ifname;
+    int io_cpu = -1;
+    bool enable_firewall = true;
+    bool firewall_shadow_mode = true;
+    std::string orca_model_path;
+    std::string anomaly_model_path;
+    std::string bandwidth_model_path;
+    std::string security_model_path;
+    float security_threshold = 0.0f;
+    std::string data_output_dir;
+    int security_label = 0;
 };
 
 class NeuStack {
 public:
-    static std::unique_ptr<NeuStack> create(StackConfig cfg = {});
+    static std::unique_ptr<NeuStack> create(const StackConfig& config = {});
 
-    // 组件访问
+    // 关键组件访问
+    NetDevice& device();
+    IPv4Layer& ip();
+    ICMPHandler* icmp();
+    UDPLayer* udp();
     HttpServer& http_server();
     HttpClient& http_client();
-    DnsClient&  dns_client();
+    DNSClient*  dns();
+    TCPLayer&   tcp();
+    telemetry::TelemetryAPI& telemetry();
 
-    // 生命周期
+    // 生命周期 / 观测
+    std::string status_json(bool pretty = false);
+    std::string status_prometheus();
+    bool ai_enabled() const;
     void run();   // 阻塞运行（Ctrl+C 退出）
     void stop();
 };
@@ -673,8 +693,10 @@ NeuStack/
 |------|--------|------|
 | `NEUSTACK_BUILD_TESTS` | ON | 编译测试 |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | 编译示例程序 |
-| `NEUSTACK_BUILD_BENCHMARKS` | ON | 编译性能基准测试 |
+| `NEUSTACK_BUILD_BENCHMARKS` | OFF | 编译性能基准测试 |
+| `NEUSTACK_BUILD_TOOLS` | ON | 编译 `neustack-stat` 等 CLI 工具 |
 | `NEUSTACK_ENABLE_ASAN` | OFF | 启用 Address Sanitizer |
+| `NEUSTACK_ENABLE_UBSAN` | OFF | 启用 Undefined Behavior Sanitizer |
 | `NEUSTACK_ENABLE_AI` | OFF | 启用 AI 拥塞控制（需要 ONNX Runtime） |
 | `NEUSTACK_ENABLE_AF_XDP` | OFF | 启用 AF_XDP kernel-bypass backend（Linux，需要 libbpf + clang） |
 
@@ -683,9 +705,9 @@ NeuStack/
 ```bash
 # 基础构建
 cmake -B build -G Ninja
-cmake --build build
+cmake --build build --parallel
 
-# 运行测试 (42 个)
+# 运行测试（注册数量会随 AI / benchmark 选项变化）
 cd build && ctest --output-on-failure
 
 # 启动协议栈（需要 root）
@@ -700,7 +722,7 @@ sudo ./scripts/nat/setup_nat.sh --dev utun4
 ```bash
 ./scripts/download/download_onnxruntime.sh
 cmake -B build -G Ninja -DNEUSTACK_ENABLE_AI=ON
-cmake --build build
+cmake --build build --parallel
 ```
 
 ### 6.4 最小示例
@@ -711,6 +733,7 @@ using namespace neustack;
 
 int main() {
     auto stack = NeuStack::create();
+    if (!stack) return 1;
 
     stack->http_server().get("/", [](const HttpRequest &) {
         return HttpResponse()
@@ -729,13 +752,13 @@ int main() {
 
 ### 7.1 测试概览
 
-共 42 个测试，覆盖单元、集成与性能基准三个层面。测试框架使用 Catch2 v3。
+NeuStack 使用 Catch2 v3 + CTest 管理测试。完整开发构建当前可发现 190+ 条测试用例；关闭 AI 或 benchmark 目标时，注册数量会相应减少。
 
-| 类别 | 数量 | 覆盖 |
-|------|------|------|
-| 单元测试 | 16 | 校验和、IP 地址、TCP 序列号、TCP 段解析/构造、拥塞控制 (Reno/CUBIC/Orca)、TCP 采样、全局指标、HTTP 类型/解析、环形缓冲区、SPSC 队列、AI 特征提取、NetworkAgent |
-| 集成测试 | 4 | TCP 三次握手 + 数据回显、HTTP 完整往返、ONNX Runtime 验证、AI 模型端到端 |
-| 基准测试 | 3 | 校验和吞吐量、SPSC 队列吞吐量、TCP 段处理吞吐量 |
+| 类别 | 覆盖 |
+|------|------|
+| 单元测试 | common、HAL、transport、firewall、telemetry、app、AI 特征与状态机 |
+| 集成测试 | TCP 三次握手/压力、HTTP 完整往返、防火墙规则与 E2E、AI runtime 与模型流水线 |
+| 可选 benchmark | checksum、SPSC、TCP、AF_XDP datapath、E2E throughput（需 `NEUSTACK_BUILD_BENCHMARKS=ON`） |
 
 ### 7.2 单元测试详述
 

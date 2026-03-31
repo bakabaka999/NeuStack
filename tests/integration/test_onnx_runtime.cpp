@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <cstring>
+#include <numeric>
 #include <neustack/common/log.hpp>
 
 int main() {
@@ -30,7 +31,8 @@ int main() {
 
         // 3. 加载模型
         std::cout << "[3] Loading model..." << std::endl;
-        const char* model_path_str = "models/test_simple.onnx";
+        std::string model_path = std::string(NEUSTACK_SOURCE_DIR) + "/models/orca_actor.onnx";
+        const char* model_path_str = model_path.c_str();
 #ifdef _WIN32
         // Windows: ORTCHAR_T = wchar_t
         std::wstring wide_path(model_path_str, model_path_str + std::strlen(model_path_str));
@@ -62,8 +64,17 @@ int main() {
 
         // 5. 准备输入数据
         std::cout << "[5] Preparing input data..." << std::endl;
-        std::vector<float> input_data = {1.0f, 2.0f, 3.0f};
-        std::vector<int64_t> input_shape_vec = {1, 3};
+        std::vector<int64_t> input_shape_vec = input_shape;
+        size_t input_element_count = 1;
+        for (auto& dim : input_shape_vec) {
+            if (dim <= 0) {
+                dim = 1;
+            }
+            input_element_count *= static_cast<size_t>(dim);
+        }
+
+        std::vector<float> input_data(input_element_count);
+        std::iota(input_data.begin(), input_data.end(), 1.0f);
 
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
             OrtArenaAllocator, OrtMemTypeDefault);
@@ -75,7 +86,7 @@ int main() {
             input_shape_vec.data(),
             input_shape_vec.size()
         );
-        std::cout << "    Input: [" << input_data[0] << ", " << input_data[1] << ", " << input_data[2] << "]" << std::endl;
+        std::cout << "    Input elements: " << input_data.size() << std::endl;
 
         // 6. 执行推理
         std::cout << "[6] Running inference..." << std::endl;

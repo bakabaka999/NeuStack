@@ -114,7 +114,7 @@ pyyaml>=6.0
 sudo ./scripts/mac/collect.sh --duration 3600 --output collected_data/
 
 # 或手动运行
-sudo ./build/examples/neustack_demo --export metrics.csv
+sudo ./build/examples/neustack_demo --collect --output-dir collected_data/
 ```
 
 ### Linux
@@ -331,15 +331,16 @@ Expected output:
 ### NetworkAgent State Monitoring
 
 ```cpp
-auto& agent = stack->network_agent();
+#ifdef NEUSTACK_AI_ENABLED
+if (stack->ai_enabled()) {
+    const auto& agent = stack->tcp().agent();
 
-// 获取当前状态
-auto state = agent.current_state();
-printf("Agent state: %s\n", agent.state_name(state));
-
-// 获取统计
-auto stats = agent.stats();
-printf("State transitions: %lu\n", stats.state_transitions);
+    printf("Agent state: %s\n", agent_state_name(agent.state()));
+    printf("Current alpha: %.3f\n", agent.current_alpha());
+    printf("Predicted bandwidth: %u\n", agent.predicted_bw());
+    printf("Anomaly score: %.4f\n", agent.anomaly_score());
+}
+#endif
 ```
 
 ---

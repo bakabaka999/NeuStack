@@ -39,7 +39,7 @@ cmake -B build \
   -DNEUSTACK_ENABLE_AF_XDP=ON \
   -DNEUSTACK_ENABLE_AI=ON
 
-cmake --build build -j$(nproc)
+cmake --build build --parallel
 ```
 
 Verify the build:
