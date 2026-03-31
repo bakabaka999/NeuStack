@@ -25,6 +25,14 @@
 
 using namespace neustack;
 
+namespace {
+
+std::string repo_model_path(const char* relative_path) {
+    return std::string(NEUSTACK_SOURCE_DIR) + "/" + relative_path;
+}
+
+} // namespace
+
 static int tests_passed = 0;
 static int tests_failed = 0;
 
@@ -44,7 +52,7 @@ static int tests_failed = 0;
 bool test_orca_model() {
     std::cout << "\n=== Test 1: Orca Model ===" << std::endl;
 
-    OrcaModel model("../models/orca_actor.onnx");
+    OrcaModel model(repo_model_path("models/orca_actor.onnx"));
     if (!model.is_loaded()) {
         std::cout << "  SKIP: model not loaded" << std::endl;
         return false;
@@ -179,7 +187,7 @@ bool test_orca_model() {
 bool test_bandwidth_model() {
     std::cout << "\n=== Test 2: Bandwidth Predictor ===" << std::endl;
 
-    BandwidthPredictor model("../models/bandwidth_predictor.onnx");
+    BandwidthPredictor model(repo_model_path("models/bandwidth_predictor.onnx"));
     if (!model.is_loaded()) {
         std::cout << "  SKIP: model not loaded" << std::endl;
         return false;
@@ -292,7 +300,7 @@ bool test_bandwidth_model() {
 bool test_anomaly_model() {
     std::cout << "\n=== Test 3: Anomaly Detector ===" << std::endl;
 
-    AnomalyDetector model("../models/anomaly_detector.onnx");
+    AnomalyDetector model(repo_model_path("models/anomaly_detector.onnx"));
     if (!model.is_loaded()) {
         std::cout << "  SKIP: model not loaded" << std::endl;
         return false;
@@ -364,9 +372,9 @@ bool test_integration() {
     SPSCQueue<AIAction, 16> action_queue;
 
     IntelligencePlaneConfig config;
-    config.orca_model_path = "../models/orca_actor.onnx";
-    config.anomaly_model_path = "../models/anomaly_detector.onnx";
-    config.bandwidth_model_path = "../models/bandwidth_predictor.onnx";
+    config.orca_model_path = repo_model_path("models/orca_actor.onnx");
+    config.anomaly_model_path = repo_model_path("models/anomaly_detector.onnx");
+    config.bandwidth_model_path = repo_model_path("models/bandwidth_predictor.onnx");
     config.orca_interval = std::chrono::milliseconds(50);
     config.anomaly_interval = std::chrono::milliseconds(200);
     config.bandwidth_interval = std::chrono::milliseconds(100);

@@ -2,6 +2,36 @@
 
 All notable changes to NeuStack will be documented in this file.
 
+## [1.4.0] - 2026-03-28
+
+### Added
+
+**AF_XDP High-Performance Backend**
+- `AFXDPDevice`: full AF_XDP backend implementing `NetDevice` interface with UMEM shared-memory ring, BPF/XDP program loading, and batch ring I/O (#22, #23, #24)
+- `UMEMArea`: UMEM lifecycle management with FixedPool slab frame allocator — zero heap allocation on hot path
+- `XDPRing`: fill / completion / RX / TX four-ring abstraction with batch ops
+- `BPFObject`: BPF program loading, XDP attach/detach, libbpf integration
+- Generic (SKB copy) mode and native zero-copy mode (`zero_copy=true`) both supported
+- `CMakeLists.txt`: `NEUSTACK_ENABLE_AF_XDP` build option with auto-detection of libbpf + clang
+
+**Zero-Copy Send Path**
+- `send_zerocopy()` interface: eliminates 2 of 3 memory copies vs traditional path (52 vs 162 ns/pkt)
+- Batch send via TX ring with completion tracking
+
+**Benchmark Framework**
+- `bench_afxdp_datapath`: micro-benchmarks for UMEM alloc/free, XDP ring ops, zero-copy send path, prefetch effect, TCP header build (#25)
+- `bench_e2e_throughput`: end-to-end packet throughput with veth pairs and network namespaces; three backends compared: kernel_udp / raw_socket / AF_XDP (#25)
+- `benchmark_runner.py`: multi-run orchestration with statistics and JSON output
+- `plot_results.py`: automated figure generation (PDF + PNG + LaTeX)
+- `run_throughput_test.sh`: E2E throughput test script with configurable duration and runs
+- `udp_flood.cpp`: high-speed sendmmsg UDP packet generator (1.2+ Mpps)
+
+### Changed
+- Project version 1.3.0 → 1.4.0
+- `NetDevice` interface extended with `recv_batch()`, `send_batch()`, `send_zerocopy()` (#22)
+
+---
+
 ## [1.3.0] - 2026-03-10
 
 ### Added

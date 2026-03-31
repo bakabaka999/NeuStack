@@ -76,13 +76,13 @@ All endpoints are auto-registered on stack startup. No manual route setup requir
 
 ```bash
 # Full JSON snapshot
-curl http://192.168.100.2:8080/api/v1/stats?pretty=true
+curl http://192.168.100.2:80/api/v1/stats?pretty=true
 
 # Prometheus scraping
-curl http://192.168.100.2:8080/metrics
+curl http://192.168.100.2:80/metrics
 
 # Active connections
-curl http://192.168.100.2:8080/api/v1/connections?pretty=true
+curl http://192.168.100.2:80/api/v1/connections?pretty=true
 ```
 
 ### JSON Response Structure (`/api/v1/stats`)
@@ -233,7 +233,7 @@ Standalone remote monitoring tool. Connects to NeuStack's HTTP API and renders a
 | Flag | Description |
 |------|-------------|
 | `--host <addr>` | Target NeuStack host (default: `127.0.0.1`) |
-| `--port <port>` | Target port (default: `8080`) |
+| `--port <port>` | Target port (default: `80`) |
 | `--live` / `-l` | Live refresh mode |
 | `--interval <sec>` / `-i <sec>` | Refresh interval (default: `1`) |
 | `--json` / `-j` | Raw JSON output |
@@ -272,7 +272,7 @@ scrape_configs:
   - job_name: 'neustack'
     scrape_interval: 1s
     static_configs:
-      - targets: ['192.168.100.2:8080']
+      - targets: ['192.168.100.2:80']
     metrics_path: '/metrics'
 ```
 
@@ -280,19 +280,22 @@ scrape_configs:
 
 ```cpp
 auto stack = neustack::NeuStack::create();
+if (!stack) return 1;
 
-// HTTP endpoints are auto-registered
+// HTTP endpoints are served on the same HttpServer port that your app listens on
 stack->http_server().listen(80);
 
 // Programmatic access
 auto& telemetry = stack->telemetry();
+auto status = telemetry.status();
 
-stack->on_timer([&]() {
-    auto status = telemetry.status();
-    if (status.traffic.pps_rx > 10000) {
-        printf("High traffic: %.0f pps\n", status.traffic.pps_rx);
-    }
-});
+printf("Active TCP connections: %u\n", status.tcp.active_connections);
+printf("Current RX PPS: %.1f\n", status.traffic.pps_rx);
+
+std::string json = stack->status_json(true);
+std::string prom = stack->status_prometheus();
 
 stack->run();
 ```
+
+For periodic monitoring, use the HTTP endpoints from another process or query `telemetry.status()` from your own management thread.

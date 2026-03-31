@@ -12,13 +12,16 @@ This directory contains the API reference documentation for NeuStack.
 | [Telemetry](telemetry.md) | Telemetry framework, HTTP endpoints, Prometheus export, CLI tool |
 | [Integration](integration.md) | How to use NeuStack as a library in your project |
 | [NeuStack Core](core.md) | Core API (protocol stack / HTTP / DNS) |
+| [AF_XDP](af-xdp.md) | AF_XDP backend: NIC compatibility, modes, configuration, batch recv/send API |
+| [Benchmark](benchmark.md) | Benchmark framework: micro-benchmarks, E2E throughput, results, reproduction |
 
 ## Quick Links
 
 ### Firewall
 
 ```cpp
-#include "neustack/firewall.hpp"
+#include "neustack/firewall/firewall_engine.hpp"
+#include "neustack/firewall/rule_engine.hpp"
 
 // Main classes
 FirewallEngine      // Firewall main engine
@@ -73,7 +76,7 @@ stack->firewall_set_threshold(0.01f);  // Adjust AI threshold
 ### AI Intelligence Plane
 
 ```cpp
-#include "neustack/ai/network_agent.hpp"
+#include "neustack/ai/ai_agent.hpp"
 #include "neustack/ai/security_model.hpp"
 
 // Main classes
@@ -89,4 +92,5 @@ SecurityAnomalyModel   // Deep Autoencoder security anomaly detection (firewall 
 - **v1.0**: Base protocol stack + AI congestion control
 - **v1.1**: Performance optimization + test hardening
 - **v1.2**: AI firewall + security training pipeline + E2E test suite
-- **v1.3**: Telemetry framework + HTTP metrics endpoints + CLI monitoring tool + AI model hardening (current)
+- **v1.3**: Telemetry framework + HTTP metrics endpoints + CLI monitoring tool + AI model hardening
+- **v1.4**: AF_XDP high-performance backend (UMEM + BPF/XDP + batch ring I/O) + benchmark framework (micro + E2E throughput) (current)
