@@ -53,7 +53,7 @@ void DNSClient::on_receive(uint32_t src_ip, uint16_t src_port,
         return;
     }
 
-    auto response = parse_response(data, len);
+    auto response = parse_message(data, len);
     if (!response) {
         LOG_WARN(DNS, "Failed to parse DNS response");
         return;
@@ -161,7 +161,7 @@ std::vector<uint8_t> DNSClient::build_query(uint16_t id,
     return packet;
 }
 
-std::optional<DNSResponse> DNSClient::parse_response(const uint8_t *data, size_t len) {
+std::optional<DNSResponse> DNSClient::parse_message(const uint8_t *data, size_t len) {
     if (len < sizeof(DNSHeader)) {
         return std::nullopt;
     }

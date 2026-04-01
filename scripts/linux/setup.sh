@@ -4,13 +4,13 @@
 # Linux environment setup & build
 #
 # What it does:
-#   1. Check / install dependencies (cmake, g++, ninja, socat)
+#   1. Check / install dependencies (cmake, g++, clang++, ninja, socat)
 #   2. Check TUN module
 #   3. Download ONNX Runtime if needed (auto-detect arch)
 #   4. Build NeuStack (auto-enable AI if ORT found)
 #
 # Usage:
-#   sudo bash scripts/linux/setup.sh [--no-ai]
+#   sudo bash scripts/linux/setup.sh [--no-ai] [--with-fuzzers]
 
 set -e
 
@@ -19,10 +19,12 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Parse args
 FORCE_NO_AI=0
+WITH_FUZZERS=0
 for arg in "$@"; do
     case "$arg" in
         --no-ai) FORCE_NO_AI=1 ;;
-        *) echo "Unknown option: $arg"; echo "Usage: $0 [--no-ai]"; exit 1 ;;
+        --with-fuzzers) WITH_FUZZERS=1 ;;
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--no-ai] [--with-fuzzers]"; exit 1 ;;
     esac
 done
 
@@ -69,6 +71,7 @@ check_cmd() {
 BASIC_PKGS=()
 command -v cmake      &>/dev/null || BASIC_PKGS+=(cmake)
 command -v g++        &>/dev/null || BASIC_PKGS+=(g++)
+command -v clang++    &>/dev/null || BASIC_PKGS+=(clang)
 command -v curl       &>/dev/null || BASIC_PKGS+=(curl)
 command -v socat      &>/dev/null || BASIC_PKGS+=(socat)
 command -v clang      &>/dev/null || BASIC_PKGS+=(clang)
@@ -148,6 +151,7 @@ fi
 # Show status
 check_cmd cmake
 check_cmd g++
+check_cmd clang++
 check_cmd curl
 check_cmd socat
 if [ $HAS_NINJA -eq 1 ]; then
@@ -178,6 +182,23 @@ if [ "$GCC_VER" -lt 10 ]; then
     exit 1
 fi
 echo "  ✓ g++ version $GCC_VER (C++20 OK)"
+
+ENABLE_FUZZERS=OFF
+SELECTED_CC="$(command -v cc || command -v gcc)"
+SELECTED_CXX="$(command -v c++ || command -v g++)"
+
+if [ $WITH_FUZZERS -eq 1 ]; then
+    if ! command -v clang++ &>/dev/null || ! command -v clang &>/dev/null; then
+        echo ""
+        echo "  ERROR: --with-fuzzers requires clang/clang++"
+        exit 1
+    fi
+
+    SELECTED_CC="$(command -v clang)"
+    SELECTED_CXX="$(command -v clang++)"
+    ENABLE_FUZZERS=ON
+    echo "  ✓ Fuzz compiler: $SELECTED_CXX"
+fi
 
 # ─── 2. TUN module ───
 echo ""
@@ -254,11 +275,15 @@ mkdir -p "$BUILD_DIR"
 # 清理旧的 CMake 缓存 (避免 generator 切换冲突)
 if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
     OLD_GEN=$(grep "^CMAKE_GENERATOR:" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null | cut -d= -f2)
+    OLD_CXX=$(grep "^CMAKE_CXX_COMPILER:FILEPATH=" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null | cut -d= -f2-)
     if [ $HAS_NINJA -eq 1 ] && [ "$OLD_GEN" != "Ninja" ]; then
         echo "  Cleaning stale CMake cache (was $OLD_GEN, switching to Ninja)..."
         rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
     elif [ $HAS_NINJA -eq 0 ] && [ "$OLD_GEN" = "Ninja" ]; then
         echo "  Cleaning stale CMake cache (was Ninja, switching to Make)..."
+        rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
+    elif [ -n "$OLD_CXX" ] && [ "$OLD_CXX" != "$SELECTED_CXX" ]; then
+        echo "  Cleaning stale CMake cache (compiler changed to $SELECTED_CXX)..."
         rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
     fi
 fi
@@ -274,7 +299,10 @@ fi
 CMAKE_ARGS=(
     -DNEUSTACK_ENABLE_AI=$ENABLE_AI
     -DNEUSTACK_ENABLE_AF_XDP=$ENABLE_AFXDP
+    -DNEUSTACK_BUILD_FUZZERS=$ENABLE_FUZZERS
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_C_COMPILER=$SELECTED_CC
+    -DCMAKE_CXX_COMPILER=$SELECTED_CXX
 )
 if [ $HAS_NINJA -eq 1 ]; then
     CMAKE_ARGS+=(-G Ninja)
@@ -294,6 +322,7 @@ echo "=============================================="
 echo ""
 echo "  AI enabled:  $ENABLE_AI"
 echo "  AF_XDP:      $ENABLE_AFXDP"
+echo "  Fuzzers:     $ENABLE_FUZZERS"
 echo "  Binary:      $BUILD_DIR/examples/neustack_demo"
 echo ""
 echo "  Quick start:"
@@ -303,3 +332,9 @@ echo ""
 echo "    # With data collection"
 echo "    sudo ./build/examples/neustack_demo --ip 10.0.0.2 --collect -v"
 echo ""
+if [ "$ENABLE_FUZZERS" = "ON" ]; then
+    echo "    # Run parser fuzzers"
+    echo "    ./build/fuzz/fuzz_http_parser -runs=100"
+    echo "    ./build/fuzz/fuzz_dns_parser -runs=100"
+    echo ""
+fi
