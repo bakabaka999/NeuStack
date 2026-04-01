@@ -157,6 +157,19 @@ if(NEUSTACK_BUILD_BENCHMARKS)
     add_executable(bench_e2e_throughput benchmark/bench_e2e_throughput.cpp)
     target_link_libraries(bench_e2e_throughput PRIVATE neustack_lib)
     add_test(NAME "Benchmark: E2E throughput" COMMAND bench_e2e_throughput --help)
+
+    set_tests_properties(
+        "Benchmark: Checksum calculate"
+        "Benchmark: Spsc queue test"
+        "Benchmark: TCP throughput test"
+        "Benchmark: TCP connection test"
+        "Benchmark: HTTP test"
+        "Benchmark: Memory pool test"
+        "Benchmark: Metrics hotpath"
+        "Benchmark: AF_XDP datapath"
+        "Benchmark: E2E throughput"
+        PROPERTIES LABELS "benchmark"
+    )
 endif()
 
 # --- AI 智能平面相关测试 ---
