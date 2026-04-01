@@ -1,6 +1,8 @@
 #include "neustack/app/http_parser.hpp"
 #include "neustack/common/string_utils.hpp"
 #include <algorithm>
+#include <cctype>
+#include <stdexcept>
 
 namespace neustack {
 
@@ -134,6 +136,28 @@ static void split_path_query(HttpRequest& req, const std::string& uri) {
     }
 }
 
+static std::string trim_http_token(const std::string& value) {
+    auto begin = value.find_first_not_of(" \t");
+    if (begin == std::string::npos) {
+        return "";
+    }
+
+    auto end = value.find_last_not_of(" \t");
+    return value.substr(begin, end - begin + 1);
+}
+
+static bool contains_token_ignore_case(const std::string& value, const std::string& token) {
+    std::string lower_value = value;
+    std::transform(lower_value.begin(), lower_value.end(), lower_value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    std::string lower_token = token;
+    std::transform(lower_token.begin(), lower_token.end(), lower_token.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    return lower_value.find(lower_token) != std::string::npos;
+}
+
 bool HttpRequestParser::parse_request_line() {
     auto pos = _buffer.find("\r\n");
     if (pos == std::string::npos) {
@@ -198,18 +222,20 @@ size_t HttpResponseParser::feed(const uint8_t *data, size_t len) {
                 {
                     auto it = find_header_ignore_case(_response.headers, "Transfer-Encoding");
                     if (it != _response.headers.end() && !it->second.empty()) {
-                        _chunked = (it->second[0].find("chunked") != std::string::npos);
+                        _chunked = contains_token_ignore_case(it->second[0], "chunked");
                     }
                 }
-                if (_chunked && _state == State::Body) {
-                    // 暂不支持 chunked
-                    _state = State::Error;
-                    _error = "Chunked transfer not implemented";
-                    return len;
+                if (_chunked) {
+                    _content_length = 0;
+                    _state = State::Body;
                 }
                 break;
             case State::Body:
-                if (!parse_body(_response.body)) return len;
+                if (_chunked) {
+                    if (!parse_chunked_body()) return len;
+                } else if (!parse_body(_response.body)) {
+                    return len;
+                }
                 break;
             default:
                 break;
@@ -265,6 +291,110 @@ void HttpResponseParser::reset() {
     _error.clear();
     _content_length = 0;
     _chunked = false;
+    _chunk_state = ChunkState::Size;
+    _chunk_bytes_remaining = 0;
+}
+
+bool HttpResponseParser::parse_chunked_body() {
+    while (_state != State::Complete && _state != State::Error) {
+        switch (_chunk_state) {
+            case ChunkState::Size: {
+                auto pos = _buffer.find("\r\n");
+                if (pos == std::string::npos) {
+                    return false;
+                }
+
+                std::string line = _buffer.substr(0, pos);
+                _buffer.erase(0, pos + 2);
+
+                auto semi = line.find(';');
+                if (semi != std::string::npos) {
+                    line = line.substr(0, semi);
+                }
+
+                line = trim_http_token(line);
+                if (line.empty()) {
+                    _state = State::Error;
+                    _error = "Invalid chunk size";
+                    return true;
+                }
+
+                try {
+                    size_t parsed = 0;
+                    _chunk_bytes_remaining = std::stoul(line, &parsed, 16);
+                    if (parsed != line.size()) {
+                        throw std::invalid_argument("trailing data");
+                    }
+                } catch (...) {
+                    _state = State::Error;
+                    _error = "Invalid chunk size";
+                    return true;
+                }
+
+                if (_chunk_bytes_remaining == 0) {
+                    _chunk_state = ChunkState::Trailers;
+                } else {
+                    _chunk_state = ChunkState::Data;
+                }
+                break;
+            }
+
+            case ChunkState::Data:
+                if (_buffer.size() < _chunk_bytes_remaining) {
+                    return false;
+                }
+
+                _response.body.append(_buffer.data(), _chunk_bytes_remaining);
+                _buffer.erase(0, _chunk_bytes_remaining);
+                _chunk_bytes_remaining = 0;
+                _chunk_state = ChunkState::DataCRLF;
+                break;
+
+            case ChunkState::DataCRLF:
+                if (_buffer.size() < 2) {
+                    return false;
+                }
+                if (_buffer.compare(0, 2, "\r\n") != 0) {
+                    _state = State::Error;
+                    _error = "Invalid chunk terminator";
+                    return true;
+                }
+
+                _buffer.erase(0, 2);
+                _chunk_state = ChunkState::Size;
+                break;
+
+            case ChunkState::Trailers: {
+                auto pos = _buffer.find("\r\n");
+                if (pos == std::string::npos) {
+                    return false;
+                }
+
+                if (pos == 0) {
+                    _buffer.erase(0, 2);
+                    _state = State::Complete;
+                    return true;
+                }
+
+                std::string line = _buffer.substr(0, pos);
+                _buffer.erase(0, pos + 2);
+
+                auto colon = line.find(':');
+                if (colon == std::string::npos) {
+                    _state = State::Error;
+                    _error = "Invalid trailer line";
+                    return true;
+                }
+
+                std::string key = line.substr(0, colon);
+                std::string value = trim_http_token(line.substr(colon + 1));
+                _response.headers[key].push_back(value);
+                break;
+            }
+        }
+    }
+
+    return true;
 }
 
 } // namespace neustack

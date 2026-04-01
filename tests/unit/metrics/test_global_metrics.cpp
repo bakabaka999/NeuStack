@@ -23,6 +23,7 @@ TEST_CASE("GlobalMetrics: Atomic counter behavior and snapshots", "[metrics][glo
         CHECK(snap.conn_closed == 0);
         CHECK(snap.conn_reset == 0);
         CHECK(snap.conn_timeout == 0);
+        CHECK(snap.total_retransmits == 0);
     }
 
     SECTION("Snapshot reflects cumulative increments") {
@@ -38,6 +39,7 @@ TEST_CASE("GlobalMetrics: Atomic counter behavior and snapshots", "[metrics][glo
         
         metrics.conn_established += 1;
         metrics.conn_timeout += 1;
+        metrics.total_retransmits += 3;
 
         auto snap = metrics.snapshot();
         
@@ -49,6 +51,7 @@ TEST_CASE("GlobalMetrics: Atomic counter behavior and snapshots", "[metrics][glo
         CHECK(snap.rst_received == 1);
         CHECK(snap.conn_established == 1);
         CHECK(snap.conn_timeout == 1);
+        CHECK(snap.total_retransmits == 3);
     }
 
     SECTION("Active connections counter (uint32) support increments and decrements") {

@@ -13,6 +13,8 @@
 
 namespace neustack {
 
+struct ICMPErrorInfo;
+
 // ============================================================================
 // UDP 头部 (网络字节序)
 // ============================================================================
@@ -73,6 +75,7 @@ struct UDPDatagram {
 // 参数: 源IP, 源端口, 数据指针, 数据长度
 using UDPReceiveCallback = std::function<void(uint32_t src_ip, uint16_t src_port,
                                               const uint8_t *data, size_t len)>;
+using UDPErrorCallback = std::function<void(const ICMPErrorInfo&)>;
 
 // ============================================================================
 // UDPLayer - UDP 层
@@ -102,6 +105,8 @@ public:
      * @param port 要解绑的端口
      */
     void unbind(uint16_t port);
+    void set_error_callback(uint16_t port, UDPErrorCallback callback);
+    void handle_icmp_error(const ICMPErrorInfo &error);
 
     /**
      * @brief 发送 UDP 数据
@@ -130,7 +135,11 @@ private:
     uint16_t allocate_ephemeral_port();
 
     IPv4Layer &_ip_layer;
-    std::unordered_map<uint16_t, UDPReceiveCallback> _sockets;
+    struct BoundSocket {
+        UDPReceiveCallback on_receive;
+        UDPErrorCallback on_error;
+    };
+    std::unordered_map<uint16_t, BoundSocket> _sockets;
     uint16_t _next_ephemeral_port = 49152; // 临时端口范围: 49152-65535
 };
 

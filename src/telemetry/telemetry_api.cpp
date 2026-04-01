@@ -189,7 +189,7 @@ StackStatus::TCP TelemetryAPI::tcp_stats() {
     tcp.total_established = gm.conn_established.load(std::memory_order_relaxed);
     tcp.total_reset = gm.conn_reset.load(std::memory_order_relaxed);
     tcp.total_timeout = gm.conn_timeout.load(std::memory_order_relaxed);
-    tcp.total_retransmits = 0; // TODO: GlobalMetrics 暂无 retransmits 字段
+    tcp.total_retransmits = gm.total_retransmits.load(std::memory_order_relaxed);
 
     // RTT 从 Histogram 计算
     auto* rtt_hist = _impl->registry.find_histogram("neustack_tcp_rtt_us");

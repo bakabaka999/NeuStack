@@ -99,4 +99,26 @@ TEST_CASE("HttpResponseParser and Serialization", "[app][http]") {
         CHECK(parser.is_complete());
         CHECK(parser.response().status == HttpStatus::NotFound);
     }
+
+    SECTION("Parse chunked response") {
+        std::string raw =
+            "HTTP/1.1 200 OK\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+            "5\r\nhello\r\n"
+            "6\r\n world\r\n"
+            "0\r\n"
+            "Trailer-Test: done\r\n"
+            "\r\n";
+
+        parser.feed(raw);
+
+        REQUIRE(parser.is_complete());
+        CHECK(parser.response().status == HttpStatus::OK);
+        CHECK(parser.response().body == "hello world");
+        REQUIRE(parser.response().headers.count("Transfer-Encoding") == 1);
+        CHECK(parser.response().headers.at("Transfer-Encoding")[0] == "chunked");
+        REQUIRE(parser.response().headers.count("Trailer-Test") == 1);
+        CHECK(parser.response().headers.at("Trailer-Test")[0] == "done");
+    }
 }

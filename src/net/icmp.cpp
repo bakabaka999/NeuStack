@@ -34,16 +34,30 @@ void ICMPHandler::handle(const IPv4Packet &pkt) {
             break;
 
         case ICMPType::DestUnreachable:
-            LOG_INFO(ICMP, "Dest Unreachable from %s, code=%u",
-                     ip_to_string(pkt.src_addr).c_str(), hdr->code);
-            // TODO: 解析原始包，通知对应的 socket
-            break;
+        case ICMPType::TimeExceeded: {
+            ICMPErrorInfo info{};
+            if (!parse_error_info(pkt, info)) {
+                LOG_INFO(ICMP, "ICMP error from %s, code=%u (embedded packet unavailable)",
+                         ip_to_string(pkt.src_addr).c_str(), hdr->code);
+                break;
+            }
 
-        case ICMPType::TimeExceeded:
-            LOG_INFO(ICMP, "Time Exceeded from %s, code=%u",
-                     ip_to_string(pkt.src_addr).c_str(), hdr->code);
-            // TODO: 解析原始包，通知对应的 socket
+            info.type = static_cast<ICMPType>(hdr->type);
+            info.code = hdr->code;
+            info.reporter_ip = pkt.src_addr;
+
+            LOG_INFO(ICMP, "ICMP error %u/%u from %s for %s:%u -> %s:%u",
+                     hdr->type, hdr->code,
+                     ip_to_string(pkt.src_addr).c_str(),
+                     ip_to_string(info.local_ip).c_str(), info.local_port,
+                     ip_to_string(info.remote_ip).c_str(), info.remote_port);
+
+            auto it = _error_callbacks.find(info.protocol);
+            if (it != _error_callbacks.end() && it->second) {
+                it->second(info);
+            }
             break;
+        }
 
         default:
             LOG_DEBUG(ICMP, "unhandled type %u from %s", hdr->type,
@@ -131,6 +145,39 @@ void ICMPHandler::handle_echo_reply(const IPv4Packet &pkt) {
     if (_reply_cb) {
         _reply_cb(pkt.src_addr, id, seq, 0);
     }
+}
+
+bool ICMPHandler::parse_error_info(const IPv4Packet &pkt, ICMPErrorInfo &info) const {
+    constexpr size_t ICMP_ERROR_PREFIX = sizeof(ICMPHeader) + sizeof(ICMPError);
+
+    if (pkt.payload_length < ICMP_ERROR_PREFIX + sizeof(IPv4Header)) {
+        return false;
+    }
+
+    const uint8_t *embedded = pkt.payload + ICMP_ERROR_PREFIX;
+    size_t embedded_len = pkt.payload_length - ICMP_ERROR_PREFIX;
+
+    IPv4Header inner_hdr{};
+    std::memcpy(&inner_hdr, embedded, sizeof(inner_hdr));
+
+    if (inner_hdr.version() != 4 || inner_hdr.ihl() < 5) {
+        return false;
+    }
+
+    size_t inner_hdr_len = inner_hdr.header_length();
+    if (embedded_len < inner_hdr_len + 4) {
+        return false;
+    }
+
+    info.local_ip = ntohl(inner_hdr.src_addr);
+    info.remote_ip = ntohl(inner_hdr.dst_addr);
+    info.protocol = inner_hdr.protocol;
+
+    uint16_t ports[2];
+    std::memcpy(ports, embedded + inner_hdr_len, sizeof(ports));
+    info.local_port = ntohs(ports[0]);
+    info.remote_port = ntohs(ports[1]);
+    return true;
 }
 
 void ICMPHandler::send_dest_unreachable(ICMPUnreachCode code, const IPv4Packet &original_pkt) {

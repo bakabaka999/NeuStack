@@ -340,6 +340,7 @@ bool HttpServer::dispatch_chunked(IStreamConnection *conn, const HttpRequest &re
     }
 
     state.chunked_header_sent = false;
+    state.chunked_transfer_encoding = false;
 
     // 开始发送
     send_next_chunk(conn);
@@ -360,12 +361,13 @@ bool HttpServer::send_next_chunk(IStreamConnection *conn) {
     if (!state.chunked_header_sent) {
         size_t total = state.chunked_generator->total_size();
         std::string content_type = state.chunked_generator->content_type();
+        state.chunked_transfer_encoding = (total == 0);
 
         std::string header = "HTTP/1.1 200 OK\r\n";
         header += "Content-Type: " + content_type + "\r\n";
         header += "Cache-Control: no-cache\r\n";
 
-        if (total > 0) {
+        if (!state.chunked_transfer_encoding) {
             // 已知大小，使用 Content-Length
             header += "Content-Length: " + std::to_string(total) + "\r\n";
         } else {
@@ -411,7 +413,13 @@ bool HttpServer::send_next_chunk(IStreamConnection *conn) {
             break;
         }
 
-        // 直接发送数据（因为我们用 Content-Length，不需要 chunked 格式）
+        if (state.chunked_transfer_encoding) {
+            std::ostringstream framed;
+            framed << std::hex << chunk.size() << "\r\n";
+            framed << chunk << "\r\n";
+            chunk = framed.str();
+        }
+
         const uint8_t *data = reinterpret_cast<const uint8_t*>(chunk.data());
         size_t len = chunk.size();
         size_t offset = 0;
@@ -430,8 +438,29 @@ bool HttpServer::send_next_chunk(IStreamConnection *conn) {
 
     // 检查是否完成
     if (!state.chunked_generator->has_more()) {
+        if (state.chunked_transfer_encoding) {
+            state.pending_data = "0\r\n\r\n";
+            state.pending_offset = 0;
+
+            while (state.pending_offset < state.pending_data.size()) {
+                const uint8_t *data = reinterpret_cast<const uint8_t*>(
+                    state.pending_data.data() + state.pending_offset);
+                size_t remaining = state.pending_data.size() - state.pending_offset;
+
+                ssize_t sent = conn->send(data, remaining);
+                if (sent <= 0) {
+                    return false;
+                }
+                state.pending_offset += sent;
+            }
+
+            state.pending_data.clear();
+            state.pending_offset = 0;
+        }
+
         LOG_DEBUG(HTTP, "chunked response complete");
         state.chunked_generator.reset();
+        state.chunked_transfer_encoding = false;
 
         // 非 Keep-Alive，关闭连接
         if (!state.keep_alive) {

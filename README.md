@@ -38,20 +38,30 @@
 
 ## Table of Contents
 
+- [Table of Contents](#table-of-contents)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [System Architecture](#system-architecture)
 - [Performance](#performance)
 - [Quick Start](#quick-start)
+  - [Dependencies](#dependencies)
+  - [One-Command Setup](#one-command-setup)
+  - [Manual Build](#manual-build)
+  - [Recommended First Run](#recommended-first-run)
+  - [Minimal Example](#minimal-example)
 - [AI Intelligence Plane](#ai-intelligence-plane)
-- [AF_XDP Data Path](#afxdp-data-path)
+  - [Models](#models)
+  - [NetworkAgent States](#networkagent-states)
+  - [Firewall AI (separate, synchronous)](#firewall-ai-separate-synchronous)
+- [AF\_XDP Data Path](#af_xdp-data-path)
 - [Firewall](#firewall)
-- [Telemetry & Observability](#telemetry--observability)
+- [Telemetry \& Observability](#telemetry--observability)
 - [Benchmarks](#benchmarks)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [Build Options](#build-options)
 - [Documentation](#documentation)
+- [Roadmap](#roadmap)
 - [License](#license)
 
 ---
@@ -160,6 +170,8 @@ NeuStack separates packet processing across two planes:
 # macOS / Linux
 ./setup              # with AI
 ./setup --no-ai      # without AI (faster build)
+./setup --with-fuzzers  # build parser fuzz targets and auto-check toolchain
+./setup fuzz            # same as above
 
 # Windows (PowerShell as Administrator)
 .\setup.bat
@@ -391,6 +403,7 @@ cd build && ctest --output-on-failure
 ```
 
 Benchmark executables are optional and require `-DNEUSTACK_BUILD_BENCHMARKS=ON` during configuration.
+Parser fuzzers are optional and require `-DNEUSTACK_BUILD_FUZZERS=ON` plus a Clang / AppleClang toolchain with libFuzzer runtime support. On macOS, Command Line Tools alone do not ship `libclang_rt.fuzzer_osx.a`; use `./setup --with-fuzzers` to auto-check and provision a compatible toolchain when possible.
 
 | Suite | Tests |
 |-------|-------|
@@ -398,6 +411,7 @@ Benchmark executables are optional and require `-DNEUSTACK_BUILD_BENCHMARKS=ON` 
 | HAL | Batch device · Ethernet · UMEM · XDP ring · AF_XDP config · BPF object |
 | AI | Feature extraction · NetworkAgent FSM · ONNX model integration |
 | Optional Benchmarks | `bench_afxdp_datapath` (micro) · `bench_e2e_throughput` (E2E) when `NEUSTACK_BUILD_BENCHMARKS=ON` |
+| Optional Fuzzers | `fuzz_http_parser` · `fuzz_dns_parser` · `fuzz_ipv4_parser` · `fuzz_tcp_parser` when `NEUSTACK_BUILD_FUZZERS=ON` |
 
 <p align="right"><a href="#top">&#8593; Back to top</a></p>
 
@@ -419,6 +433,7 @@ NeuStack/
 ├── tests/
 │   ├── unit/                  #   Catch2 unit tests
 │   └── benchmark/             #   bench_afxdp_datapath, bench_e2e_throughput
+├── fuzz/                      #   libFuzzer harnesses for HTTP, DNS, IPv4, TCP parsers
 ├── training/                  # Python AI training pipelines
 │   ├── congestion/            #   Orca (SAC RL)
 │   ├── bandwidth/             #   LSTM bandwidth prediction
@@ -451,6 +466,7 @@ NeuStack/
 | `NEUSTACK_BUILD_TESTS` | ON | Build unit and integration tests |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | Build example programs |
 | `NEUSTACK_BUILD_BENCHMARKS` | OFF | Build benchmark executables and register benchmark ctest targets |
+| `NEUSTACK_BUILD_FUZZERS` | OFF | Build libFuzzer parser fuzz targets and enable sanitizer instrumentation |
 | `NEUSTACK_BUILD_TOOLS` | ON | Build CLI tools such as `neustack-stat` |
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
 | `NEUSTACK_ENABLE_UBSAN` | OFF | Undefined Behavior Sanitizer |
@@ -473,7 +489,7 @@ NeuStack/
 | [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP: NIC compatibility, modes, configuration, API |
 | [`docs/api/benchmark.md`](docs/api/benchmark.md) | Benchmark framework: usage, results, reproduction |
 | [`docs/api/integration.md`](docs/api/integration.md) | Using NeuStack as a library (CMake, release archives) |
-| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper (v1.4) |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | Full technical whitepaper (v1.5) |
 
 <p align="right"><a href="#top">&#8593; Back to top</a></p>
 
@@ -488,8 +504,11 @@ NeuStack/
 - [ ] **Multi-queue AF_XDP** — per-core RX/TX queues for multi-threaded packet processing
 - [ ] **AI Benchmark Suite** — latency/throughput profiling of each ONNX model under sustained load
 - [ ] **TLS / HTTPS support** — integrate a mature TLS backend for secure client/server connections without reimplementing TLS in-house
-- [ ] **Parser fuzzing** — add libFuzzer-based coverage for HTTP, DNS, IPv4, and TCP parsing hot paths with sanitizer integration
-- [ ] **Exception-path closure** — propagate ICMP unreachable / time-exceeded errors to TCP/UDP consumers and complete retransmit telemetry
+- [x] **HTTP chunked transfer support** — client parser consumes chunked responses; server emits standards-compliant chunked streams for unknown-size bodies
+- [x] **Parser fuzzing** — libFuzzer harnesses cover HTTP, DNS, IPv4, and TCP parsing hot paths with ASAN/UBSAN integration
+- [x] **UDP ICMP error propagation** — deliver ICMP unreachable / time-exceeded metadata to bound UDP consumers
+- [x] **TCP ICMP error propagation** — surface ICMP unreachable / time-exceeded failures to TCP connect and stream-close consumers
+- [x] **Retransmit telemetry** — export TCP retransmit counters through `GlobalMetrics` / Telemetry API
 
 **v2.0 — AI Infra Transport Layer**
 

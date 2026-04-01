@@ -154,6 +154,8 @@ NeuStack 将包处理分离为两个平面：
 # macOS / Linux
 ./setup              # 含 AI
 ./setup --no-ai      # 不含 AI（编译更快）
+./setup --with-fuzzers  # 构建 parser fuzz targets，并自动检查/补齐工具链
+./setup fuzz            # 同上
 
 # Windows（以管理员身份运行 PowerShell）
 .\setup.bat
@@ -394,6 +396,7 @@ cd build && ctest --output-on-failure
 ```
 
 Benchmark 可执行文件是可选项，配置阶段需要显式开启 `-DNEUSTACK_BUILD_BENCHMARKS=ON`。
+Parser fuzzers 也是可选项，需要显式开启 `-DNEUSTACK_BUILD_FUZZERS=ON`，并使用带 libFuzzer runtime 的 Clang / AppleClang 工具链。在 macOS 上，单独安装的 Command Line Tools 不包含 `libclang_rt.fuzzer_osx.a`；可以直接运行 `./setup --with-fuzzers` 自动检查并尽量补齐。
 
 | 套件 | 测试内容 |
 |------|----------|
@@ -401,6 +404,7 @@ Benchmark 可执行文件是可选项，配置阶段需要显式开启 `-DNEUSTA
 | HAL | 批量设备 · Ethernet · UMEM · XDP ring · AF_XDP 配置 · BPF 对象 |
 | AI | 特征提取 · NetworkAgent FSM · ONNX 模型集成 |
 | 可选 Benchmarks | `bench_afxdp_datapath`（micro） · `bench_e2e_throughput`（E2E），需开启 `NEUSTACK_BUILD_BENCHMARKS=ON` |
+| 可选 Fuzzers | `fuzz_http_parser` · `fuzz_dns_parser` · `fuzz_ipv4_parser` · `fuzz_tcp_parser`，需开启 `NEUSTACK_BUILD_FUZZERS=ON` |
 
 <p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
@@ -421,6 +425,7 @@ NeuStack/
 │   └── common/                #   FixedPool、SPSC 队列、日志、校验和
 ├── src/                       # 实现文件
 ├── tests/                     # 单元测试 + 基准测试
+├── fuzz/                      # HTTP、DNS、IPv4、TCP 解析路径的 libFuzzer harness
 ├── training/                  # Python AI 训练管线
 ├── scripts/
 │   ├── bench/                 #   benchmark_runner.py、plot_results.py、run_throughput_test.sh
@@ -448,6 +453,7 @@ NeuStack/
 | `NEUSTACK_BUILD_TESTS` | ON | 编译单元测试与集成测试 |
 | `NEUSTACK_BUILD_EXAMPLES` | ON | 编译示例程序 |
 | `NEUSTACK_BUILD_BENCHMARKS` | OFF | 编译 benchmark 可执行文件，并注册 benchmark ctest 目标 |
+| `NEUSTACK_BUILD_FUZZERS` | OFF | 编译 libFuzzer 解析器 fuzz 目标，并启用 sanitizer instrumentation |
 | `NEUSTACK_BUILD_TOOLS` | ON | 编译 `neustack-stat` 等 CLI 工具 |
 | `NEUSTACK_ENABLE_ASAN` | OFF | Address Sanitizer |
 | `NEUSTACK_ENABLE_UBSAN` | OFF | Undefined Behavior Sanitizer |
@@ -470,7 +476,7 @@ NeuStack/
 | [`docs/api/af-xdp.md`](docs/api/af-xdp.md) | AF_XDP：NIC 兼容性、模式、配置、API |
 | [`docs/api/benchmark.md`](docs/api/benchmark.md) | 基准测试框架：使用方法、结果、复现步骤 |
 | [`docs/api/integration.md`](docs/api/integration.md) | 将 NeuStack 作为库使用（CMake、release 压缩包） |
-| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书（v1.4） |
+| [`docs/project_whitepaper.md`](docs/project_whitepaper.md) | 完整技术白皮书（v1.5） |
 
 <p align="right"><a href="#top">&#8593; 回到顶部</a></p>
 
@@ -485,8 +491,11 @@ NeuStack/
 - [ ] **Multi-queue AF_XDP** — 每核独立 RX/TX 队列，支持多线程包处理
 - [ ] **AI Benchmark Suite** — 各 ONNX 模型在持续负载下的延迟/吞吐 profiling
 - [ ] **TLS / HTTPS 支持** — 接入成熟 TLS 后端，为客户端/服务端提供安全连接，不自行重复实现 TLS
-- [ ] **解析器 Fuzz 测试** — 为 HTTP、DNS、IPv4、TCP 热路径增加 libFuzzer 覆盖，并和 sanitizer 联动
-- [ ] **异常路径闭环** — 打通 ICMP unreachable / time exceeded 到 TCP/UDP 消费方的错误传播，并补齐 retransmit telemetry
+- [x] **HTTP chunked 传输支持** — 客户端解析 chunked 响应，服务端对未知长度响应输出标准 chunked 流
+- [x] **解析器 Fuzz 测试** — 为 HTTP、DNS、IPv4、TCP 热路径增加 libFuzzer harness，并接入 ASAN/UBSAN
+- [x] **UDP ICMP 错误传播** — 将 ICMP unreachable / time exceeded 元数据传递到绑定的 UDP 消费方
+- [x] **TCP ICMP 错误传播** — 将 ICMP unreachable / time exceeded 失败传播到 TCP connect 和流关闭消费者
+- [x] **重传 Telemetry** — 通过 `GlobalMetrics` / Telemetry API 导出 TCP retransmit 计数
 
 **v2.0 — AI Infra 传输层**
 

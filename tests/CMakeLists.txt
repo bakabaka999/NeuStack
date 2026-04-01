@@ -65,10 +65,12 @@ neustack_add_test(test_tcp_orca    unit/transport/test_tcp_orca.cpp)
 neustack_add_test(test_tcp_builder unit/transport/test_tcp_builder.cpp)
 neustack_add_test(test_tcp_sample  unit/transport/test_tcp_sample.cpp)
 neustack_add_test(test_tcp_edge    unit/transport/test_tcp_edge.cpp)
+neustack_add_test(test_tcp_exception unit/transport/test_tcp_exception.cpp)
 neustack_add_test(test_udp_edge    unit/transport/test_udp_edge.cpp)
 
 # --- 网络层测试 (net/) ---
 neustack_add_test(test_ip_edge     unit/net/test_ip_edge.cpp)
+neustack_add_test(test_icmp        unit/net/test_icmp.cpp)
 
 # --- 应用层测试 (app/) ---
 neustack_add_test(test_http_types  unit/app/test_http_types.cpp)
@@ -155,6 +157,19 @@ if(NEUSTACK_BUILD_BENCHMARKS)
     add_executable(bench_e2e_throughput benchmark/bench_e2e_throughput.cpp)
     target_link_libraries(bench_e2e_throughput PRIVATE neustack_lib)
     add_test(NAME "Benchmark: E2E throughput" COMMAND bench_e2e_throughput --help)
+
+    set_tests_properties(
+        "Benchmark: Checksum calculate"
+        "Benchmark: Spsc queue test"
+        "Benchmark: TCP throughput test"
+        "Benchmark: TCP connection test"
+        "Benchmark: HTTP test"
+        "Benchmark: Memory pool test"
+        "Benchmark: Metrics hotpath"
+        "Benchmark: AF_XDP datapath"
+        "Benchmark: E2E throughput"
+        PROPERTIES LABELS "benchmark"
+    )
 endif()
 
 # --- AI 智能平面相关测试 ---
@@ -201,4 +216,9 @@ if(NEUSTACK_ENABLE_AI)
             )
         endif()
     endif()
+endif()
+
+# --- Fuzz 测试 ---
+if(NEUSTACK_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
 endif()

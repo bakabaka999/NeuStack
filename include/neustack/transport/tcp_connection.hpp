@@ -14,6 +14,8 @@
 
 namespace neustack {
 
+struct ICMPErrorInfo;
+
 class TCPLayer;  // 前向声明
 
 // ========================================================================
@@ -92,6 +94,7 @@ public:
 
     // 定时器触发（需要周期性调用，建议 100ms）
     void on_timer();
+    void on_icmp_error(const ICMPErrorInfo &error);
 
 // ═══════════════════════════════════════════════════════════════════
 // 内部实现
@@ -124,6 +127,7 @@ private:
     void handle_last_ack(TCB *tcb, const TCPSegment &seg);
     void handle_time_wait(TCB *tcb, const TCPSegment &seg);
     void handle_rst(TCB *tcb, const TCPSegment &seg);
+    void close_with_error(TCB *tcb, StreamError error, uint8_t detail, bool delete_now);
 
 private:
     // ─── 定时器 ───

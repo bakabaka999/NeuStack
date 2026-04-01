@@ -1,6 +1,6 @@
 /**
  * @file neustack_demo.cpp
- * @brief NeuStack v1.4.0 — Interactive Demo
+ * @brief NeuStack v1.5.0 — Interactive Demo
  */
 
 #include "neustack/neustack.hpp"
@@ -117,7 +117,7 @@ static void print_banner() {
         "╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝\n"
         C_RESET);
     std::printf(C_GRAY "  User-space TCP/IP Stack  " C_RESET
-                C_DIM  "v1.4.0  •  github.com/bakabaka999/NeuStack\n" C_RESET);
+                C_DIM  "v1.5.0  •  github.com/bakabaka999/NeuStack\n" C_RESET);
     std::printf("\n");
 }
 
@@ -187,7 +187,7 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NeuStack v1.4.0</title>
+    <title>NeuStack v1.5.0</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -291,7 +291,7 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
 <body>
     <div class="container">
         <header>
-            <h1>NeuStack v1.4.0</h1>
+            <h1>NeuStack v1.5.0</h1>
             <div class="subtitle">High-Performance User-Space TCP/IP Stack</div>
         </header>
         
@@ -349,7 +349,7 @@ static void setup_echo_services(NeuStack &stack) {
     stack.tcp().listen(7, [](IStreamConnection *) -> StreamCallbacks {
         return {
             .on_receive = [](IStreamConnection *c, const uint8_t *d, size_t l) { c->send(d, l); },
-            .on_close   = [](IStreamConnection *c) { c->close(); }
+            .on_close   = [](IStreamConnection *) {}
         };
     });
 
@@ -357,7 +357,7 @@ static void setup_echo_services(NeuStack &stack) {
     stack.tcp().listen(9, [](IStreamConnection *) -> StreamCallbacks {
         return {
             .on_receive = [](IStreamConnection *, const uint8_t *, size_t) {},
-            .on_close   = [](IStreamConnection *c) { c->close(); }
+            .on_close   = [](IStreamConnection *) {}
         };
     });
 
@@ -377,7 +377,7 @@ static void setup_http_server(NeuStack &stack) {
     server.get("/api/status", [](const HttpRequest &) {
         return HttpResponse()
             .content_type("application/json")
-            .set_body(R"({"status":"running","version":"1.4.0"})");
+            .set_body(R"({"status":"running","version":"1.5.0"})");
     });
 
     server.get("/api/info", [local_ip, &stack](const HttpRequest &) {
@@ -541,6 +541,22 @@ static void print_help() {
 // ============================================================================
 // Command handlers
 // ============================================================================
+
+static const char* stream_error_name(StreamError error) {
+    switch (error) {
+        case StreamError::None:
+            return "none";
+        case StreamError::Reset:
+            return "reset";
+        case StreamError::Timeout:
+            return "timeout";
+        case StreamError::ICMPUnreachable:
+            return "icmp-unreachable";
+        case StreamError::ICMPTimeExceeded:
+            return "icmp-time-exceeded";
+    }
+    return "unknown";
+}
 
 static void cmd_ping(const std::string &args, NeuStack &stack) {
     if (!stack.icmp()) {
@@ -749,8 +765,13 @@ static void cmd_nc(const std::string &args, NeuStack &stack) {
             async_printf(C_BCYAN "  ← received: %.*s\n" C_RESET, static_cast<int>(len), data);
         },
         [](IStreamConnection *c) {
-            async_printf(C_GRAY "  Connection closed\n" C_RESET);
-            c->close();
+            if (c && c->last_error() != StreamError::None) {
+                async_printf(C_RED "  Connection closed: %s (detail=%u)\n" C_RESET,
+                             stream_error_name(c->last_error()),
+                             static_cast<unsigned>(c->last_error_detail()));
+            } else {
+                async_printf(C_GRAY "  Connection closed\n" C_RESET);
+            }
         }
     );
 }
@@ -983,7 +1004,7 @@ int main(int argc, char *argv[]) {
     logger.set_timestamp(cfg.timestamp);
 
     print_banner();
-    LOG_INFO(APP, "NeuStack 1.4.0 starting");
+    LOG_INFO(APP, "NeuStack 1.5.0 starting");
 
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);

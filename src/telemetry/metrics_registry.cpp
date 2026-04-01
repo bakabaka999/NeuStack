@@ -41,6 +41,10 @@ void neustack::telemetry::register_builtin_metrics(GlobalMetrics &gm, const Secu
         "Total TCP connections timed out",
         [&gm]() { return static_cast<double>(gm.conn_timeout.load(std::memory_order_relaxed)); });
 
+    reg.bridge_gauge("neustack_tcp_retransmits_total",
+        "Total TCP retransmissions",
+        [&gm]() { return static_cast<double>(gm.total_retransmits.load(std::memory_order_relaxed)); });
+
     // ─── TCP 标志统计 ───
     reg.bridge_gauge("neustack_tcp_syn_received_total",
         "Total SYN packets received",

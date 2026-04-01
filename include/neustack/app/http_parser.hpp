@@ -102,10 +102,20 @@ public:
     void reset() override;
 
 private:
+    enum class ChunkState {
+        Size,
+        Data,
+        DataCRLF,
+        Trailers
+    };
+
     HttpResponse _response;
     bool _chunked = false;
+    ChunkState _chunk_state = ChunkState::Size;
+    size_t _chunk_bytes_remaining = 0;
 
     bool parse_status_line();
+    bool parse_chunked_body();
 };
 
 } // namespace neustack

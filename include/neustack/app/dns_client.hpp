@@ -141,12 +141,14 @@ public:
     // 初始化（绑定 UDP 端口）
     bool init();
 
+    // 纯解析入口（供 fuzzing / 离线验证使用）
+    static std::optional<DNSResponse> parse_message(const uint8_t *data, size_t len);
+
 private:
+    void on_error(const ICMPErrorInfo &error);
+
     // 构建查询报文
     std::vector<uint8_t> build_query(uint16_t id, const std::string &hostname, DNSType type);
-
-    // 解析响应报文
-    std::optional<DNSResponse> parse_response(const uint8_t *data, size_t len);
 
     // 编码域名
     static std::vector<uint8_t> encode_name(const std::string &name);

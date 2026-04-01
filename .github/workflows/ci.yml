@@ -213,3 +213,30 @@ jobs:
 
       - name: Test under UBSan
         run: cd build && ctest --output-on-failure --timeout 120
+
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Install Catch2 v3
+        run: |
+          git clone --depth 1 --branch v3.5.2 https://github.com/catchorg/Catch2.git /tmp/catch2
+          cmake -B /tmp/catch2/build -S /tmp/catch2 -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/catch2/build
+          sudo cmake --install /tmp/catch2/build
+
+      - name: Configure with benchmarks
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEUSTACK_BUILD_BENCHMARKS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run benchmarks
+        run: cd build && ctest -L benchmark --output-on-failure --timeout 120

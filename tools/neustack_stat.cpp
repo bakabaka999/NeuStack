@@ -624,7 +624,7 @@ static void print_overview(const JsonReader& traffic,
     printf("%s██║╚██╗██║██╔══╝  ██║   ██║╚════██║   ██║   ██╔══██║██║     ██╔═██╗ %s\n", ansi::green(), ansi::clr());
     printf("%s██║ ╚████║███████╗╚██████╔╝███████║   ██║   ██║  ██║╚██████╗██║  ██╗%s\n", ansi::magenta(), ansi::clr());
     printf("%s╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝%s\n", ansi::cyan(), ansi::clr());
-    printf("%s  User-space TCP/IP Stack  %s%sv1.4.0  •  github.com/bakabaka999/NeuStack%s\n", 
+    printf("%s  User-space TCP/IP Stack  %s%sv1.5.0  •  github.com/bakabaka999/NeuStack%s\n", 
            ansi::dim(), ansi::reset(), ansi::dim(), ansi::clr());
     printf("\n%s\n", ansi::clr());
 
@@ -651,6 +651,8 @@ static void print_overview(const JsonReader& traffic,
                    static_cast<uint64_t>(tcp.get_number("total_established")),
                    static_cast<uint64_t>(tcp.get_number("total_reset")),
                    static_cast<uint64_t>(tcp.get_number("total_timeout")));
+    print_box_line(" retransmits=%" PRIu64,
+                   static_cast<uint64_t>(tcp.get_number("total_retransmits")));
     auto samples = static_cast<uint64_t>(tcp.get_number("samples"));
     if (samples > 0) {
         print_box_line(" RTT  min=%.1fms  p50=%.1fms  p90=%.1fms  p99=%.1fms  samples=%" PRIu64,
@@ -667,12 +669,13 @@ static void print_overview(const JsonReader& traffic,
     std::printf("  %s%s├─ Security & AI ────────────────────────────────────────────────────────┤%s\033[K\n", ansi::bold(), ansi::white(), ansi::reset());
     bool fw_enabled = sec.get_bool("firewall_enabled");
     bool shadow     = sec.get_bool("shadow_mode");
+    bool ai_enabled = sec.get_bool("ai_enabled");
     if (!fw_enabled) {
         print_box_line(" %sdisabled%s", ansi::gray(), ansi::reset());
     } else {
         const char *sm = shadow ? "\033[33mSHADOW\033[0m" : "\033[92mENFORCE\033[0m";
         print_box_line(" mode=%-20s  ai=%s",
-                       sm, "\033[92mon\033[0m"); // Assuming ai is on if fw is enabled here or check if needed
+                       sm, ai_enabled ? "\033[92mon\033[0m" : "\033[90moff\033[0m");
         print_box_line(" dropped=%-8" PRIu64 " alerted=%" PRIu64 "  pps=%.0f  syn_rate=%.1f/s",
                        static_cast<uint64_t>(sec.get_number("packets_dropped")),
                        static_cast<uint64_t>(sec.get_number("packets_alerted")),
@@ -684,7 +687,8 @@ static void print_overview(const JsonReader& traffic,
     auto anomaly = sec.get_number("anomaly_score");
     const char* state_color = ansi::green();
     if (state == "DEGRADED") state_color = ansi::yellow();
-    if (state == "ATTACK")   state_color = ansi::red();
+    if (state == "UNDER_ATTACK") state_color = ansi::red();
+    if (state == "RECOVERY")     state_color = ansi::cyan();
     if (state == "DISABLED") state_color = ansi::dim();
 
     print_box_line(" %sAI Agent%s state=%s%s%s  anomaly=%.3f  bar=[%s]",

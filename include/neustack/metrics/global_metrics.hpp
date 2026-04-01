@@ -41,6 +41,7 @@ struct alignas(64) GlobalMetrics {
     std::atomic<uint64_t> conn_closed{0};
     std::atomic<uint64_t> conn_reset{0};
     std::atomic<uint64_t> conn_timeout{0};
+    std::atomic<uint64_t> total_retransmits{0};
 
     // ─── 快照 (智能面读取用) ───
 
@@ -63,6 +64,7 @@ struct alignas(64) GlobalMetrics {
         uint64_t conn_closed;
         uint64_t conn_reset;
         uint64_t conn_timeout;
+        uint64_t total_retransmits;
 
         // 与上一次快照的差值 (用于计算速率)
         struct Delta {
@@ -110,6 +112,7 @@ struct alignas(64) GlobalMetrics {
             .conn_closed = conn_closed.load(std::memory_order_relaxed),
             .conn_reset = conn_reset.load(std::memory_order_relaxed),
             .conn_timeout = conn_timeout.load(std::memory_order_relaxed),
+            .total_retransmits = total_retransmits.load(std::memory_order_relaxed),
         };
     }
 };

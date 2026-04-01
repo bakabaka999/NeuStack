@@ -6,16 +6,20 @@
 #
 # Usage:
 #   ./setup [command] [args...]
+#   ./setup [build-options...]
 #
 # Commands:
 #   (none)       Build the project (default)
 #   build        Same as above
 #   collect      Start data collection (requires sudo)
 #   traffic IP   Generate traffic to server
+#   fuzz         Build parser fuzz targets
 #   help         Show this help
 #
 # Examples:
 #   ./setup                        # Build
+#   ./setup --with-fuzzers         # Build with parser fuzz targets
+#   ./setup fuzz                   # Same as above
 #   sudo ./setup collect           # Collect data
 #   ./setup traffic 1.2.3.4        # Send traffic to server
 #
@@ -51,7 +55,17 @@ detect_platform() {
 }
 
 PLATFORM=$(detect_platform)
-COMMAND="${1:-build}"
+
+if [ $# -eq 0 ]; then
+    COMMAND="build"
+    FORWARD_ARGS=()
+elif [[ "$1" == -* ]]; then
+    COMMAND="build"
+    FORWARD_ARGS=("$@")
+else
+    COMMAND="$1"
+    FORWARD_ARGS=("${@:2}")
+fi
 
 # 显示帮助
 show_help() {
@@ -61,14 +75,22 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  build           Build NeuStack (default)"
+    echo "  build           Build NeuStack (default)"
+    echo "  fuzz            Build parser fuzz targets"
     echo "  collect         Start data collection (requires sudo)"
     echo "  traffic IP      Generate traffic to server"
     echo "  help            Show this help"
+    echo ""
+    echo "Build options:"
+    echo "  --no-ai              Disable AI during setup"
+    echo "  --with-fuzzers       Enable parser fuzz targets and toolchain checks"
     echo ""
     echo "Platform: $PLATFORM"
     echo ""
     echo "Examples:"
     echo "  ./setup                     # Build"
+    echo "  ./setup --with-fuzzers      # Build fuzz targets"
+    echo "  ./setup fuzz                # Build fuzz targets"
     echo "  sudo ./setup collect        # Collect data"
     echo "  ./setup traffic 1.2.3.4     # Send traffic to server"
     echo ""
@@ -83,9 +105,9 @@ case "$COMMAND" in
         echo "Platform: $PLATFORM"
         echo ""
         if [ "$PLATFORM" = "mac" ]; then
-            bash scripts/mac/setup.sh "${@:2}"
+            bash scripts/mac/setup.sh "${FORWARD_ARGS[@]}"
         elif [ "$PLATFORM" = "linux" ]; then
-            bash scripts/linux/setup.sh "${@:2}"
+            bash scripts/linux/setup.sh "${FORWARD_ARGS[@]}"
         elif [ "$PLATFORM" = "windows" ]; then
             echo "Windows detected (MSYS/MinGW shell)."
             echo ""
@@ -97,6 +119,19 @@ case "$COMMAND" in
             exit 1
         else
             echo "ERROR: Unsupported platform: $(uname -s)"
+            exit 1
+        fi
+        ;;
+
+    fuzz)
+        echo "Platform: $PLATFORM"
+        echo ""
+        if [ "$PLATFORM" = "mac" ]; then
+            bash scripts/mac/setup.sh --with-fuzzers "${FORWARD_ARGS[@]}"
+        elif [ "$PLATFORM" = "linux" ]; then
+            bash scripts/linux/setup.sh --with-fuzzers "${FORWARD_ARGS[@]}"
+        else
+            echo "ERROR: fuzz setup not supported on $PLATFORM"
             exit 1
         fi
         ;;

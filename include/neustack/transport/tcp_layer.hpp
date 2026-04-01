@@ -21,6 +21,8 @@
 
 namespace neustack {
 
+struct ICMPErrorInfo;
+
 // ============================================================================
 // TCPStreamConnection - TCP 连接的 IStreamConnection 适配器
 // ============================================================================
@@ -36,6 +38,8 @@ public:
 
     uint32_t remote_ip() const override;
     uint16_t remote_port() const override;
+    StreamError last_error() const override;
+    uint8_t last_error_detail() const override;
 
     // 获取底层 TCB（内部使用）
     TCB *tcb() const { return _tcb; }
@@ -167,6 +171,7 @@ public:
      * @brief 获取连接管理器引用 (Telemetry API 用)
      */
     TCPConnectionManager& connection_manager() { return _tcp_mgr; }
+    void handle_icmp_error(const ICMPErrorInfo &error);
 
 private:
     friend class TCPStreamConnection;  // 允许访问 _tcp_mgr

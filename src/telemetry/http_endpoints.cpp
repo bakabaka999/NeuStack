@@ -238,7 +238,7 @@ void register_http_endpoints(HttpServer& server, TelemetryAPI& api) {
     server.get("/api/v1/health", [](const HttpRequest&) {
         HttpResponse resp;
         resp.content_type("application/json; charset=utf-8");
-        resp.set_body(R"({"status":"ok","version":"1.4.0"})");
+        resp.set_body(R"({"status":"ok","version":"1.5.0"})");
         add_cors_headers(resp);
         return resp;
     });

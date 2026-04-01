@@ -24,6 +24,14 @@ uint16_t TCPStreamConnection::remote_port() const {
     return _tcb->t_tuple.remote_port;
 }
 
+StreamError TCPStreamConnection::last_error() const {
+    return _tcb->last_error;
+}
+
+uint8_t TCPStreamConnection::last_error_detail() const {
+    return _tcb->last_error_detail;
+}
+
 // ============================================================================
 // TCPLayer 实现
 // ============================================================================
@@ -53,6 +61,10 @@ void TCPLayer::on_timer() {
 
     // 处理 AI 决策
     process_ai_actions();
+}
+
+void TCPLayer::handle_icmp_error(const ICMPErrorInfo &error) {
+    _tcp_mgr.on_icmp_error(error);
 }
 
 #ifdef NEUSTACK_AI_ENABLED

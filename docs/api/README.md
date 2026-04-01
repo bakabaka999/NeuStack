@@ -93,4 +93,5 @@ SecurityAnomalyModel   // Deep Autoencoder security anomaly detection (firewall 
 - **v1.1**: Performance optimization + test hardening
 - **v1.2**: AI firewall + security training pipeline + E2E test suite
 - **v1.3**: Telemetry framework + HTTP metrics endpoints + CLI monitoring tool + AI model hardening
-- **v1.4**: AF_XDP high-performance backend (UMEM + BPF/XDP + batch ring I/O) + benchmark framework (micro + E2E throughput) (current)
+- **v1.4**: AF_XDP high-performance backend (UMEM + BPF/XDP + batch ring I/O) + benchmark framework (micro + E2E throughput)
+- **v1.5**: Exception-path correctness hardening: HTTP chunked support, ICMP error propagation, retransmit telemetry (current)
