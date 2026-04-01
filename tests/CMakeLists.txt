@@ -204,3 +204,8 @@ if(NEUSTACK_ENABLE_AI)
         endif()
     endif()
 endif()
+
+# --- Fuzz 测试 ---
+if(NEUSTACK_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
+endif()
