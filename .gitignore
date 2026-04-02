@@ -80,3 +80,6 @@ training/*/*.png
 docs/_draft/*
 
 .claude
+
+# key
+*.pem

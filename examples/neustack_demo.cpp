@@ -136,6 +136,8 @@ struct Config {
     std::string model_dir;
     bool security_collect = false;
     int  security_label   = 0;
+    std::string tls_cert;    // TLS certificate path
+    std::string tls_key;     // TLS private key path
 };
 
 static void print_usage(const char *prog) {
@@ -149,6 +151,8 @@ static void print_usage(const char *prog) {
     std::printf("  --output-dir <dir>   Output directory  (default: .)\n");
     std::printf("  --security-collect   Enable security data collection\n");
     std::printf("  --security-label N   Security label: 0=normal 1=anomaly\n");
+    std::printf("  --tls-cert <file>    TLS certificate (PEM), enables HTTPS on :443\n");
+    std::printf("  --tls-key  <file>    TLS private key (PEM)\n");
     std::printf("  -v / -vv / -q        Verbose / Trace / Quiet\n");
     std::printf("  --no-color           Disable colored output\n");
     std::printf("  --no-time            Disable timestamps\n");
@@ -170,6 +174,8 @@ static bool parse_args(int argc, char *argv[], Config &cfg) {
         else if (std::strcmp(argv[i], "--security-collect") == 0) cfg.security_collect = true;
         else if (std::strcmp(argv[i], "--security-label")   == 0 && i+1 < argc)
             cfg.security_label = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--tls-cert") == 0 && i+1 < argc) cfg.tls_cert = argv[++i];
+        else if (std::strcmp(argv[i], "--tls-key")  == 0 && i+1 < argc) cfg.tls_key  = argv[++i];
         else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return false;
@@ -465,6 +471,73 @@ static void setup_http_server(NeuStack &stack) {
 
     server.listen(80);
     LOG_INFO(HTTP, "HTTP server on port 80");
+
+    // ─── HTTPS: mirror all routes on the TLS server ───
+#ifdef NEUSTACK_TLS_ENABLED
+    auto *https = stack.https_server();
+    if (https) {
+        https->get("/", [](const HttpRequest &) {
+            return HttpResponse()
+                .content_type("text/html")
+                .set_body(INDEX_HTML);
+        });
+
+        https->get("/api/status", [](const HttpRequest &) {
+            return HttpResponse()
+                .content_type("application/json")
+                .set_body(R"({"status":"running","version":"1.5.0","tls":true})");
+        });
+
+        https->get("/api/info", [local_ip, &stack](const HttpRequest &) {
+            std::string json = R"({"local_ip":")" + ip_to_string(local_ip) + R"(",)";
+            json += R"("services":["icmp","udp-echo:7","tcp-echo:7","http:80","https:443","dns-client")";
+            if (stack.firewall_enabled())    json += R"(,"firewall")";
+            if (stack.firewall_ai_enabled()) json += R"(,"firewall-ai")";
+            if (stack.ai_enabled())          json += R"(,"ai-intelligence")";
+            json += "]}";
+            return HttpResponse().content_type("application/json").set_body(json);
+        });
+
+        https->get("/api/firewall/status", [&stack](const HttpRequest &) {
+            // Reuse the same logic as HTTP
+            std::string json = "{";
+            if (stack.firewall_enabled()) {
+                const auto s = stack.firewall_stats();
+                json += "\"enabled\":true,";
+                json += "\"shadow_mode\":" + std::string(stack.firewall_shadow_mode() ? "true" : "false") + ",";
+                json += "\"ai_enabled\":" + std::string(stack.firewall_ai_enabled() ? "true" : "false") + ",";
+                json += "\"packets_inspected\":" + std::to_string(s.packets_inspected) + ",";
+                json += "\"packets_passed\":" + std::to_string(s.packets_passed) + ",";
+                json += "\"packets_dropped\":" + std::to_string(s.packets_dropped) + ",";
+                json += "\"packets_alerted\":" + std::to_string(s.packets_alerted);
+            } else {
+                json += "\"enabled\":false";
+            }
+            json += "}";
+            return HttpResponse().content_type("application/json").set_body(json);
+        });
+
+        https->post("/api/echo", [](const HttpRequest &req) {
+            return HttpResponse()
+                .content_type(req.get_header("Content-Type"))
+                .set_body(req.body);
+        });
+
+        auto add_dl_https = [https](const char *path, size_t size) {
+            https->get_chunked(path, [size](const HttpRequest &) {
+                return std::make_unique<RandomDataGenerator>(size);
+            });
+        };
+        add_dl_https("/download/1k",   1024);
+        add_dl_https("/download/100k", 100  * 1024);
+        add_dl_https("/download/1m",   1024 * 1024);
+        add_dl_https("/download/10m",  10   * 1024 * 1024);
+        add_dl_https("/download/100m", 100  * 1024 * 1024);
+
+        https->listen(443);
+        LOG_INFO(TLS, "HTTPS server on port 443");
+    }
+#endif
 }
 
 // ============================================================================
@@ -507,8 +580,12 @@ static void print_help() {
     print_box_line("");
 
     print_box_line(C_BOLD C_GRAY " " C_BCYAN "HTTP Client" C_RESET);
-    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "get <ip> <path>", "HTTP GET  (port 80)");
-    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "post <ip> <path> <body>", "HTTP POST (port 80)");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "get <host> <path>", "HTTP GET  (port 80)");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "post <host> <path> <body>", "HTTP POST (port 80)");
+#ifdef NEUSTACK_TLS_ENABLED
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "gets <host> <path>", "HTTPS GET (port 443)");
+    print_box_line(C_GRAY "  " C_WHITE "%-22s" C_RESET " %s", "posts <host> <path> <body>", "HTTPS POST(port 443)");
+#endif
     print_box_line("");
 
     print_box_line(C_BOLD C_GRAY " " C_BCYAN "TCP" C_RESET);
@@ -554,6 +631,10 @@ static const char* stream_error_name(StreamError error) {
             return "icmp-unreachable";
         case StreamError::ICMPTimeExceeded:
             return "icmp-time-exceeded";
+        case StreamError::TLSHandshakeFailed:
+            return "tls-handshake-failed";
+        case StreamError::TLSAlert:
+            return "tls-alert";
     }
     return "unknown";
 }
@@ -632,6 +713,9 @@ static void cmd_ping(const std::string &args, NeuStack &stack) {
                     stack.ip().on_receive(buf, n);
             }
             stack.http_server().poll();
+#ifdef NEUSTACK_TLS_ENABLED
+            if (stack.https_server()) stack.https_server()->poll();
+#endif
 #ifndef _WIN32
             // Check stdin: Enter cancels ping, other chars discarded
             struct pollfd pfd = {STDIN_FILENO, POLLIN, 0};
@@ -674,57 +758,103 @@ static void cmd_dns(const std::string &args, NeuStack &stack) {
     });
 }
 
-static void cmd_get(const std::string &args, NeuStack &stack) {
-    // get <ip> <path>
-    auto sp = args.find(' ');
-    if (sp == std::string::npos) {
-        std::printf(C_YELLOW "  Usage: get <ip> <path>\n" C_RESET);
+/**
+ * 解析 host（IP 或域名）并调用回调。
+ * 如果是 IP 地址，直接调用；如果是域名，先 DNS 解析。
+ * callback(ip, hostname) — hostname 用于 Host 头。
+ */
+static void resolve_and_call(const std::string &host, NeuStack &stack,
+                              std::function<void(uint32_t ip, const std::string &hostname)> callback) {
+    uint32_t ip = ip_from_string(host.c_str());
+    if (ip != 0) {
+        // 已经是 IP 地址
+        callback(ip, host);
         return;
     }
-    std::string ip_str = args.substr(0, sp);
-    std::string path   = args.substr(sp + 1);
-    uint32_t ip = ip_from_string(ip_str.c_str());
-    if (ip == 0) {
-        std::printf(C_RED "  [!] Invalid IP: %s\n" C_RESET, ip_str.c_str());
+
+    // 域名 → DNS 解析
+    if (!stack.dns()) {
+        std::printf(C_RED "  [!] DNS not available, use IP address instead\n" C_RESET);
         return;
     }
-    std::printf(C_DIM "  GET http://%s%s\n" C_RESET, ip_str.c_str(), path.c_str());
-    stack.http_client().get(ip, 80, path, [](const HttpResponse &resp, int err) {
-        std::printf("\r\033[K");
-        if (err != 0) {
-            std::printf(C_RED "  [!] Request failed (err=%d)\n" C_RESET, err);
-            print_prompt();
+    std::printf(C_DIM "  Resolving %s...\n" C_RESET, host.c_str());
+    stack.dns()->resolve_async(host, [host, cb = std::move(callback)](std::optional<DNSResponse> resp) {
+        if (!resp || resp->rcode != DNSRcode::NoError) {
+            async_printf(C_RED "  [!] %s: DNS lookup failed\n" C_RESET, host.c_str());
             return;
         }
-        int code = static_cast<int>(resp.status);
-        const char *color = (code < 300) ? C_BGREEN : (code < 400) ? C_BYELLOW : C_BRED;
-        std::printf("%s  HTTP %d %s\n" C_RESET, color, code, http_status_text(resp.status));
-        for (const auto &[k, vals] : resp.headers)
-            for (const auto &v : vals)
-                std::printf(C_DIM "  %s: %s\n" C_RESET, k.c_str(), v.c_str());
-        if (!resp.body.empty())
-            std::printf("\n%s\n", resp.body.c_str());
-        print_prompt();
+        auto ip = resp->get_ip();
+        if (!ip) {
+            async_printf(C_RED "  [!] %s: no A record\n" C_RESET, host.c_str());
+            return;
+        }
+        cb(*ip, host);
+    });
+}
+
+static void cmd_get(const std::string &args, NeuStack &stack) {
+    // get <host> <path>
+    auto sp = args.find(' ');
+    if (sp == std::string::npos) {
+        std::printf(C_YELLOW "  Usage: get <host|ip> <path>\n" C_RESET);
+        return;
+    }
+    std::string host = args.substr(0, sp);
+    std::string path = args.substr(sp + 1);
+
+    resolve_and_call(host, stack, [path, &stack](uint32_t ip, const std::string &hostname) {
+        async_printf(C_DIM "  GET http://%s%s (%s)\n" C_RESET,
+                     hostname.c_str(), path.c_str(), ip_to_string(ip).c_str());
+
+        HttpRequest req;
+        req.method = HttpMethod::GET;
+        req.path = path;
+        req.add_header("Host", hostname);
+
+        stack.http_client().request(ip, 80, req, [](const HttpResponse &resp, int err) {
+            std::printf("\r\033[K");
+            if (err != 0) {
+                std::printf(C_RED "  [!] Request failed (err=%d)\n" C_RESET, err);
+                print_prompt();
+                return;
+            }
+            int code = static_cast<int>(resp.status);
+            const char *color = (code < 300) ? C_BGREEN : (code < 400) ? C_BYELLOW : C_BRED;
+            std::printf("%s  HTTP %d %s\n" C_RESET, color, code, http_status_text(resp.status));
+            for (const auto &[k, vals] : resp.headers)
+                for (const auto &v : vals)
+                    std::printf(C_DIM "  %s: %s\n" C_RESET, k.c_str(), v.c_str());
+            if (!resp.body.empty())
+                std::printf("\n%s\n", resp.body.c_str());
+            print_prompt();
+        });
     });
 }
 
 static void cmd_post(const std::string &args, NeuStack &stack) {
-    // post <ip> <path> <body>
+    // post <host> <path> <body>
     auto sp1 = args.find(' ');
-    if (sp1 == std::string::npos) { std::printf(C_YELLOW "  Usage: post <ip> <path> <body>\n" C_RESET); return; }
+    if (sp1 == std::string::npos) { std::printf(C_YELLOW "  Usage: post <host|ip> <path> <body>\n" C_RESET); return; }
     auto sp2 = args.find(' ', sp1 + 1);
-    if (sp2 == std::string::npos) { std::printf(C_YELLOW "  Usage: post <ip> <path> <body>\n" C_RESET); return; }
+    if (sp2 == std::string::npos) { std::printf(C_YELLOW "  Usage: post <host|ip> <path> <body>\n" C_RESET); return; }
 
-    std::string ip_str = args.substr(0, sp1);
-    std::string path   = args.substr(sp1 + 1, sp2 - sp1 - 1);
-    std::string body   = args.substr(sp2 + 1);
-    uint32_t ip = ip_from_string(ip_str.c_str());
-    if (ip == 0) { std::printf(C_RED "  [!] Invalid IP: %s\n" C_RESET, ip_str.c_str()); return; }
+    std::string host = args.substr(0, sp1);
+    std::string path = args.substr(sp1 + 1, sp2 - sp1 - 1);
+    std::string body = args.substr(sp2 + 1);
 
-    std::printf(C_DIM "  POST http://%s%s  (%zu bytes)\n" C_RESET,
-                ip_str.c_str(), path.c_str(), body.size());
-    stack.http_client().post(ip, 80, path, body, "text/plain",
-        [](const HttpResponse &resp, int err) {
+    resolve_and_call(host, stack, [path, body, &stack](uint32_t ip, const std::string &hostname) {
+        async_printf(C_DIM "  POST http://%s%s  (%zu bytes)\n" C_RESET,
+                     hostname.c_str(), path.c_str(), body.size());
+
+        HttpRequest req;
+        req.method = HttpMethod::POST;
+        req.path = path;
+        req.body = body;
+        req.add_header("Host", hostname);
+        req.add_header("Content-Type", "text/plain");
+        req.add_header("Content-Length", std::to_string(body.size()));
+
+        stack.http_client().request(ip, 80, req, [](const HttpResponse &resp, int err) {
             std::printf("\r\033[K");
             if (err != 0) { std::printf(C_RED "  [!] Request failed (err=%d)\n" C_RESET, err); print_prompt(); return; }
             int code = static_cast<int>(resp.status);
@@ -734,7 +864,94 @@ static void cmd_post(const std::string &args, NeuStack &stack) {
                 std::printf("\n%s\n", resp.body.c_str());
             print_prompt();
         });
+    });
 }
+
+#ifdef NEUSTACK_TLS_ENABLED
+static void cmd_gets(const std::string &args, NeuStack &stack) {
+    if (!stack.https_client()) {
+        std::printf(C_RED "  [!] HTTPS not available (start with --tls-cert/--tls-key)\n" C_RESET);
+        return;
+    }
+    auto sp = args.find(' ');
+    if (sp == std::string::npos) {
+        std::printf(C_YELLOW "  Usage: gets <host|ip> <path>\n" C_RESET);
+        return;
+    }
+    std::string host = args.substr(0, sp);
+    std::string path = args.substr(sp + 1);
+
+    resolve_and_call(host, stack, [path, &stack](uint32_t ip, const std::string &hostname) {
+        async_printf(C_DIM "  GET https://%s%s (%s)\n" C_RESET,
+                     hostname.c_str(), path.c_str(), ip_to_string(ip).c_str());
+
+        HttpRequest req;
+        req.method = HttpMethod::GET;
+        req.path = path;
+        req.add_header("Host", hostname);
+
+        // 设置 SNI 以便公网 HTTPS 服务器识别域名
+        stack.tls()->set_next_hostname(hostname);
+        stack.https_client()->request(ip, 443, req, [](const HttpResponse &resp, int err) {
+            std::printf("\r\033[K");
+            if (err != 0) {
+                std::printf(C_RED "  [!] HTTPS request failed (err=%d)\n" C_RESET, err);
+                print_prompt();
+                return;
+            }
+            int code = static_cast<int>(resp.status);
+            const char *color = (code < 300) ? C_BGREEN : (code < 400) ? C_BYELLOW : C_BRED;
+            std::printf("%s  HTTPS %d %s\n" C_RESET, color, code, http_status_text(resp.status));
+            for (const auto &[k, vals] : resp.headers)
+                for (const auto &v : vals)
+                    std::printf(C_DIM "  %s: %s\n" C_RESET, k.c_str(), v.c_str());
+            if (!resp.body.empty())
+                std::printf("\n%s\n", resp.body.c_str());
+            print_prompt();
+        });
+    });
+}
+
+static void cmd_posts(const std::string &args, NeuStack &stack) {
+    if (!stack.https_client()) {
+        std::printf(C_RED "  [!] HTTPS not available (start with --tls-cert/--tls-key)\n" C_RESET);
+        return;
+    }
+    auto sp1 = args.find(' ');
+    if (sp1 == std::string::npos) { std::printf(C_YELLOW "  Usage: posts <host|ip> <path> <body>\n" C_RESET); return; }
+    auto sp2 = args.find(' ', sp1 + 1);
+    if (sp2 == std::string::npos) { std::printf(C_YELLOW "  Usage: posts <host|ip> <path> <body>\n" C_RESET); return; }
+
+    std::string host = args.substr(0, sp1);
+    std::string path = args.substr(sp1 + 1, sp2 - sp1 - 1);
+    std::string body = args.substr(sp2 + 1);
+
+    resolve_and_call(host, stack, [path, body, &stack](uint32_t ip, const std::string &hostname) {
+        async_printf(C_DIM "  POST https://%s%s  (%zu bytes)\n" C_RESET,
+                     hostname.c_str(), path.c_str(), body.size());
+
+        HttpRequest req;
+        req.method = HttpMethod::POST;
+        req.path = path;
+        req.body = body;
+        req.add_header("Host", hostname);
+        req.add_header("Content-Type", "text/plain");
+        req.add_header("Content-Length", std::to_string(body.size()));
+
+        stack.tls()->set_next_hostname(hostname);
+        stack.https_client()->request(ip, 443, req, [](const HttpResponse &resp, int err) {
+            std::printf("\r\033[K");
+            if (err != 0) { std::printf(C_RED "  [!] HTTPS request failed (err=%d)\n" C_RESET, err); print_prompt(); return; }
+            int code = static_cast<int>(resp.status);
+            const char *color = (code < 300) ? C_BGREEN : (code < 400) ? C_BYELLOW : C_BRED;
+            std::printf("%s  HTTPS %d %s\n" C_RESET, color, code, http_status_text(resp.status));
+            if (!resp.body.empty())
+                std::printf("\n%s\n", resp.body.c_str());
+            print_prompt();
+        });
+    });
+}
+#endif
 
 static void cmd_nc(const std::string &args, NeuStack &stack) {
     // nc <ip> <port>
@@ -975,6 +1192,10 @@ static void handle_command(const std::string &line, NeuStack &stack) {
     else if (cmd == "dns")   cmd_dns(rest, stack);
     else if (cmd == "get")   cmd_get(rest, stack);
     else if (cmd == "post")  cmd_post(rest, stack);
+#ifdef NEUSTACK_TLS_ENABLED
+    else if (cmd == "gets")  cmd_gets(rest, stack);
+    else if (cmd == "posts") cmd_posts(rest, stack);
+#endif
     else if (cmd == "nc")    cmd_nc(rest, stack);
     else if (cmd == "stats") cmd_stats(stack);
     else if (cmd == "conns") cmd_conns(stack);
@@ -1029,6 +1250,11 @@ int main(int argc, char *argv[]) {
     sc.enable_firewall      = true;
     sc.firewall_shadow_mode = true;   // alert-only by default, use 'fw shadow off' to enforce
 
+    if (!cfg.tls_cert.empty() && !cfg.tls_key.empty()) {
+        sc.tls_cert_path = cfg.tls_cert;
+        sc.tls_key_path  = cfg.tls_key;
+    }
+
     auto stack = NeuStack::create(sc);
     if (!stack) { LOG_FATAL(APP, "Failed to create stack"); return EXIT_FAILURE; }
 
@@ -1041,7 +1267,13 @@ int main(int argc, char *argv[]) {
                 stack->device().get_name().c_str());
     std::printf(C_BOLD "  Test:\n" C_RESET);
     std::printf("    ping %s\n", cfg.local_ip.c_str());
-    std::printf("    curl http://%s/\n\n", cfg.local_ip.c_str());
+    std::printf("    curl http://%s/\n", cfg.local_ip.c_str());
+#ifdef NEUSTACK_TLS_ENABLED
+    if (stack->https_server()) {
+        std::printf("    curl -k https://%s/\n", cfg.local_ip.c_str());
+    }
+#endif
+    std::printf("\n");
     std::printf(C_BOLD "  Telemetry:\n" C_RESET);
     std::printf("    curl http://%s/api/v1/health\n",   cfg.local_ip.c_str());
     std::printf("    curl http://%s/api/v1/stats | python3 -m json.tool\n", cfg.local_ip.c_str());
@@ -1064,6 +1296,9 @@ int main(int argc, char *argv[]) {
                 stack->ip().on_receive(buf, n);
         }
         stack->http_server().poll();
+#ifdef NEUSTACK_TLS_ENABLED
+        if (stack->https_server()) stack->https_server()->poll();
+#endif
 
         auto now = steady_clock::now();
         if (now - last_timer >= milliseconds(100)) {
