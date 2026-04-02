@@ -41,6 +41,7 @@ struct NeuStack::Impl {
 #ifdef NEUSTACK_TLS_ENABLED
     std::unique_ptr<TLSLayer> tls_layer;
     std::unique_ptr<HttpServer> https_server;   // 基于 TLSLayer 的 HTTPS 服务器
+    std::unique_ptr<HttpClient> https_client;   // 基于 TLSLayer 的 HTTPS 客户端
 #endif
 
     // 数据采集
@@ -153,6 +154,7 @@ struct NeuStack::Impl {
                 tls_layer = std::make_unique<TLSLayer>(
                     *tcp, *tcp, std::move(server_ctx), std::move(client_ctx));
                 https_server = std::make_unique<HttpServer>(*tls_layer);
+                https_client = std::make_unique<HttpClient>(*tls_layer);
                 LOG_INFO(TLS, "HTTPS server initialized (cert=%s)",
                          config.tls_cert_path.c_str());
             } else {
@@ -338,6 +340,7 @@ DNSClient  *NeuStack::dns()         { return _impl->dns_client.get(); }
 
 #ifdef NEUSTACK_TLS_ENABLED
 HttpServer *NeuStack::https_server() { return _impl->https_server.get(); }
+HttpClient *NeuStack::https_client() { return _impl->https_client.get(); }
 TLSLayer   *NeuStack::tls()          { return _impl->tls_layer.get(); }
 #endif
 

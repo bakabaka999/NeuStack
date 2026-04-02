@@ -269,7 +269,8 @@ if(NEUSTACK_ENABLE_TLS)
         $<BUILD_INTERFACE:mbedtls>
         $<BUILD_INTERFACE:mbedx509>
         $<BUILD_INTERFACE:mbedcrypto>)
-    target_include_directories(neustack_lib PUBLIC
+    # SYSTEM suppresses warnings from mbedTLS public headers (C99 flexible array members)
+    target_include_directories(neustack_lib SYSTEM PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/third_party/mbedtls/include>)
     target_compile_definitions(neustack_lib PUBLIC NEUSTACK_TLS_ENABLED)
 endif()

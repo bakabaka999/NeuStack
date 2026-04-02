@@ -87,6 +87,12 @@ public:
      */
     IStreamConnection *inner() const { return _inner; }
 
+    /**
+     * @brief 设置 SNI hostname（客户端连接时必须在握手前调用）
+     * @param hostname 服务器域名（如 "x.com"）
+     */
+    void set_hostname(const std::string &hostname);
+
 private:
     // BIO 回调（mbedTLS 用）
     static int bio_send(void *ctx, const unsigned char *buf, size_t len);

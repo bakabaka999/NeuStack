@@ -126,6 +126,7 @@ public:
     // ─── TLS / HTTPS ───
 #ifdef NEUSTACK_TLS_ENABLED
     HttpServer *https_server();    // TLS 未配置时返回 nullptr
+    HttpClient *https_client();    // TLS 未配置时返回 nullptr
     TLSLayer   *tls();             // TLS 未配置时返回 nullptr
 #endif
 

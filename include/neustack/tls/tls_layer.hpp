@@ -62,11 +62,20 @@ public:
      */
     TLSContext *client_context() const { return _client_ctx.get(); }
 
+    /**
+     * @brief 设置下一次 connect() 使用的 SNI hostname
+     *
+     * 必须在 connect() 之前调用。连接发起后自动清除。
+     * 公网 HTTPS 服务器（如 Cloudflare）要求 SNI 才能正确响应。
+     */
+    void set_next_hostname(const std::string &hostname) { _next_hostname = hostname; }
+
 private:
     IStreamServer &_tcp_server;
     IStreamClient &_tcp_client;
     std::unique_ptr<TLSContext> _server_ctx;
     std::unique_ptr<TLSContext> _client_ctx;
+    std::string _next_hostname;  // SNI for next connect()
 
     // 服务端: port → 应用层 accept 回调
     std::unordered_map<uint16_t, StreamAcceptCallback> _accept_callbacks;

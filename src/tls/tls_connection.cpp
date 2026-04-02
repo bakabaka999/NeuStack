@@ -89,8 +89,12 @@ ssize_t TLSStreamConnection::send(const uint8_t *data, size_t len) {
 
 void TLSStreamConnection::close() {
     if (_hs_state == TLSHandshakeState::Complete) {
-        // 发送 close_notify（best effort）
+        // Best-effort close_notify before closing TCP.
+        // Ignore WANT_WRITE / errors — peer may have closed already.
+        _hs_state = TLSHandshakeState::Pending;  // prevent re-entrant TLS I/O
         mbedtls_ssl_close_notify(&_ssl);
+    } else {
+        _hs_state = TLSHandshakeState::Pending;
     }
     _inner->close();
 }
@@ -115,6 +119,15 @@ uint8_t TLSStreamConnection::last_error_detail() const {
 
 void TLSStreamConnection::on_tcp_data(const uint8_t *data, size_t len) {
     _recv_buf.insert(_recv_buf.end(), data, data + len);
+}
+
+void TLSStreamConnection::set_hostname(const std::string &hostname) {
+    int ret = mbedtls_ssl_set_hostname(&_ssl, hostname.c_str());
+    if (ret != 0) {
+        char errbuf[128];
+        mbedtls_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_WARN(TLS, "ssl_set_hostname(%s) failed: %s", hostname.c_str(), errbuf);
+    }
 }
 
 TLSHandshakeState TLSStreamConnection::drive_handshake() {

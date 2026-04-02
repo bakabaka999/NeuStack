@@ -138,8 +138,12 @@ int TLSLayer::connect(uint32_t remote_ip, uint16_t remote_port,
         return -1;
     }
 
+    // 捕获并清除 SNI hostname
+    std::string hostname = std::move(_next_hostname);
+    _next_hostname.clear();
+
     // 包装回调：TCP 连接成功后开始 TLS 握手
-    auto tls_on_connect = [this, on_connect, on_receive, on_close](
+    auto tls_on_connect = [this, on_connect, on_receive, on_close, hostname](
                               IStreamConnection *tcp_conn, int error) {
         if (error != 0) {
             on_connect(nullptr, error);
@@ -147,6 +151,11 @@ int TLSLayer::connect(uint32_t remote_ip, uint16_t remote_port,
         }
 
         auto tls_conn = std::make_unique<TLSStreamConnection>(tcp_conn, *_client_ctx);
+
+        // 设置 SNI（Server Name Indication）
+        if (!hostname.empty()) {
+            tls_conn->set_hostname(hostname);
+        }
 
         PendingConnect pending;
         pending.tls_conn = std::move(tls_conn);
