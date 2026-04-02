@@ -24,6 +24,13 @@
 #include "neustack/metrics/security_metrics.hpp"
 #include "neustack/metrics/security_features.hpp"
 
+// ─── TLS ───
+#ifdef NEUSTACK_TLS_ENABLED
+#include "neustack/tls/tls_context.hpp"
+#include "neustack/tls/tls_connection.hpp"
+#include "neustack/tls/tls_layer.hpp"
+#endif
+
 // ─── 指标与采集 ───
 #include "neustack/metrics/global_metrics.hpp"
 #include "neustack/metrics/sample_exporter.hpp"
@@ -67,6 +74,11 @@ struct StackConfig {
 
     // 安全数据标注 (仅采集时生效)
     int security_label = 0;           // 0=正常, 1=异常
+
+    // TLS/HTTPS 配置（需要 NEUSTACK_TLS_ENABLED）
+    std::string tls_cert_path;        // PEM 证书文件路径
+    std::string tls_key_path;         // PEM 私钥文件路径
+    std::string tls_ca_path;          // CA 证书路径（客户端验证用，空 = 跳过验证）
 };
 
 class NeuStack {
@@ -110,6 +122,12 @@ public:
     HttpServer &http_server();
     HttpClient &http_client();
     DNSClient  *dns();             // 依赖 UDP，未启用时返回 nullptr
+
+    // ─── TLS / HTTPS ───
+#ifdef NEUSTACK_TLS_ENABLED
+    HttpServer *https_server();    // TLS 未配置时返回 nullptr
+    TLSLayer   *tls();             // TLS 未配置时返回 nullptr
+#endif
 
     // ─── 指标与采集 ───
     GlobalMetrics   &metrics();
