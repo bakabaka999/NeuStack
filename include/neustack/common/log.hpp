@@ -52,6 +52,7 @@ enum class LogModule : uint8_t {
     APP  = 8,
     AI   = 9,
     FW   = 10,  // Firewall
+    TLS  = 11,  // TLS/HTTPS
     MAX_MODULES
 };
 
@@ -264,6 +265,7 @@ private:
             case LogModule::APP:  return "\033[1;37m"; // Bold White (最显眼)
             case LogModule::AI:   return "\033[1;36m"; // Bold Cyan (AI 模块通常代表"高科技"，青色很合适)
             case LogModule::FW:   return "\033[1;33m"; // Bold Yellow (防火墙，安全相关)
+            case LogModule::TLS:  return "\033[1;32m"; // Bold Green (TLS/安全连接)
 
             default: return RESET;
         }
@@ -282,6 +284,7 @@ private:
             case LogModule::APP:  return "APP ";
             case LogModule::AI:   return "AI  ";
             case LogModule::FW:   return "FW  ";
+            case LogModule::TLS:  return "TLS ";
             default: return "????";
         }
     }

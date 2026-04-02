@@ -6,17 +6,19 @@
 #   1. Check dependencies (cmake, cl/g++, ninja)
 #   2. Download Wintun DLL
 #   3. Download ONNX Runtime if needed
-#   4. Build NeuStack (auto-enable AI if ORT found)
+#   4. Download mbedTLS if needed (--with-tls)
+#   5. Build NeuStack (auto-enable AI if ORT found)
 #
 # Usage:
-#   .\scripts\windows\setup.ps1 [-NoAI]
+#   .\scripts\windows\setup.ps1 [-NoAI] [-WithTLS]
 #
 # Prerequisites:
 #   - Visual Studio 2019+ with C++ workload, or MinGW g++ >= 10
 #   - Run from Developer Command Prompt (for MSVC) or have g++ in PATH
 
 param(
-    [switch]$NoAI
+    [switch]$NoAI,
+    [switch]$WithTLS
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,7 +34,7 @@ Write-Host "=============================================="
 Write-Host ""
 
 # ─── 1. Check dependencies ───
-Write-Host "[1/4] Checking dependencies..."
+Write-Host "[1/5] Checking dependencies..."
 
 function Test-Command($cmd) {
     $found = Get-Command $cmd -ErrorAction SilentlyContinue
@@ -75,7 +77,7 @@ if (-not $hasNinja) {
 
 # ─── 2. Download Wintun ───
 Write-Host ""
-Write-Host "[2/4] Checking Wintun..."
+Write-Host "[2/5] Checking Wintun..."
 
 $WintunDll = Join-Path $ProjectRoot "wintun.dll"
 $BuildWintunDll = Join-Path $ProjectRoot "build\wintun.dll"
@@ -109,7 +111,7 @@ if (Test-Path $WintunDll) {
 
 # ─── 3. ONNX Runtime ───
 Write-Host ""
-Write-Host "[3/4] Checking ONNX Runtime..."
+Write-Host "[3/5] Checking ONNX Runtime..."
 
 $OrtFound = $false
 
@@ -164,9 +166,56 @@ if ($NoAI) {
     Write-Host "  AI: disabled (ONNX Runtime not available)"
 }
 
-# ─── 4. Build ───
+# ─── 4. mbedTLS (TLS support) ───
 Write-Host ""
-Write-Host "[4/4] Building NeuStack..."
+Write-Host "[4/5] Checking mbedTLS..."
+
+$EnableTLS = "OFF"
+
+if ($WithTLS) {
+    $MbedtlsDir = Join-Path $ProjectRoot "third_party\mbedtls"
+    $MbedtlsCMake = Join-Path $MbedtlsDir "CMakeLists.txt"
+
+    if (Test-Path $MbedtlsCMake) {
+        Write-Host "  ✓ mbedTLS found"
+        $EnableTLS = "ON"
+    } else {
+        $MbedtlsVersion = "3.6.0"
+        $MbedtlsUrl = "https://github.com/Mbed-TLS/mbedtls/releases/download/v${MbedtlsVersion}/mbedtls-${MbedtlsVersion}.tar.bz2"
+        $MbedtlsArchive = Join-Path $env:TEMP "mbedtls-${MbedtlsVersion}.tar.bz2"
+        $MbedtlsExtractDir = Join-Path $ProjectRoot "third_party"
+
+        Write-Host "  Downloading mbedTLS v${MbedtlsVersion}..."
+        try {
+            Invoke-WebRequest -Uri $MbedtlsUrl -OutFile $MbedtlsArchive
+
+            # tar can handle .tar.bz2 on Windows 10+
+            Write-Host "  Extracting..."
+            New-Item -ItemType Directory -Force -Path $MbedtlsExtractDir | Out-Null
+            tar xjf $MbedtlsArchive -C $MbedtlsExtractDir
+
+            $ExtractedDir = Join-Path $MbedtlsExtractDir "mbedtls-${MbedtlsVersion}"
+            if (Test-Path $ExtractedDir) {
+                Rename-Item $ExtractedDir $MbedtlsDir
+                $EnableTLS = "ON"
+                Write-Host "  ✓ mbedTLS downloaded"
+            } else {
+                Write-Host "  ✗ Extraction failed (expected $ExtractedDir)"
+            }
+
+            Remove-Item -Force $MbedtlsArchive -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "  ✗ mbedTLS download failed: $_"
+            Write-Host "  TLS will be disabled"
+        }
+    }
+} else {
+    Write-Host "  TLS: skipped (pass -WithTLS to enable)"
+}
+
+# ─── 5. Build ───
+Write-Host ""
+Write-Host "[5/5] Building NeuStack..."
 
 $BuildDir = Join-Path $ProjectRoot "build"
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
@@ -175,6 +224,7 @@ Set-Location $BuildDir
 $cmakeArgs = @(
     "..",
     "-DNEUSTACK_ENABLE_AI=$EnableAI",
+    "-DNEUSTACK_ENABLE_TLS=$EnableTLS",
     "-DCMAKE_BUILD_TYPE=Release"
 )
 
@@ -202,6 +252,7 @@ Write-Host "  ✓ Build Complete!"
 Write-Host "=============================================="
 Write-Host ""
 Write-Host "  AI enabled:  $EnableAI"
+Write-Host "  TLS:         $EnableTLS"
 Write-Host "  Binary:      build\examples\neustack_demo.exe"
 Write-Host "  Wintun:      build\wintun.dll"
 Write-Host ""
@@ -209,3 +260,11 @@ Write-Host "  Quick start:"
 Write-Host "    # Run as Administrator (required for Wintun)"
 Write-Host "    .\build\examples\neustack_demo.exe --ip 192.168.100.2 -v"
 Write-Host ""
+if ($EnableTLS -eq "ON") {
+    Write-Host "    # Generate TLS certificate"
+    Write-Host "    openssl req -x509 -newkey rsa:2048 -keyout server_key.pem -out server_cert.pem -days 3650 -nodes -subj '/CN=NeuStack'"
+    Write-Host ""
+    Write-Host "    # Run HTTPS server"
+    Write-Host "    .\build\examples\https_server.exe"
+    Write-Host ""
+}

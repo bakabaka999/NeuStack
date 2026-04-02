@@ -18,6 +18,7 @@ option(NEUSTACK_ENABLE_ASAN "Enable Address Sanitizer" OFF)
 option(NEUSTACK_ENABLE_UBSAN "Enable Undefined Behavior Sanitizer" OFF)
 option(NEUSTACK_ENABLE_AI "Enable AI congestion control (requires ONNX Runtime)" OFF)
 option(NEUSTACK_ENABLE_AF_XDP "Enable AF_XDP backend (requires libbpf, Linux only)" OFF)
+option(NEUSTACK_ENABLE_TLS "Enable TLS support via mbedTLS (requires third_party/mbedtls)" ON)
 
 # ============================================================================
 # C++ Standard
@@ -197,6 +198,26 @@ if(NEUSTACK_PLATFORM_LINUX AND NEUSTACK_ENABLE_AF_XDP)
     endif()
 endif()
 
+# TLS sources (optional, requires mbedTLS in third_party/mbedtls)
+if(NEUSTACK_ENABLE_TLS)
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/mbedtls/CMakeLists.txt")
+        message(FATAL_ERROR
+            "NEUSTACK_ENABLE_TLS=ON but third_party/mbedtls not found.\n"
+            "Download: curl -L https://github.com/Mbed-TLS/mbedtls/releases/download/v3.6.0/mbedtls-3.6.0.tar.bz2 | tar xj -C third_party && mv third_party/mbedtls-3.6.0 third_party/mbedtls")
+    endif()
+
+    # Build mbedTLS as a static library (suppress tests/programs)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/mbedtls EXCLUDE_FROM_ALL)
+
+    set(TLS_SOURCES
+        src/tls/tls_context.cpp
+        src/tls/tls_connection.cpp
+        src/tls/tls_layer.cpp
+    )
+endif()
+
 # ============================================================================
 # Main Library
 # ============================================================================
@@ -210,6 +231,7 @@ add_library(neustack_lib STATIC
     ${FIREWALL_SOURCES}
     ${HAL_SOURCES}
     ${AI_SOURCES}
+    ${TLS_SOURCES}
 )
 
 target_include_directories(neustack_lib PUBLIC
@@ -240,6 +262,16 @@ if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
     )
     target_link_libraries(neustack_lib PRIVATE ${ONNXRUNTIME_LIBRARIES})
     target_compile_definitions(neustack_lib PUBLIC NEUSTACK_AI_ENABLED)
+endif()
+
+if(NEUSTACK_ENABLE_TLS)
+    target_link_libraries(neustack_lib PRIVATE
+        $<BUILD_INTERFACE:mbedtls>
+        $<BUILD_INTERFACE:mbedx509>
+        $<BUILD_INTERFACE:mbedcrypto>)
+    target_include_directories(neustack_lib PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/third_party/mbedtls/include>)
+    target_compile_definitions(neustack_lib PUBLIC NEUSTACK_TLS_ENABLED)
 endif()
 
 # MinGW: 确保 %zu 等格式符支持 (target 级别，比目录级更可靠)
@@ -290,6 +322,9 @@ install(TARGETS neustack_lib
     ARCHIVE DESTINATION lib
 )
 
+# Note: mbedTLS targets are linked PRIVATE and not exported.
+# When TLS is enabled, consumers must also link mbedTLS separately.
+
 install(DIRECTORY include/neustack DESTINATION include)
 
 # Generate CMake package config files for find_package(NeuStack)
@@ -334,6 +369,7 @@ message(STATUS "Build Tools:      ${NEUSTACK_BUILD_TOOLS}")
 message(STATUS "Enable ASan:      ${NEUSTACK_ENABLE_ASAN}")
 message(STATUS "Enable UBSan:     ${NEUSTACK_ENABLE_UBSAN}")
 message(STATUS "Enable AI:        ${NEUSTACK_ENABLE_AI}")
+message(STATUS "Enable TLS:       ${NEUSTACK_ENABLE_TLS}")
 if(NEUSTACK_PLATFORM_LINUX)
     message(STATUS "Enable AF_XDP:    ${NEUSTACK_ENABLE_AF_XDP}")
     if(NEUSTACK_ENABLE_AF_XDP)
