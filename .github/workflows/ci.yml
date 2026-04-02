@@ -16,45 +16,67 @@ jobs:
             build_type: Release
             ai_enabled: ON
             af_xdp: OFF
+            tls_enabled: OFF
           - os: ubuntu-latest
             build_type: Release
             ai_enabled: OFF
             af_xdp: OFF
+            tls_enabled: OFF
           - os: ubuntu-latest
             build_type: Debug
             ai_enabled: ON
             af_xdp: OFF
+            tls_enabled: OFF
           - os: ubuntu-latest
             build_type: Debug
             ai_enabled: OFF
             af_xdp: OFF
+            tls_enabled: OFF
           # Linux: AF_XDP (Release, AI ON/OFF)
           - os: ubuntu-latest
             build_type: Release
             ai_enabled: ON
             af_xdp: ON
+            tls_enabled: OFF
           - os: ubuntu-latest
             build_type: Release
             ai_enabled: OFF
             af_xdp: ON
+            tls_enabled: OFF
+          # Linux: TLS (Release, AI OFF)
+          - os: ubuntu-latest
+            build_type: Release
+            ai_enabled: OFF
+            af_xdp: OFF
+            tls_enabled: ON
           # macOS: Release only (with and without AI)
           - os: macos-latest
             build_type: Release
             ai_enabled: ON
             af_xdp: OFF
+            tls_enabled: OFF
           - os: macos-latest
             build_type: Release
             ai_enabled: OFF
             af_xdp: OFF
+            tls_enabled: OFF
+          # macOS: TLS (Release, AI OFF)
+          - os: macos-latest
+            build_type: Release
+            ai_enabled: OFF
+            af_xdp: OFF
+            tls_enabled: ON
           # Windows: Release (with and without AI)
           - os: windows-latest
             build_type: Release
             ai_enabled: ON
             af_xdp: OFF
+            tls_enabled: OFF
           - os: windows-latest
             build_type: Release
             ai_enabled: OFF
             af_xdp: OFF
+            tls_enabled: OFF
 
     runs-on: ${{ matrix.os }}
 
@@ -135,6 +157,13 @@ jobs:
           Expand-Archive -Path "$env:RUNNER_TEMP\ort.zip" -DestinationPath "$env:RUNNER_TEMP"
           echo "ONNXRUNTIME_ROOT=$env:RUNNER_TEMP\$ORT_NAME" >> $env:GITHUB_ENV
 
+      # ─── mbedTLS (when TLS=ON) ───
+      - name: Download mbedTLS
+        if: matrix.tls_enabled == 'ON'
+        run: |
+          curl -sL https://github.com/Mbed-TLS/mbedtls/releases/download/v3.6.0/mbedtls-3.6.0.tar.bz2 | tar xj -C third_party
+          mv third_party/mbedtls-3.6.0 third_party/mbedtls
+
       # ─── Configure ───
       - name: Configure (Unix)
         if: runner.os != 'Windows'
@@ -142,7 +171,8 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }} \
-            -DNEUSTACK_ENABLE_AF_XDP=${{ matrix.af_xdp }}
+            -DNEUSTACK_ENABLE_AF_XDP=${{ matrix.af_xdp }} \
+            -DNEUSTACK_ENABLE_TLS=${{ matrix.tls_enabled }}
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'

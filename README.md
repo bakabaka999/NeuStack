@@ -503,7 +503,7 @@ NeuStack/
 - [ ] **Web Dashboard** — browser-based observability UI backed by the Telemetry HTTP API
 - [ ] **Multi-queue AF_XDP** — per-core RX/TX queues for multi-threaded packet processing
 - [ ] **AI Benchmark Suite** — latency/throughput profiling of each ONNX model under sustained load
-- [ ] **TLS / HTTPS support** — integrate a mature TLS backend for secure client/server connections without reimplementing TLS in-house
+- [x] **TLS / HTTPS support** — mbedTLS-backed TLS layer with transparent HTTPS server/client via `TLSLayer` decorator over TCP
 - [x] **HTTP chunked transfer support** — client parser consumes chunked responses; server emits standards-compliant chunked streams for unknown-size bodies
 - [x] **Parser fuzzing** — libFuzzer harnesses cover HTTP, DNS, IPv4, and TCP parsing hot paths with ASAN/UBSAN integration
 - [x] **UDP ICMP error propagation** — deliver ICMP unreachable / time-exceeded metadata to bound UDP consumers
