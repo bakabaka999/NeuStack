@@ -4,6 +4,7 @@
 #include "neustack/common/log.hpp"
 
 #include <mbedtls/debug.h>
+#include <cstring>
 
 #include <string>
 
@@ -52,7 +53,7 @@ bool TLSContext::init_common() {
     int ret = mbedtls_ctr_drbg_seed(&_ctr_drbg, mbedtls_entropy_func,
                                      &_entropy,
                                      reinterpret_cast<const unsigned char *>(pers),
-                                     strlen(pers));
+                                     std::strlen(pers));
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));

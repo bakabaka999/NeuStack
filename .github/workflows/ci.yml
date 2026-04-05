@@ -160,8 +160,11 @@ jobs:
       # ─── mbedTLS (when TLS=ON) ───
       - name: Download mbedTLS
         if: matrix.tls_enabled == 'ON'
+        shell: bash
         run: |
-          curl -sL https://github.com/Mbed-TLS/mbedtls/releases/download/v3.6.0/mbedtls-3.6.0.tar.bz2 | tar xj -C third_party
+          mkdir -p third_party
+          curl -fSL -o /tmp/mbedtls.tar.bz2 https://github.com/Mbed-TLS/mbedtls/releases/download/v3.6.0/mbedtls-3.6.0.tar.bz2
+          tar xjf /tmp/mbedtls.tar.bz2 -C third_party
           mv third_party/mbedtls-3.6.0 third_party/mbedtls
 
       # ─── Configure ───
@@ -176,11 +179,13 @@ jobs:
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           cmake -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
             -DNEUSTACK_ENABLE_AI=${{ matrix.ai_enabled }} `
-            -DCMAKE_PREFIX_PATH="${{ runner.temp }}/catch2-install"
+            -DNEUSTACK_ENABLE_TLS=${{ matrix.tls_enabled }} `
+            -DCMAKE_PREFIX_PATH="${{ runner.temp }}\catch2-install"
 
       # ─── Build ───
       - name: Build
@@ -209,7 +214,7 @@ jobs:
           sudo cmake --install /tmp/catch2/build
 
       - name: Configure with ASan
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNEUSTACK_ENABLE_ASAN=ON
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNEUSTACK_ENABLE_ASAN=ON -DNEUSTACK_ENABLE_TLS=OFF
 
       - name: Build
         run: cmake --build build
@@ -236,7 +241,7 @@ jobs:
           sudo cmake --install /tmp/catch2/build
 
       - name: Configure with UBSan
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNEUSTACK_ENABLE_UBSAN=ON
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNEUSTACK_ENABLE_UBSAN=ON -DNEUSTACK_ENABLE_TLS=OFF
 
       - name: Build
         run: cmake --build build
@@ -263,7 +268,7 @@ jobs:
           sudo cmake --install /tmp/catch2/build
 
       - name: Configure with benchmarks
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEUSTACK_BUILD_BENCHMARKS=ON
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEUSTACK_BUILD_BENCHMARKS=ON -DNEUSTACK_ENABLE_TLS=OFF
 
       - name: Build
         run: cmake --build build
