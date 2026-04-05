@@ -10,7 +10,7 @@
 #   4. Build NeuStack (auto-enable AI if ORT found)
 #
 # Usage:
-#   sudo bash scripts/linux/setup.sh [--no-ai] [--with-fuzzers]
+#   sudo bash scripts/linux/setup.sh [--no-ai] [--with-fuzzers] [--with-tls]
 
 set -e
 
@@ -20,11 +20,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Parse args
 FORCE_NO_AI=0
 WITH_FUZZERS=0
+WITH_TLS=0
 for arg in "$@"; do
     case "$arg" in
         --no-ai) FORCE_NO_AI=1 ;;
         --with-fuzzers) WITH_FUZZERS=1 ;;
-        *) echo "Unknown option: $arg"; echo "Usage: $0 [--no-ai] [--with-fuzzers]"; exit 1 ;;
+        --with-tls) WITH_TLS=1 ;;
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--no-ai] [--with-fuzzers] [--with-tls]"; exit 1 ;;
     esac
 done
 
@@ -269,6 +271,29 @@ fi
 echo ""
 echo "[4/4] Building NeuStack..."
 
+# TLS setup
+ENABLE_TLS=OFF
+if [ $WITH_TLS -eq 1 ]; then
+    MBEDTLS_DIR="$PROJECT_ROOT/third_party/mbedtls"
+    if [ -f "$MBEDTLS_DIR/CMakeLists.txt" ]; then
+        echo "  ✓ mbedTLS found"
+        ENABLE_TLS=ON
+    else
+        echo "  Downloading mbedTLS v3.6.0..."
+        mkdir -p "$PROJECT_ROOT/third_party"
+        if curl -L https://github.com/Mbed-TLS/mbedtls/releases/download/v3.6.0/mbedtls-3.6.0.tar.bz2 -o /tmp/mbedtls-3.6.0.tar.bz2 && \
+           tar xjf /tmp/mbedtls-3.6.0.tar.bz2 -C "$PROJECT_ROOT/third_party" && \
+           mv "$PROJECT_ROOT/third_party/mbedtls-3.6.0" "$MBEDTLS_DIR"; then
+            echo "  ✓ mbedTLS downloaded"
+            ENABLE_TLS=ON
+        else
+            echo "  ✗ mbedTLS download failed, TLS will be disabled"
+        fi
+    fi
+    # Install python3 if needed (mbedTLS build scripts may need it)
+    command -v python3 &>/dev/null || install_packages python3
+fi
+
 BUILD_DIR="$PROJECT_ROOT/build"
 mkdir -p "$BUILD_DIR"
 
@@ -299,6 +324,7 @@ fi
 CMAKE_ARGS=(
     -DNEUSTACK_ENABLE_AI=$ENABLE_AI
     -DNEUSTACK_ENABLE_AF_XDP=$ENABLE_AFXDP
+    -DNEUSTACK_ENABLE_TLS=$ENABLE_TLS
     -DNEUSTACK_BUILD_FUZZERS=$ENABLE_FUZZERS
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_C_COMPILER=$SELECTED_CC
@@ -322,6 +348,7 @@ echo "=============================================="
 echo ""
 echo "  AI enabled:  $ENABLE_AI"
 echo "  AF_XDP:      $ENABLE_AFXDP"
+echo "  TLS:         $ENABLE_TLS"
 echo "  Fuzzers:     $ENABLE_FUZZERS"
 echo "  Binary:      $BUILD_DIR/examples/neustack_demo"
 echo ""

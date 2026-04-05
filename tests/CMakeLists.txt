@@ -218,6 +218,18 @@ if(NEUSTACK_ENABLE_AI)
     endif()
 endif()
 
+# --- TLS 测试 ---
+if(NEUSTACK_ENABLE_TLS)
+    message(STATUS "NeuStack: TLS features enabled for unit testing.")
+
+    neustack_add_test(test_tls_connection unit/tls/test_tls_connection.cpp)
+    neustack_add_test(test_tls_layer      unit/tls/test_tls_layer.cpp)
+
+    add_executable(test_tls_roundtrip integration/test_tls_roundtrip.cpp)
+    target_link_libraries(test_tls_roundtrip PRIVATE neustack_lib)
+    add_test(NAME "Integration: TLS request/response roundtrip" COMMAND test_tls_roundtrip)
+endif()
+
 # --- Fuzz 测试 ---
 if(NEUSTACK_BUILD_FUZZERS)
     add_subdirectory(fuzz)

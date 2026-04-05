@@ -84,6 +84,7 @@ show_help() {
     echo "Build options:"
     echo "  --no-ai              Disable AI during setup"
     echo "  --with-fuzzers       Enable parser fuzz targets and toolchain checks"
+    echo "  --with-tls           Enable TLS/HTTPS support (mbedTLS)"
     echo ""
     echo "Platform: $PLATFORM"
     echo ""

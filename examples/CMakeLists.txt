@@ -48,6 +48,12 @@ if(NEUSTACK_PLATFORM_LINUX AND NEUSTACK_ENABLE_AF_XDP AND NEUSTACK_BPF_SUPPORTED
     target_link_libraries(afxdp_test PRIVATE neustack_lib)
 endif()
 
+# HTTPS Server example (TLS only)
+if(NEUSTACK_ENABLE_TLS)
+    add_executable(https_server https_server.cpp)
+    target_link_libraries(https_server PRIVATE neustack_lib)
+endif()
+
 # RPATH for ONNX Runtime (demo links neustack_lib which may use ONNX)
 if(NEUSTACK_ENABLE_AI AND ONNXRUNTIME_FOUND)
     if(APPLE)

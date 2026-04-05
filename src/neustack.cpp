@@ -11,6 +11,10 @@
 #include "neustack/ai/intelligence_plane.hpp"
 #endif
 
+#ifdef NEUSTACK_TLS_ENABLED
+#include "neustack/tls/tls_layer.hpp"
+#endif
+
 #include <chrono>
 #include <atomic>
 
@@ -32,6 +36,13 @@ struct NeuStack::Impl {
     std::unique_ptr<HttpServer> http_server;
     std::unique_ptr<HttpClient> http_client;
     std::unique_ptr<DNSClient> dns_client;
+
+    // TLS / HTTPS
+#ifdef NEUSTACK_TLS_ENABLED
+    std::unique_ptr<TLSLayer> tls_layer;
+    std::unique_ptr<HttpServer> https_server;   // 基于 TLSLayer 的 HTTPS 服务器
+    std::unique_ptr<HttpClient> https_client;   // 基于 TLSLayer 的 HTTPS 客户端
+#endif
 
     // 数据采集
     std::unique_ptr<SampleExporter> sample_exporter;
@@ -125,6 +136,32 @@ struct NeuStack::Impl {
             dns_client = std::make_unique<DNSClient>(*udp, config.dns_server);
             dns_client->init();
         }
+
+        // 5b. TLS / HTTPS
+#ifdef NEUSTACK_TLS_ENABLED
+        if (!config.tls_cert_path.empty() && !config.tls_key_path.empty()) {
+            auto server_ctx = TLSContext::create_server(
+                config.tls_cert_path, config.tls_key_path);
+
+            std::unique_ptr<TLSContext> client_ctx;
+            if (!config.tls_ca_path.empty()) {
+                client_ctx = TLSContext::create_client(config.tls_ca_path);
+            } else {
+                client_ctx = TLSContext::create_client();
+            }
+
+            if (server_ctx) {
+                tls_layer = std::make_unique<TLSLayer>(
+                    *tcp, *tcp, std::move(server_ctx), std::move(client_ctx));
+                https_server = std::make_unique<HttpServer>(*tls_layer);
+                https_client = std::make_unique<HttpClient>(*tls_layer);
+                LOG_INFO(TLS, "HTTPS server initialized (cert=%s)",
+                         config.tls_cert_path.c_str());
+            } else {
+                LOG_WARN(TLS, "Failed to create TLS context, HTTPS disabled");
+            }
+        }
+#endif
 
         // 6. AI 智能面
 #ifdef NEUSTACK_AI_ENABLED
@@ -299,6 +336,14 @@ HttpServer &NeuStack::http_server() { return *_impl->http_server; }
 HttpClient &NeuStack::http_client() { return *_impl->http_client; }
 DNSClient  *NeuStack::dns()         { return _impl->dns_client.get(); }
 
+// ─── TLS / HTTPS ───
+
+#ifdef NEUSTACK_TLS_ENABLED
+HttpServer *NeuStack::https_server() { return _impl->https_server.get(); }
+HttpClient *NeuStack::https_client() { return _impl->https_client.get(); }
+TLSLayer   *NeuStack::tls()          { return _impl->tls_layer.get(); }
+#endif
+
 // ─── 指标与采集 ───
 
 GlobalMetrics   &NeuStack::metrics()          { return global_metrics(); }
@@ -389,6 +434,9 @@ void NeuStack::run() {
 
         // 4. 应用层轮询
         _impl->http_server->poll();
+#ifdef NEUSTACK_TLS_ENABLED
+        if (_impl->https_server) _impl->https_server->poll();
+#endif
 
         // 5. 定时器 (100ms)
         auto now = std::chrono::steady_clock::now();

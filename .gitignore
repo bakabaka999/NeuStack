@@ -36,8 +36,9 @@ compile_commands.json
 *.onnx
 !models/*.onnx
 
-# Third-party dependencies (downloaded binaries)
+# Third-party dependencies (downloaded binaries / source)
 third_party/onnxruntime/
+third_party/mbedtls/
 
 # Logs
 *.log
@@ -79,3 +80,6 @@ training/*/*.png
 docs/_draft/*
 
 .claude
+
+# key
+*.pem

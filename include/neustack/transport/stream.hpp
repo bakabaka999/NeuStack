@@ -20,6 +20,8 @@ enum class StreamError : uint8_t {
     Timeout,
     ICMPUnreachable,
     ICMPTimeExceeded,
+    TLSHandshakeFailed,
+    TLSAlert,
 };
 
 /**
