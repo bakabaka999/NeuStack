@@ -2,8 +2,8 @@
 <h1 align="center">NeuStack</h1>
 
 <p align="center">
-  <strong>A high-performance, programmable user-space network stack — built from scratch in C++20.</strong><br>
-  <sub>Designed for workloads where kernel overhead matters: AI collective communications, inference serving, HPC data paths, and systems research.</sub>
+  <strong>An embeddable, high-performance user-space networking library that implements a programmable protocol stack — built from scratch in C++20.</strong><br>
+  <sub>Designed for systems where transport behavior, observability, and packet-path control matter more than general-purpose OS compatibility.</sub>
 </p>
 
 <p align="center">
@@ -40,6 +40,7 @@
 
 - [Table of Contents](#table-of-contents)
 - [Overview](#overview)
+- [Project Scope](#project-scope)
 - [Key Features](#key-features)
 - [System Architecture](#system-architecture)
 - [Performance](#performance)
@@ -68,23 +69,27 @@
 
 ## Overview
 
-NeuStack is a **complete, from-scratch** user-space network stack written in C++20, implementing the full protocol chain — Ethernet → IPv4 → TCP/UDP → HTTP/DNS — with no dependence on the kernel network stack.
+NeuStack is an **embeddable user-space networking library** written in C++20. Inside that library, it implements a programmable protocol stack covering Ethernet / IPv4, TCP/UDP, HTTP, DNS, telemetry, and optional AI-assisted transport components.
 
-**Why user-space?**  The kernel network stack is a general-purpose design optimized for compatibility, not throughput. Moving the stack to user space unlocks:
+The project is aimed at environments where the network stack itself is part of the system design: places where you want to shape congestion control, inspect live transport state, benchmark alternate data paths, or attach domain-specific logic directly to packet processing.
+
+**Why user-space?** The kernel network stack is a general-purpose design optimized first for compatibility. Moving the stack to user space unlocks:
 
 - **Bypass kernel scheduling and syscall overhead** on the packet fast path
 - **Programmable transport semantics** — e.g., custom congestion control tuned per workload
 - **Zero-copy data movement** from NIC ring buffers directly to application buffers
 - **Full observability** into every layer without kernel tracing overhead
 
-This is directly applicable to workloads where network I/O is a bottleneck: **distributed AI training** (AllReduce / NCCL-style collective comms), **high-throughput inference serving**, **HPC cluster communication**, and **low-latency trading infrastructure**. NeuStack explores the full design space of such a stack — from hardware abstraction to AI-assisted transport.
+That makes NeuStack a good fit for workloads such as **distributed AI training**, **inference serving**, **HPC communication**, **low-latency services**, and **systems research**. These are examples, not hard boundaries; the common trait is that network behavior is part of the application or infrastructure design, not just a background utility.
+
+NeuStack is **not** trying to be a drop-in replacement for the full desktop or mobile OS networking stack. It is better understood as a programmable protocol-stack library for specialized services, controlled environments, benchmarking, and transport experimentation.
 
 What makes NeuStack different:
 
 - **AI-native transport**: Three ONNX models (SAC RL · LSTM · Autoencoder) run in a dedicated async inference thread. Congestion control decisions feed back to the data plane through a lock-free SPSC queue — zero inference latency on the hot path
 - **AF_XDP kernel bypass**: UMEM shared-memory ring, batch packet I/O, BPF/XDP program loading. Tested in **generic (copy) mode** on commodity hardware — **1.45× over kernel UDP**. Native zero-copy mode is ready for Intel NICs (i40e / ice / igc)
 - **Zero-allocation hot path**: FixedPool slab allocator — no `new`/`delete` in the packet processing loop
-- **Production observability**: Prometheus/JSON telemetry, 7 live HTTP endpoints, `neustack-stat` live CLI
+- **Deep observability**: Prometheus/JSON telemetry, 7 live HTTP endpoints, Web Dashboard, and `neustack-stat` live CLI
 - **Unified cross-platform HAL**: macOS utun · Linux TUN/TAP + AF_XDP · Windows Wintun — one API
 <!-- 
 ```
@@ -92,6 +97,22 @@ C++ Core:        ~10,000 lines  —  protocol stack + AI inference + firewall + 
 Python Training:  ~4,000 lines  —  SAC / LSTM / Autoencoder training pipelines
 Scripts:          ~2,700 lines  —  data collection, benchmarks, environment setup
 ``` -->
+
+## Project Scope
+
+NeuStack is currently strongest in scenarios where you control both the environment and the traffic path:
+
+- **Protocol and systems research**: experiment with transport behavior, packet handling, metrics, and failure semantics without kernel iteration cycles
+- **Specialized infrastructure paths**: build services where transport policy, congestion control, or telemetry needs to be application-aware
+- **Performance investigations**: benchmark user-space fast paths, AF_XDP backends, and custom transport logic under reproducible workloads
+
+Just as importantly, NeuStack is **not** positioned as:
+
+- A general consumer internet accelerator
+- A browser-first desktop networking replacement
+- A finished substitute for the compatibility surface of a mature OS network stack
+
+That distinction is intentional. The project optimizes for **programmability, observability, and specialized performance work**, not for pretending every workload has the same goals.
 
 ---
 
@@ -146,6 +167,8 @@ NeuStack separates packet processing across two planes:
 
 > [!NOTE]
 > All E2E benchmarks run in **generic (copy) mode** on veth pairs with a Realtek r8169 NIC, which does **not** support native XDP. The AF_XDP implementation fully supports native zero-copy mode for Intel NICs (i40e / ice / igc), where 5–10× additional throughput gains are expected based on published XDP benchmarks.
+>
+> These numbers should be read as evidence that the fast path is real, not as a claim that NeuStack is a universal replacement for the general-purpose internet stack on end-user machines.
 
 <p align="right"><a href="#top">&#8593; Back to top</a></p>
 
