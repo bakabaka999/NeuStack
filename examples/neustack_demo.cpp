@@ -230,6 +230,31 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
             color: #94a3b8;
             font-size: 1.1rem;
         }
+        .hero-actions {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .hero-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.8rem 1.2rem;
+            border-radius: 999px;
+            border: 1px solid rgba(125, 211, 252, 0.35);
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(59, 130, 246, 0.08));
+            color: var(--text-color);
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.2s, border-color 0.2s, background-color 0.2s;
+        }
+        .hero-link:hover {
+            transform: translateY(-2px);
+            border-color: rgba(125, 211, 252, 0.75);
+            color: var(--hover-color);
+        }
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -299,6 +324,10 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
         <header>
             <h1>NeuStack v1.5.0</h1>
             <div class="subtitle">High-Performance User-Space TCP/IP Stack</div>
+            <div class="hero-actions">
+                <a class="hero-link" href="/dashboard">Open Live Dashboard</a>
+                <a class="hero-link" href="/metrics">Inspect Prometheus Metrics</a>
+            </div>
         </header>
         
         <div class="grid">
@@ -321,6 +350,7 @@ static constexpr const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
                     <li><a href="/api/v1/stats/tcp"><span class="method get">GET</span>/api/v1/stats/tcp</a></li>
                     <li><a href="/api/v1/stats/security"><span class="method get">GET</span>/api/v1/stats/security</a></li>
                     <li><a href="/api/v1/connections"><span class="method get">GET</span>/api/v1/connections</a></li>
+                    <li><a href="/dashboard"><span class="method get">GET</span>/dashboard</a></li>
                     <li><a href="/metrics"><span class="method get">GET</span>/metrics (Prometheus)</a></li>
                 </ul>
             </div>
@@ -1277,7 +1307,8 @@ int main(int argc, char *argv[]) {
     std::printf(C_BOLD "  Telemetry:\n" C_RESET);
     std::printf("    curl http://%s/api/v1/health\n",   cfg.local_ip.c_str());
     std::printf("    curl http://%s/api/v1/stats | python3 -m json.tool\n", cfg.local_ip.c_str());
-    std::printf("    curl http://%s/metrics\n\n",       cfg.local_ip.c_str());
+    std::printf("    curl http://%s/metrics\n",         cfg.local_ip.c_str());
+    std::printf("    " C_BOLD "open http://%s/dashboard" C_RESET "  (Web UI)\n\n", cfg.local_ip.c_str());
 
     print_help();
     print_prompt();

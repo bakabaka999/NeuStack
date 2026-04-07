@@ -71,7 +71,9 @@ public:
             w_cubic = std::max(w_cubic, _w_tcp);
         }
 
-        // 更新 cwnd
+        // 更新 cwnd — clamp 到 uint32_t 范围，避免 UB
+        w_cubic = std::min(w_cubic, static_cast<double>(UINT32_MAX));
+        w_cubic = std::max(w_cubic, 0.0);
         uint32_t target = static_cast<uint32_t>(w_cubic);
         if (target > _cwnd) {
             // 增长：每个 ACK 增加 (target - cwnd) / cwnd

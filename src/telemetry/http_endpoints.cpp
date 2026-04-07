@@ -5,6 +5,13 @@
 #include "neustack/common/ip_addr.hpp"
 #include "neustack/common/json_builder.hpp"
 
+#if __has_include("dashboard_embed.hpp")
+#include "dashboard_embed.hpp"
+#define NEUSTACK_DASHBOARD_AVAILABLE 1
+#else
+#define NEUSTACK_DASHBOARD_AVAILABLE 0
+#endif
+
 #include <chrono>
 
 namespace neustack::telemetry {
@@ -127,6 +134,17 @@ static std::string serialize_security_json(TelemetryAPI& api, bool pretty) {
     return std::move(b.buf);
 }
 
+static std::string serialize_health_json(TelemetryAPI& api, bool pretty) {
+    const auto status = api.status();
+    JsonBuilder b(pretty, 128);
+    b.begin_object();
+    b.key("status");         b.write_string("ok");                     b.comma();
+    b.key("version");        b.write_string("1.5.0");                 b.comma();
+    b.key("uptime_seconds"); b.write_uint64(status.uptime_seconds);
+    b.end_object();
+    return std::move(b.buf);
+}
+
 static std::string serialize_connections_json(
     const std::vector<ConnectionDetail>& conns, bool pretty)
 {
@@ -234,11 +252,23 @@ void register_http_endpoints(HttpServer& server, TelemetryAPI& api) {
         return resp;
     });
 
+    // ─── Dashboard SPA ───
+#if NEUSTACK_DASHBOARD_AVAILABLE
+    server.get("/dashboard", [](const HttpRequest&) {
+        HttpResponse resp;
+        resp.content_type("text/html; charset=utf-8");
+        resp.set_body(std::string(neustack::DASHBOARD_HTML));
+        resp.set_header("Cache-Control", "no-cache");
+        return resp;
+    });
+#endif
+
     // ─── 健康检查 ───
-    server.get("/api/v1/health", [](const HttpRequest&) {
+    server.get("/api/v1/health", [&api](const HttpRequest& req) {
+        bool pretty = req.query_param("pretty") == "true";
         HttpResponse resp;
         resp.content_type("application/json; charset=utf-8");
-        resp.set_body(R"({"status":"ok","version":"1.5.0"})");
+        resp.set_body(serialize_health_json(api, pretty));
         add_cors_headers(resp);
         return resp;
     });

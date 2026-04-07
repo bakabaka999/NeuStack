@@ -500,7 +500,7 @@ NeuStack/
 **v1.5 — Near-term**
 
 - [ ] **Native zero-copy benchmark** — reproduce 3.1× send speedup on Intel NIC (i40e / ice / igc) with `force_native_mode=true`
-- [ ] **Web Dashboard** — browser-based observability UI backed by the Telemetry HTTP API
+- [x] **Web Dashboard** — browser-based observability UI backed by the Telemetry HTTP API
 - [ ] **Multi-queue AF_XDP** — per-core RX/TX queues for multi-threaded packet processing
 - [ ] **AI Benchmark Suite** — latency/throughput profiling of each ONNX model under sustained load
 - [x] **TLS / HTTPS support** — mbedTLS-backed TLS layer with transparent HTTPS server/client via `TLSLayer` decorator over TCP

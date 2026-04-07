@@ -20,3 +20,17 @@ install(TARGETS neustack_stat RUNTIME DESTINATION bin)
 if(NEUSTACK_PLATFORM_LINUX)
     add_executable(udp_flood udp_flood.cpp)
 endif()
+
+# ============================================================================
+# Dashboard HTML embedding
+# ============================================================================
+set(DASHBOARD_SRC "${CMAKE_CURRENT_SOURCE_DIR}/dashboard/index.html")
+if(EXISTS "${DASHBOARD_SRC}")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+    file(READ "${DASHBOARD_SRC}" DASHBOARD_CONTENT)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/dashboard/dashboard_embed.hpp.in"
+        "${CMAKE_BINARY_DIR}/generated/dashboard_embed.hpp"
+        @ONLY
+    )
+endif()

@@ -1,0 +1,6 @@
+#pragma once
+namespace neustack {
+inline constexpr const char DASHBOARD_HTML[] = R"RAWHTML(
+@DASHBOARD_CONTENT@
+)RAWHTML";
+}
