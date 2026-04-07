@@ -236,6 +236,7 @@ add_library(neustack_lib STATIC
 
 target_include_directories(neustack_lib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/generated>
     $<INSTALL_INTERFACE:include>
 )
 

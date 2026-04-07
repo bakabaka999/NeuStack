@@ -172,6 +172,22 @@ TEST_CASE("endpoint data: security JSON structure is valid", "[http_endpoints][t
     CHECK_THAT(b.buf, ContainsSubstring("\"DISABLED\""));   // agent_state
 }
 
+TEST_CASE("endpoint data: health JSON includes uptime", "[http_endpoints][telemetry]") {
+    EndpointFixture fix;
+    auto status = fix.api.status();
+
+    JsonBuilder b(false, 128);
+    b.begin_object();
+    b.key("status");         b.write_string("ok");            b.comma();
+    b.key("version");        b.write_string("1.5.0");        b.comma();
+    b.key("uptime_seconds"); b.write_uint64(status.uptime_seconds);
+    b.end_object();
+
+    CHECK(JsonValidator::is_valid(b.buf));
+    CHECK_THAT(b.buf, ContainsSubstring("\"status\""));
+    CHECK_THAT(b.buf, ContainsSubstring("\"uptime_seconds\""));
+}
+
 // ════════════════════════════════════════════
 // connections() → serialize_connections_json 的数据来源
 // ════════════════════════════════════════════

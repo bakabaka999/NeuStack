@@ -487,7 +487,7 @@ NeuStack/
 **v1.5 — 近期目标**
 
 - [ ] **原生零拷贝 Benchmark** — 在 Intel NIC（i40e / ice / igc）上复现 3.1× 发送加速，验证 `force_native_mode=true` 效果
-- [ ] **Web Dashboard** — 基于 Telemetry HTTP API 的浏览器可观测性界面
+- [x] **Web Dashboard** — 基于 Telemetry HTTP API 的浏览器可观测性界面
 - [ ] **Multi-queue AF_XDP** — 每核独立 RX/TX 队列，支持多线程包处理
 - [ ] **AI Benchmark Suite** — 各 ONNX 模型在持续负载下的延迟/吞吐 profiling
 - [x] **TLS / HTTPS 支持** — 接入成熟 TLS 后端，为客户端/服务端提供安全连接，不自行重复实现 TLS
