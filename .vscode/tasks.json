@@ -32,7 +32,7 @@
                 "isDefault": true
             },
             "problemMatcher": ["$gcc"],
-            "dependsOn": []
+            "dependsOn": ["CMake: Configure"]
         },
         {
             "label": "CMake: Clean",
@@ -78,6 +78,74 @@
                 "reveal": "always",
                 "panel": "new"
             }
+        },
+        {
+            "label": "neustack: run with sudo (background)",
+            "type": "shell",
+            "command": "sudo",
+            "args": ["${workspaceFolder}/build/examples/neustack_demo"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": ["CMake: Build"],
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^(.*)$",
+                    "file": 1,
+                    "location": 1,
+                    "message": 1
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "."
+                }
+            }
+        },
+        {
+            "label": "neustack: start debugserver (run this first, then F5)",
+            "type": "shell",
+            "command": "sudo",
+            "args": [
+                "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Resources/debugserver",
+                "127.0.0.1:12345",
+                "${workspaceFolder}/build/examples/neustack_demo"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": ["CMake: Build"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "neustack: sudo lldb (terminal, CLI debug)",
+            "type": "shell",
+            "command": "sudo",
+            "args": [
+                "lldb",
+                "${workspaceFolder}/build/examples/neustack_demo"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": ["CMake: Build"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            },
+            "problemMatcher": []
         },
         {
             "label": "Run Tests",

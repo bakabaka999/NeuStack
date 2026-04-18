@@ -2,69 +2,96 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug NeuStack",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/neustack",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "lldb",
-            "preLaunchTask": "CMake: Build",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
+            "name": "Debug NeuStack (connect to debugserver :12345)",
+            "type": "lldb",
+            "request": "custom",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/build/examples/neustack_demo"
+            ],
+            "processCreateCommands": [
+                "platform select remote-macosx",
+                "gdb-remote 127.0.0.1:12345"
             ]
         },
         {
-            "name": "Debug NeuStack (sudo)",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "/usr/bin/sudo",
-            "args": ["${workspaceFolder}/build/neustack"],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": true,
-            "MIMode": "lldb",
-            "preLaunchTask": "CMake: Build"
-        },
-        {
-            "name": "Debug Unit Test",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/tests/${input:testExecutable}",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "lldb",
-            "preLaunchTask": "CMake: Build"
-        },
-        {
-            "name": "Attach to Process",
-            "type": "cppdbg",
+            "name": "Attach to NeuStack Process",
+            "type": "lldb",
             "request": "attach",
-            "program": "${workspaceFolder}/build/neustack",
-            "processId": "${command:pickProcess}",
-            "MIMode": "lldb"
+            "program": "${workspaceFolder}/build/examples/neustack_demo",
+            "pid": "${command:pickProcess}"
+        },
+        {
+            "name": "Debug Test (pick folder → test)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/${input:testPick}",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "CMake: Build"
         }
     ],
     "inputs": [
         {
-            "id": "testExecutable",
+            "id": "testPick",
             "type": "pickString",
-            "description": "Select test to run",
+            "description": "Select test (grouped by folder)",
             "options": [
+                "───── ai ─────",
+                "test_ai_agent",
+                "test_ai_features",
+                "test_security_model",
+                "───── app (http) ─────",
+                "test_http_edge",
+                "test_http_parser",
+                "test_http_types",
+                "───── common ─────",
                 "test_checksum",
-                "test_ipv4",
-                "test_tcp_state"
+                "test_ip_addr",
+                "test_json_builder",
+                "test_memory_pool",
+                "test_ring_buffer",
+                "test_spsc_queue",
+                "───── firewall ─────",
+                "test_firewall_ai",
+                "test_rate_limiter",
+                "test_rule_engine",
+                "───── hal ─────",
+                "test_batch_device",
+                "test_ethernet",
+                "───── metrics ─────",
+                "test_global_metrics",
+                "───── net ─────",
+                "test_icmp",
+                "test_ip_edge",
+                "───── telemetry ─────",
+                "test_http_endpoints",
+                "test_json_exporter",
+                "test_metrics_registry",
+                "test_prometheus_exporter",
+                "test_telemetry_api",
+                "───── tls ─────",
+                "test_tls_connection",
+                "test_tls_layer",
+                "───── transport (tcp/udp) ─────",
+                "test_tcp_builder",
+                "test_tcp_cubic",
+                "test_tcp_edge",
+                "test_tcp_exception",
+                "test_tcp_orca",
+                "test_tcp_reno",
+                "test_tcp_sample",
+                "test_tcp_segment",
+                "test_tcp_seq",
+                "test_udp_edge",
+                "───── integration ─────",
+                "test_ai_models",
+                "test_firewall_ai_shadow",
+                "test_firewall_e2e",
+                "test_firewall_integration",
+                "test_http_roundtrip",
+                "test_onnx_runtime",
+                "test_tcp_handshake",
+                "test_tcp_stress",
+                "test_tls_roundtrip"
             ],
             "default": "test_checksum"
         }
